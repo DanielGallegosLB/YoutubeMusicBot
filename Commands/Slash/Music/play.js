@@ -48,12 +48,22 @@ module.exports = {
       await client.distube.voices.join(channel);
     } catch {}
     const isURL = /^(https?:\/\/)/i.test(song);
-    const query = isURL ? song : `ytsearch1:${song}`;
-    client.distube.play(channel, query, {
-      member: interaction.member,
-      textChannel: interaction.channel,
-      ...(hqMode ? { volume: 100 } : {}),
-    });
+    const query = isURL ? song : song; // yt-dlp resuelve texto plano directamente
+    console.log(`[Slash Play] Query: ${query}`);
+    try {
+      await client.distube.play(channel, query, {
+        member: interaction.member,
+        textChannel: interaction.channel,
+        ...(hqMode ? { volume: 100 } : {}),
+      });
+    } catch (e) {
+      console.error(`[Slash Play Error]`, e);
+      interaction.followUp({
+        content: `Error: ${e.message}`,
+        ephemeral: true,
+      });
+      return;
+    }
     interaction
       .followUp({
         content: `Searching \`${song}\``,

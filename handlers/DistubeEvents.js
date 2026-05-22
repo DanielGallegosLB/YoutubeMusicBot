@@ -9,11 +9,15 @@ const InitAutoResume = require("./InitAutoResume");
  */
 module.exports = async (client) => {
   client.on(Events.ClientReady, async () => {
-    setTimeout(async () => await AutoresumeHandler(client), 2 * client.ws.ping);
+    setTimeout(
+      async () => await AutoresumeHandler(client),
+      Math.max(client.ws.ping * 2, 1000)
+    );
   });
 
   // events
   client.distube.on("playSong", async (queue, song) => {
+    console.log(`[DisTube] Playing: ${song.name} in ${queue.textChannel.guild.name}`);
     let data = await client.music.get(`${queue.textChannel.guildId}.music`);
     if (data) {
       await client.updatequeue(queue);
@@ -46,7 +50,7 @@ module.exports = async (client) => {
             ])
             .setFooter(client.getFooter(song.user)),
         ],
-  components: client.buttons(false, queue),
+        components: client.buttons(false, queue),
       })
       .then((msg) => {
         client.temp.set(queue.textChannel.guildId, msg.id);
@@ -54,10 +58,11 @@ module.exports = async (client) => {
   });
 
   client.distube.on("addSong", async (queue, song) => {
+    console.log(`[DisTube] Song Added: ${song.name}`);
     let data = await client.music.get(`${queue.textChannel.guildId}.music`);
     if (data) {
-  await client.updatequeue(queue);
-  await client.updateplayer(queue);
+      await client.updatequeue(queue);
+      await client.updateplayer(queue);
       if (data.channel === queue.textChannel.id) return;
     }
     queue.textChannel
@@ -100,10 +105,11 @@ module.exports = async (client) => {
   });
 
   client.distube.on("addList", async (queue, playlist) => {
+    console.log(`[DisTube] Playlist Added: ${playlist.name} (${playlist.songs.length} songs)`);
     let data = await client.music.get(`${queue.textChannel.guildId}.music`);
     if (data) {
-  await client.updatequeue(queue);
-  await client.updateplayer(queue);
+      await client.updatequeue(queue);
+      await client.updateplayer(queue);
       if (data.channel === queue.textChannel.id) return;
     }
 
@@ -183,6 +189,7 @@ module.exports = async (client) => {
   });
 
   client.distube.on("error", async (error, queue, song) => {
+    console.error("[DisTube Error]", error);
     queue.textChannel
       .send({
         embeds: [

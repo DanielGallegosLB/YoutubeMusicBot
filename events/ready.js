@@ -10,7 +10,7 @@ client.once(Events.ClientReady, async () => {
 
     // Set bot activity
     client.user.setActivity({
-      name: `By @kabirjaipal`,
+      name: `By @Dani | ${client.guilds.cache.size} Servers`,
       type: ActivityType.Watching,
     });
 

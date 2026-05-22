@@ -5,8 +5,8 @@
   "type": "commonjs",
   "main": "index.js",
   "scripts": {
-  "start": "node index.js",
-  "postinstall": "node scripts/ffmpeg-postinstall.js"
+    "start": "node index.js",
+    "postinstall": "node scripts/ffmpeg-postinstall.js"
   },
   "repository": {
     "type": "git",
@@ -62,7 +62,7 @@
     "@snazzah/davey": "^0.1.6",
     "cors": "^2.8.5",
     "discord.js": "^14.22.1",
-    "distube": "^5.0.7",
+    "distube": "^5.2.3",
     "dotenv": "^17.2.1",
     "express": "^5.1.0",
     "ffmpeg": "^0.0.4",

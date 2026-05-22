@@ -12,7 +12,6 @@ const { SpotifyPlugin } = require("@distube/spotify");
 const { SoundCloudPlugin } = require("@distube/soundcloud");
 const { filters, options } = require("../settings/config");
 const { YtDlpPlugin } = require("@distube/yt-dlp");
-const { YouTubePlugin } = require("@distube/youtube");
 
 class JUGNU extends Client {
   constructor() {
@@ -51,31 +50,18 @@ class JUGNU extends Client {
     this.scategories = fs.readdirSync("./Commands/Slash");
     this.temp = new Collection();
     this.config = require("../settings/config");
+
     this.distube = new Distube(this, {
-      emitNewSongOnly: true, // Emit 'playSong' event only when a new song starts playing
-      nsfw: false, // Enable nsfw mode for searching
-      savePreviousSongs: true, // Save previous songs in the queue
-      joinNewVoiceChannel: false, // Join the new voice channel when a song is played
-      // Additional options
-      customFilters: filters, // Use custom filters if needed
-      // Plugins configuration
+      emitNewSongOnly: true,
+      nsfw: false,
+      savePreviousSongs: true,
+      joinNewVoiceChannel: false,
+      customFilters: filters,
       plugins: [
-        new YouTubePlugin(),
-        // Spotify Plugin with optimizations
         new SpotifyPlugin(),
-        new SoundCloudPlugin(), // SoundCloud Plugin remains the same
-        // YouTube DL Plugin with optimizations
-        new YtDlpPlugin({
-          update: false, // Disable runtime updater for faster startup
-          requestOptions: {
-            // Configure request options for faster downloading
-            maxRedirects: 5, // Increase maximum redirects
-            timeout: 10000, // Set timeout for requests to avoid long waits
-            headers: process.env.YOUTUBE_COOKIE
-              ? { Cookie: process.env.YOUTUBE_COOKIE }
-              : undefined,
-          },
-        }),
+        new SoundCloudPlugin(),
+        // YtDlpPlugin debe ir al final — actúa como fallback universal
+        new YtDlpPlugin({ update: true }),
       ],
       ffmpeg: {
         path: (() => {
@@ -109,17 +95,15 @@ class JUGNU extends Client {
     });
     this.login(token);
   }
+
   /**
-   *
    * @param {User} user
-   * @returns
    */
   getFooter(user) {
     const obj = {
       text: `Requested By ${user.username}`,
       iconURL: user.displayAvatarURL(),
     };
-
     return options.embedFooter ? obj : null;
   }
 

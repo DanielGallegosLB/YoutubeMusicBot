@@ -394,12 +394,17 @@ async function registerSlashCommands(client) {
     } else {
       console.log("Started refreshing guild (/) commands.");
       for (const guildID of slash.guildIDS) {
-        const guild = await client.guilds.fetch(guildID);
+        if (!guildID) continue;
+        const guild = await client.guilds.fetch(guildID).catch(() => null);
         if (!guild) {
           console.error(`Guild with ID ${guildID} not found.`);
           continue;
         }
-        await guild.commands.set(commands);
+        if (guild.commands) {
+          await guild.commands.set(commands);
+        } else {
+          console.error(`Guild with ID ${guildID} does not support commands.`);
+        }
       }
       console.log("Successfully reloaded guild (/) commands.");
     }
