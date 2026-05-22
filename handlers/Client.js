@@ -60,8 +60,12 @@ class JUGNU extends Client {
       plugins: [
         new SpotifyPlugin(),
         new SoundCloudPlugin(),
-        // YtDlpPlugin debe ir al final — actúa como fallback universal
-        new YtDlpPlugin({ update: true }),
+        new YtDlpPlugin({
+          update: false,
+          ytdlpOptions: {
+            jsRuntimes: ["node"],
+          },
+        }),
       ],
       ffmpeg: {
         path: (() => {
