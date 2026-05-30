@@ -12,7 +12,7 @@ module.exports = async (client) => {
       if (!message.guild || !message.id) return;
 
       const guildId = message.guild.id;
-      const data = await client.music.get(`${guildId}.music`);
+      const data = await client.music?.get(`${guildId}.music`);
 
       // If music data for the guild doesn't exist, return
       if (!data) return;
@@ -75,14 +75,18 @@ module.exports = async (client) => {
         );
       }
 
+      const query = song;
+
+      client.logger.log(`[RequestChannel] Play request from ${message.author.tag} in ${message.guild.name}: ${song}`);
+
       // Play the song in the user's voice channel
-      await client.distube.play(voiceChannel, song, {
+      await client.distube.play(voiceChannel, query, {
         member: message.member,
         message: message,
         textChannel: message.channel,
       });
     } catch (error) {
-      console.error("Error handling message:", error);
+      client.logger.error("Error handling message in RequestChannel:", error);
     }
   });
 };

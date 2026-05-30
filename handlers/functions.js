@@ -152,7 +152,7 @@ async function swap_pages(interaction, embeds) {
   //Send message with buttons
   embeds = embeds.map((embed, index) => {
     return embed.setColor(client.config.embed.color).setFooter({
-      text: `Page ${index + 1} / ${embeds.length}`,
+      text: `Página ${index + 1} / ${embeds.length}`,
       iconURL: interaction.guild.iconURL({ dynamic: true }),
     });
   });
@@ -312,12 +312,12 @@ function msToDuration(ms) {
   months %= 12;
 
   // to string
-  years = years ? `${years} Years ` : "";
-  months = months ? `${months} Months ` : "";
-  days = days ? `${days} Days ` : "";
-  hours = hours ? `${hours} Hours ` : "";
-  minutes = minutes ? `${minutes} Minutes ` : "";
-  seconds = seconds ? `${seconds} Seconds ` : "";
+  years = years ? `${years} Años ` : "";
+  months = months ? `${months} Meses ` : "";
+  days = days ? `${days} Días ` : "";
+  hours = hours ? `${hours} Horas ` : "";
+  minutes = minutes ? `${minutes} Minutos ` : "";
+  seconds = seconds ? `${seconds} Segundos ` : "";
 
   return years + months + days + hours + minutes + seconds;
 }

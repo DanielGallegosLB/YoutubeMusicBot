@@ -28,7 +28,7 @@ const { Events } = require("discord.js");
  */
 module.exports = async (client) => {
   // Initialize music and autoresume databases
-  const dbName = client.user.username.replace(" ", "");
+  const dbName = (client.user?.username || "JUGNU-MUSIC").replace(/\s+/g, "");
 
   const dbOptions = {
     url: MONGO_URL,
@@ -66,7 +66,7 @@ module.exports = async (client) => {
       const requestChannel = guild.channels.cache.get(musicData.music.channel);
       if (requestChannel) {
         await requestChannel.delete(
-          `Deleting ${client.user.username} Request Channel`
+          `Deleting ${client.user?.username || "JUGNU-MUSIC"} Request Channel`
         );
       }
 

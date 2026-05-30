@@ -35,10 +35,11 @@ module.exports = async (client) => {
 
     // Loop visuals
     const loopMode = Number(queue?.repeatMode || 0); // 0 off, 1 song, 2 queue
-    const loopActive = loopMode === 1 || loopMode === 2;
-    const loopEmoji = loopMode === 1 ? "🔂" : loopMode === 2 ? "🔁" : client.config.emoji.loop;
-    const loopStyle = loopActive ? ButtonStyle.Success : ButtonStyle.Secondary;
-    const loopLabel = loopMode === 1 ? "Loop Song" : loopMode === 2 ? "Loop Queue" : "Loop";
+    const isLoopSong = loopMode === 1;
+    const isLoopQueue = loopMode === 2;
+
+    const loopSongStyle = isLoopSong ? ButtonStyle.Success : ButtonStyle.Secondary;
+    const loopQueueStyle = isLoopQueue ? ButtonStyle.Success : ButtonStyle.Secondary;
 
     // Autoplay visuals
     const autoplayOn = !!queue?.autoplay;
@@ -86,7 +87,7 @@ module.exports = async (client) => {
         .setDisabled(dis(!hasNext)),
     ]);
 
-    // Row 2: Stop • Shuffle • Loop • Autoplay • SaveCurrent ⭐
+    // Row 2: Stop • Shuffle • Loop Song • Loop Queue • Autoplay
     const row2 = new ActionRowBuilder().addComponents([
       new ButtonBuilder()
         .setStyle(ButtonStyle.Danger)
@@ -101,10 +102,16 @@ module.exports = async (client) => {
         .setLabel("Shuffle")
         .setDisabled(dis((queue?.songs?.length || 0) <= 2)),
       new ButtonBuilder()
-        .setStyle(loopStyle)
-        .setCustomId("loop")
-        .setEmoji(loopEmoji)
-        .setLabel(loopLabel)
+        .setStyle(loopSongStyle)
+        .setCustomId("loop_song")
+        .setEmoji("🔂")
+        .setLabel("Song")
+        .setDisabled(state),
+      new ButtonBuilder()
+        .setStyle(loopQueueStyle)
+        .setCustomId("loop_queue")
+        .setEmoji("🔁")
+        .setLabel("Queue")
         .setDisabled(state),
       new ButtonBuilder()
         .setStyle(autoplayStyle)
@@ -112,44 +119,50 @@ module.exports = async (client) => {
         .setEmoji(client.config.emoji.autoplay)
         .setLabel("Autoplay")
         .setDisabled(state),
+    ]);
+
+    // Row 3: SaveCurrent ⭐
+    const row3 = new ActionRowBuilder().addComponents([
       new ButtonBuilder()
         .setStyle(ButtonStyle.Secondary)
         .setCustomId("savecurrent_btn")
         .setEmoji("⭐")
-        .setLabel("Save")
+        .setLabel("Save Current Song")
         .setDisabled(dis(!track)),
     ]);
 
-    return [row1, row2];
+    return [row1, row2, row3];
   };
 
   client.editPlayerMessage = async (channel) => {
-    const ID = client.temp.get(channel.guild.id);
-    if (!ID) return;
+    try {
+      const ID = client.temp.get(channel.guild.id);
+      if (!ID) return;
 
-    let playembed =
-      channel.messages.cache.get(ID) ||
-      (await channel.messages.fetch(ID).catch(console.error));
-    if (!playembed) return;
+      let playembed =
+        channel.messages.cache.get(ID) ||
+        (await channel.messages.fetch(ID).catch(() => null));
+      if (!playembed) return;
 
-    if (client.config.options.nowplayingMsg) {
-      playembed.delete().catch(() => {});
-    } else {
-      const embeds = playembed?.embeds?.[0];
-      if (embeds) {
-        playembed
-          .edit({
-            embeds: [
-              embeds.setFooter({
-                text: `⛔️ SONG & QUEUE ENDED!`,
-                iconURL: channel.guild.iconURL({ dynamic: true }),
-              }),
-            ],
-            components: client.buttons(true, null),
-          })
-          .catch(console.error);
+      if (client.config.options.nowplayingMsg) {
+        playembed.delete().catch(() => {});
+      } else {
+        const embeds = playembed?.embeds?.[0];
+        if (embeds) {
+          playembed
+            .edit({
+              embeds: [
+                new EmbedBuilder(embeds.data).setFooter({
+                  text: `⛔️ SONG & QUEUE ENDED!`,
+                  iconURL: channel.guild.iconURL({ dynamic: true }),
+                }),
+              ],
+              components: client.buttons(true, null),
+            })
+            .catch(() => {});
+        }
       }
-    }
+    } catch (e) {}
   };
 
   /**

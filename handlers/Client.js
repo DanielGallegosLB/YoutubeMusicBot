@@ -12,6 +12,7 @@ const { SpotifyPlugin } = require("@distube/spotify");
 const { SoundCloudPlugin } = require("@distube/soundcloud");
 const { filters, options } = require("../settings/config");
 const { YtDlpPlugin } = require("@distube/yt-dlp");
+const Logger = require("./Logger");
 
 class JUGNU extends Client {
   constructor() {
@@ -46,10 +47,12 @@ class JUGNU extends Client {
     this.aliases = new Collection();
     this.shuffleData = new Collection();
     this.leaveTimeoutHandles = new Collection();
+    this.playlistLoading = new Collection();
     this.mcategories = fs.readdirSync("./Commands/Message");
     this.scategories = fs.readdirSync("./Commands/Slash");
     this.temp = new Collection();
     this.config = require("../settings/config");
+    this.logger = Logger;
 
     this.distube = new Distube(this, {
       emitNewSongOnly: true,
@@ -63,7 +66,18 @@ class JUGNU extends Client {
         new YtDlpPlugin({
           update: false,
           ytdlpOptions: {
-            jsRuntimes: ["node"],
+            // Cookies para autenticación con YouTube (evita NO_RESULT y FFMPEG_EXITED)
+            cookies: require("path").join(__dirname, "../yt-cookies.txt"),
+            // Evitar throttling y bloqueos de YouTube
+            preferFreeFormats: true,
+            socketTimeout: 30,
+            fragmentRetries: 3,
+            skipUnavailableFragments: true,
+            allowUnplayableFormats: true,
+            addHeader: [
+              "referer:https://www.youtube.com",
+              "user-agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            ],
           },
         }),
       ],
@@ -90,6 +104,7 @@ class JUGNU extends Client {
   start(token) {
     [
       "handler",
+      "Database",
       "DistubeEvents",
       "RequestChannel",
       "DistubeHandler",

@@ -35,62 +35,62 @@ module.exports = async (client) => {
   switch (customId) {
           case "previous":
             {
-              if (!channel) return send(interaction, ` ${client.config.emoji.ERROR} You Need to Join Voice Channel`);
+              if (!channel) return send(interaction, ` ${client.config.emoji.ERROR} Debes unirte a un canal de voz`);
               if (interaction.guild.members.me.voice.channel && !interaction.guild.members.me.voice.channel.equals(channel))
-                return send(interaction, ` ${client.config.emoji.ERROR} You Need to Join __My__ Voice Channel `);
-              if (!queue) return send(interaction, ` ${client.config.emoji.ERROR} i am Not Playing Right Now `);
-              if (checkDJ) return send(interaction, `${client.config.emoji.SUCCESS} You are not DJ and also you are not song requester..`);
+                return send(interaction, ` ${client.config.emoji.ERROR} Debes unirte a __mi__ canal de voz `);
+              if (!queue) return send(interaction, ` ${client.config.emoji.ERROR} No hay nada sonando ahora `);
+              if (checkDJ) return send(interaction, `${client.config.emoji.SUCCESS} No eres DJ ni has solicitado esta canción..`);
               try {
                 await queue.previous();
                 refresh(queue, 300);
-                return send(interaction, `${client.config.emoji.SUCCESS}  Playing previous track`);
+                return send(interaction, `${client.config.emoji.SUCCESS} Reproduciendo la pista anterior`);
               } catch (e) {
-                return send(interaction, `${client.config.emoji.ERROR} No previous track available`);
+                return send(interaction, `${client.config.emoji.ERROR} No hay ninguna pista anterior disponible`);
               }
             }
             break;
           case "rewind10":
             {
-              if (!channel) return send(interaction, ` ${client.config.emoji.ERROR} You Need to Join Voice Channel`);
+              if (!channel) return send(interaction, ` ${client.config.emoji.ERROR} Debes unirte a un canal de voz`);
               if (interaction.guild.members.me.voice.channel && !interaction.guild.members.me.voice.channel.equals(channel))
-                return send(interaction, ` ${client.config.emoji.ERROR} You Need to Join __My__ Voice Channel `);
-              if (!queue) return send(interaction, ` ${client.config.emoji.ERROR} i am Not Playing Right Now `);
-              if (checkDJ) return send(interaction, `${client.config.emoji.SUCCESS} You are not DJ and also you are not song requester..`);
+                return send(interaction, ` ${client.config.emoji.ERROR} Debes unirte a __mi__ canal de voz `);
+              if (!queue) return send(interaction, ` ${client.config.emoji.ERROR} No hay nada sonando ahora `);
+              if (checkDJ) return send(interaction, `${client.config.emoji.SUCCESS} No eres DJ ni has solicitado esta canción..`);
               const pos = Math.max(0, (queue.currentTime || 0) - 10);
               try {
                 await queue.seek(pos);
                 refresh(queue, 200);
-                return send(interaction, `${client.config.emoji.SUCCESS} Rewound 10s`);
+                return send(interaction, `${client.config.emoji.SUCCESS} Retrocedido 10s`);
               } catch {}
             }
             break;
           case "forward10":
             {
-              if (!channel) return send(interaction, ` ${client.config.emoji.ERROR} You Need to Join Voice Channel`);
+              if (!channel) return send(interaction, ` ${client.config.emoji.ERROR} Debes unirte a un canal de voz`);
               if (interaction.guild.members.me.voice.channel && !interaction.guild.members.me.voice.channel.equals(channel))
-                return send(interaction, ` ${client.config.emoji.ERROR} You Need to Join __My__ Voice Channel `);
-              if (!queue) return send(interaction, ` ${client.config.emoji.ERROR} i am Not Playing Right Now `);
-              if (checkDJ) return send(interaction, `${client.config.emoji.SUCCESS} You are not DJ and also you are not song requester..`);
+                return send(interaction, ` ${client.config.emoji.ERROR} Debes unirte a __mi__ canal de voz `);
+              if (!queue) return send(interaction, ` ${client.config.emoji.ERROR} No hay nada sonando ahora `);
+              if (checkDJ) return send(interaction, `${client.config.emoji.SUCCESS} No eres DJ ni has solicitado esta canción..`);
               const duration = queue.songs[0]?.duration || 0;
               const pos = Math.min(duration - 1, (queue.currentTime || 0) + 10);
               try {
                 await queue.seek(pos);
                 refresh(queue, 200);
-                return send(interaction, `${client.config.emoji.SUCCESS} Forwarded 10s`);
+                return send(interaction, `${client.config.emoji.SUCCESS} Avanzado 10s`);
               } catch {}
             }
             break;
           case "shuffle":
             {
-              if (!channel) return send(interaction, ` ${client.config.emoji.ERROR} You Need to Join Voice Channel`);
+              if (!channel) return send(interaction, ` ${client.config.emoji.ERROR} Debes unirte a un canal de voz`);
               if (interaction.guild.members.me.voice.channel && !interaction.guild.members.me.voice.channel.equals(channel))
-                return send(interaction, ` ${client.config.emoji.ERROR} You Need to Join __My__ Voice Channel `);
-              if (!queue) return send(interaction, ` ${client.config.emoji.ERROR} i am Not Playing Right Now `);
-              if (checkDJ) return send(interaction, `${client.config.emoji.SUCCESS} You are not DJ and also you are not song requester..`);
+                return send(interaction, ` ${client.config.emoji.ERROR} Debes unirte a __mi__ canal de voz `);
+              if (!queue) return send(interaction, ` ${client.config.emoji.ERROR} No hay nada sonando ahora `);
+              if (checkDJ) return send(interaction, `${client.config.emoji.SUCCESS} No eres DJ ni has solicitado esta canción..`);
               try {
                 await queue.shuffle();
                 refresh(queue, 0);
-                return send(interaction, `${client.config.emoji.SUCCESS} Queue shuffled`);
+                return send(interaction, `${client.config.emoji.SUCCESS} Lista mezclada`);
               } catch {}
             }
             break;
@@ -99,7 +99,7 @@ module.exports = async (client) => {
               if (!channel) {
                 return send(
                   interaction,
-                  `** ${client.config.emoji.ERROR} You Need to Join Voice Channel**`
+                  `** ${client.config.emoji.ERROR} Debes unirte a un canal de voz**`
                 );
               } else if (
                 interaction.guild.members.me.voice.channel &&
@@ -107,31 +107,31 @@ module.exports = async (client) => {
               ) {
                 return send(
                   interaction,
-                  ` ${client.config.emoji.ERROR} You Need to Join __My__ Voice Channel `
+                  ` ${client.config.emoji.ERROR} Debes unirte a __mi__ canal de voz `
                 );
               } else if (!queue) {
                 return send(
                   interaction,
-                  ` ${client.config.emoji.ERROR} i am Not Playing Right Now `
+                  ` ${client.config.emoji.ERROR} No hay nada sonando ahora `
                 );
               } else if (checkDJ) {
                 return send(
                   interaction,
-                  `${client.config.emoji.SUCCESS} You are not DJ and also you are not song requester..`
+                  `${client.config.emoji.SUCCESS} No eres DJ ni has solicitado esta canción..`
                 );
               } else if (!queue.autoplay) {
                 queue.toggleAutoplay();
                 refresh(queue, 0);
                 return send(
                   interaction,
-                  ` ${client.config.emoji.SUCCESS} Autoplay Enabled !! `
+                  ` ${client.config.emoji.SUCCESS} Reproducción automática activada `
                 );
               } else {
                 queue.toggleAutoplay();
                 refresh(queue, 0);
                 return send(
                   interaction,
-                  ` ${client.config.emoji.SUCCESS} Autoplay is Disabled !!.`
+                  ` ${client.config.emoji.SUCCESS} Reproducción automática desactivada `
                 );
               }
             }
@@ -141,7 +141,7 @@ module.exports = async (client) => {
               if (!channel) {
                 return send(
                   interaction,
-                  ` ${client.config.emoji.ERROR} You Need to Join Voice Channel`
+                  ` ${client.config.emoji.ERROR} Debes unirte a un canal de voz`
                 );
               } else if (
                 interaction.guild.members.me.voice.channel &&
@@ -149,24 +149,24 @@ module.exports = async (client) => {
               ) {
                 return send(
                   interaction,
-                  ` ${client.config.emoji.ERROR} You Need to Join __My__ Voice Channel `
+                  ` ${client.config.emoji.ERROR} Debes unirte a __mi__ canal de voz `
                 );
               } else if (!queue) {
                 return send(
                   interaction,
-                  ` ${client.config.emoji.ERROR} i am Not Playing Right Now `
+                  ` ${client.config.emoji.ERROR} No hay nada sonando ahora `
                 );
               } else if (checkDJ) {
                 return send(
                   interaction,
-                  `${client.config.emoji.SUCCESS} You are not DJ and also you are not song requester..`
+                  `${client.config.emoji.SUCCESS} No eres DJ ni has solicitado esta canción..`
                 );
               } else {
                 await skip(queue);
                 refresh(queue, 300);
                 return send(
                   interaction,
-                  `${client.config.emoji.SUCCESS}  Song Skipped !!`
+                  `${client.config.emoji.SUCCESS} Canción saltada`
                 );
               }
             }
@@ -176,7 +176,7 @@ module.exports = async (client) => {
               if (!channel) {
                 return send(
                   interaction,
-                  ` ${client.config.emoji.ERROR} You Need to Join Voice Channel`
+                  ` ${client.config.emoji.ERROR} Debes unirte a un canal de voz`
                 );
               } else if (
                 interaction.guild.members.me.voice.channel &&
@@ -184,23 +184,23 @@ module.exports = async (client) => {
               ) {
                 return send(
                   interaction,
-                  ` ${client.config.emoji.ERROR} You Need to Join __My__ Voice Channel `
+                  ` ${client.config.emoji.ERROR} Debes unirte a __mi__ canal de voz `
                 );
               } else if (!queue) {
                 return send(
                   interaction,
-                  ` ${client.config.emoji.ERROR} i am Not Playing Right Now `
+                  ` ${client.config.emoji.ERROR} No hay nada sonando ahora `
                 );
               } else if (checkDJ) {
                 return send(
                   interaction,
-                  `${client.config.emoji.SUCCESS} You are not DJ and also you are not song requester..`
+                  `${client.config.emoji.SUCCESS} No eres DJ ni has solicitado esta canción..`
                 );
               } else {
+                client.playlistLoading.delete(interaction.guildId);
                 await queue.stop().catch((e) => {});
                 try {
-                  const db = await client.music?.get(`${interaction.guildId}.vc`);
-                  if (!db?.enable) await client.distube.voices.leave(interaction.guild);
+                  await client.distube.voices.leave(interaction.guild);
                   // Reset embeds to default immediately
                   try {
                     await client.updateembed(client, interaction.guild);
@@ -209,7 +209,7 @@ module.exports = async (client) => {
                 } catch {}
                 return send(
                   interaction,
-                  ` ${client.config.emoji.SUCCESS} Song Stoped and Left Channel !!.`
+                  ` ${client.config.emoji.SUCCESS} ¡Música detenida y el bot ha salido del canal!`
                 );
               }
             }
@@ -219,7 +219,7 @@ module.exports = async (client) => {
               if (!channel) {
                 return send(
                   interaction,
-                  ` ${client.config.emoji.ERROR} You Need to Join Voice Channel`
+                  ` ${client.config.emoji.ERROR} Debes unirte a un canal de voz`
                 );
               } else if (
                 interaction.guild.members.me.voice.channel &&
@@ -227,90 +227,68 @@ module.exports = async (client) => {
               ) {
                 return send(
                   interaction,
-                  ` ${client.config.emoji.ERROR} You Need to Join __My__ Voice Channel `
+                  ` ${client.config.emoji.ERROR} Debes unirte a __mi__ canal de voz `
                 );
               } else if (!queue) {
                 return send(
                   interaction,
-                  ` ${client.config.emoji.ERROR} i am Not Playing Right Now `
+                  ` ${client.config.emoji.ERROR} No hay nada sonando ahora `
                 );
               } else if (checkDJ) {
                 return send(
                   interaction,
-                  `${client.config.emoji.SUCCESS} You are not DJ and also you are not song requester..`
+                  `${client.config.emoji.SUCCESS} No eres DJ ni has solicitado esta canción..`
                 );
               } else if (queue.paused) {
                 await queue.resume();
                 refresh(queue, 0);
                 return send(
                   interaction,
-                  ` ${client.config.emoji.SUCCESS} Queue Resumed!! `
+                  ` ${client.config.emoji.SUCCESS} Lista reanudada `
                 );
-              } else if (!queue.paused) {
+              } else {
                 await queue.pause();
                 refresh(queue, 0);
                 return send(
                   interaction,
-                  ` ${client.config.emoji.SUCCESS} Queue Paused !! `
+                  ` ${client.config.emoji.SUCCESS} Lista pausada `
                 );
               }
             }
             break;
-          case "loop":
+          case "loop_song":
             {
-              if (!channel) {
-                return send(
-                  interaction,
-                  `${client.config.emoji.ERROR} You Need to Join Voice Channel`
-                );
-              } else if (
-                interaction.guild.members.me.voice.channel &&
-                !interaction.guild.members.me.voice.channel.equals(channel)
-              ) {
-                return send(
-                  interaction,
-                  `${client.config.emoji.ERROR} You Need to Join __My__ Voice Channel`
-                );
-              } else if (!queue) {
-                return send(
-                  interaction,
-                  `${client.config.emoji.ERROR} I am Not Playing Right Now`
-                );
-              } else if (checkDJ) {
-                return send(
-                  interaction,
-                  `${client.config.emoji.SUCCESS} You are not a DJ and also you are not the song requester..`
-                );
-              } else {
-        switch (queue.repeatMode) {
-                  case 0: // off
-                    await queue.setRepeatMode(1);
-          refresh(queue, 0);
-                    return send(
-                      interaction,
-                      `${client.config.emoji.SUCCESS} Song Loop On !!`
-                    );
-                  case 1: // song
-                    await queue.setRepeatMode(2);
-          refresh(queue, 0);
-                    return send(
-                      interaction,
-                      `${client.config.emoji.SUCCESS} Queue Loop On !!`
-                    );
-                  case 2: // queue
-                    await queue.setRepeatMode(0);
-          refresh(queue, 0);
-                    return send(
-                      interaction,
-                      `${client.config.emoji.SUCCESS} Loop Off !!`
-                    );
-                  default:
-                    return send(
-                      interaction,
-                      `${client.config.emoji.ERROR} Unknown loop mode`
-                    );
-                }
-              }
+              if (!channel) return send(interaction, `${client.config.emoji.ERROR} Debes unirte a un canal de voz`);
+              if (interaction.guild.members.me.voice.channel && !interaction.guild.members.me.voice.channel.equals(channel))
+                return send(interaction, `${client.config.emoji.ERROR} Debes unirte a __mi__ canal de voz`);
+              if (!queue) return send(interaction, `${client.config.emoji.ERROR} No hay nada sonando ahora`);
+              if (checkDJ) return send(interaction, `${client.config.emoji.SUCCESS} No eres DJ ni has solicitado esta canción..`);
+
+              const newMode = queue.repeatMode === 1 ? 0 : 1;
+              await queue.setRepeatMode(newMode);
+              refresh(queue, 0);
+              return send(
+                interaction,
+                `${client.config.emoji.SUCCESS} Bucle de canción ${newMode === 1 ? "activado" : "desactivado"}`
+              );
+            }
+            break;
+
+          case "loop_queue":
+            {
+              if (!channel) return send(interaction, `${client.config.emoji.ERROR} Debes unirte a un canal de voz`);
+              if (interaction.guild.members.me.voice.channel && !interaction.guild.members.me.voice.channel.equals(channel))
+                return send(interaction, `${client.config.emoji.ERROR} Debes unirte a __mi__ canal de voz`);
+              if (!queue) return send(interaction, `${client.config.emoji.ERROR} No hay nada sonando ahora`);
+              if (checkDJ) return send(interaction, `${client.config.emoji.SUCCESS} No eres DJ ni has solicitado esta canción..`);
+
+              const newMode = queue.repeatMode === 2 ? 0 : 2;
+              await queue.setRepeatMode(newMode);
+              refresh(queue, 0);
+              return send(
+                interaction,
+                `${client.config.emoji.SUCCESS} Bucle de cola ${newMode === 2 ? "activado" : "desactivado"}`
+              );
             }
             break;
 
@@ -320,7 +298,7 @@ module.exports = async (client) => {
               if (!channel) {
                 return send(
                   interaction,
-                  `${client.config.emoji.ERROR} You Need to Join Voice Channel`
+                  `${client.config.emoji.ERROR} Debes unirte a un canal de voz`
                 );
               }
               if (
@@ -329,13 +307,13 @@ module.exports = async (client) => {
               ) {
                 return send(
                   interaction,
-                  `${client.config.emoji.ERROR} You Need to Join __My__ Voice Channel`
+                  `${client.config.emoji.ERROR} Debes unirte a __mi__ canal de voz`
                 );
               }
               if (!queue || !queue.songs?.length) {
                 return send(
                   interaction,
-                  `${client.config.emoji.ERROR} I am Not Playing Right Now`
+                  `${client.config.emoji.ERROR} No hay nada sonando ahora`
                 );
               }
 
@@ -344,7 +322,7 @@ module.exports = async (client) => {
               const baseMsg = baseMsgId
                 ? await interaction.channel.messages.fetch(baseMsgId).catch(() => null)
                 : null;
-              const threadName = `save ▶ ${interaction.user.username}`.substring(0, 90);
+              const threadName = `guardar ▶ ${interaction.user.username}`.substring(0, 90);
               const starter = baseMsg || (await interaction.message?.fetch().catch(() => null)) || null;
               let thread;
               try {
@@ -352,18 +330,18 @@ module.exports = async (client) => {
                   name: threadName,
                   autoArchiveDuration: 60,
                   type: ChannelType.PrivateThread,
-                  reason: `Save current song prompt for ${interaction.user.tag}`,
+                  reason: `Solicitud de guardado de canción para ${interaction.user.tag}`,
                 });
               } catch (e) {
                 return send(
                   interaction,
-                  `${client.config.emoji.ERROR} I need permission to create threads in this channel.`
+                  `${client.config.emoji.ERROR} Necesito permiso para crear hilos en este canal.`
                 );
               }
               // Invite only the clicker
               try { await thread.members.add(interaction.user.id).catch(() => {}); } catch {}
               await thread.send({
-                content: `${interaction.user}, reply with the playlist name to save "${client.getTitle(queue.songs[0])}" (timeout 60s).`,
+                content: `${interaction.user}, responde con el nombre de la lista para guardar "${client.getTitle(queue.songs[0])}" (tiempo límite 60s).`,
               });
 
               const collector = thread.createMessageCollector({
@@ -377,11 +355,11 @@ module.exports = async (client) => {
                 const track = Store.serializeSong(queue.songs[0], interaction.user);
                 await Store.create(client, interaction.guildId, interaction.user.id, name);
                 await Store.addTracks(client, interaction.guildId, interaction.user.id, name, [track]);
-                await thread.send(`${client.config.emoji.SUCCESS} Saved to \`${name}\`. This thread will close soon.`);
+                await thread.send(`${client.config.emoji.SUCCESS} Guardado en \`${name}\`. Este hilo se cerrará pronto.`);
               });
 
               collector.on("end", async () => {
-                setTimeout(() => thread.setArchived(true, "Completed save prompt").catch(() => {}), 5000);
+                setTimeout(() => thread.setArchived(true, "Solicitud completada").catch(() => {}), 5000);
               });
             }
             break;
@@ -393,17 +371,15 @@ module.exports = async (client) => {
     });
 
     async function send(interaction, string) {
-      interaction
-        .followUp({
-          embeds: [
-            new EmbedBuilder()
-              .setColor(client.config.embed.color)
-              .setDescription(`> ${string.substring(0, 3000)}`)
-              .setFooter(client.getFooter(interaction.user)),
-          ],
-          ephemeral: true,
-        })
-        .catch((e) => null);
+      await interaction.followUp({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(client.config.embed.color)
+            .setDescription(`> ${string.substring(0, 3000)}`)
+            .setFooter(client.getFooter(interaction.user)),
+        ],
+        ephemeral: true,
+      }).catch((e) => null);
     }
   } catch (e) {
     console.log(e);

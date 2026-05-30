@@ -9,7 +9,7 @@ const { Queue } = require("distube");
 
 module.exports = {
   name: "dj",
-  description: `DJ System`,
+  description: `Configura el sistema DJ`,
   userPermissions: PermissionFlagsBits.ManageGuild,
   botPermissions: PermissionFlagsBits.ManageGuild,
   category: "Settings",
@@ -26,8 +26,8 @@ module.exports = {
       type: ApplicationCommandOptionType.Subcommand,
       options: [
         {
-          name: "role",
-          description: `mention a role for dj system`,
+          name: "rol",
+          description: `Rol para el sistema DJ`,
           type: ApplicationCommandOptionType.Role,
           required: true,
         },
@@ -58,7 +58,7 @@ module.exports = {
     switch (options) {
       case "enable":
         {
-          let role = interaction.options.getRole("role");
+          let role = interaction.options.getRole("rol");
           await client.music.set(`${interaction.guild.id}.djrole`, role.id);
           client.embed(
             interaction,

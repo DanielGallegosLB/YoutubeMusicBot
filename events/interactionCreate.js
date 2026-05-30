@@ -23,8 +23,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
   }
 
   // Slash Command Handling
-  if (interaction.isCommand()) {
-    await interaction.deferReply().catch((e) => {});
+  if (interaction.isChatInputCommand()) {
+    try {
+      await interaction.deferReply().catch((e) => {
+        client.logger.error(`[Interaction Defer Error] Guild: ${interaction.guildId}`, e);
+      });
+    } catch (e) {}
+
     await databasing(interaction.guildId, interaction.user.id);
 
     const cmd = client.commands.get(interaction.commandName);
@@ -51,14 +56,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
       let botChannel = interaction.guild.members.me.voice.channel;
       let checkDJ = await check_dj(client, interaction.member, queue?.songs[0]);
 
-      if (!interaction.member.permissions.has(cmd.userPermissions)) {
+      if (!interaction.member.permissions.has(cmd.userPermissions || [])) {
         const needPerms = getPermissionName(cmd.userPermissions);
         return client.embed(
           interaction,
           `You Don't Have \`${needPerms}\` Permission to Use \`${cmd.name}\` Command!!`
         );
       } else if (
-        !interaction.guild.members.me.permissions.has(cmd.botPermissions)
+        !interaction.guild.members.me.permissions.has(cmd.botPermissions || [])
       ) {
         const needPerms = getPermissionName(cmd.botPermissions);
         return client.embed(
@@ -95,7 +100,16 @@ client.on(Events.InteractionCreate, async (interaction) => {
           `${emoji.ERROR} You are not DJ and also you are not song requester..`
         );
       } else {
-        await cmd.run(client, interaction, args, queue);
+        try {
+          await cmd.run(client, interaction, args, queue);
+        } catch (error) {
+          client.logger.error(`[Command Error] ${cmd.name}`, error);
+          if (interaction.deferred || interaction.replied) {
+            await interaction.followUp({ content: `❌ Error: ${error.message}`, ephemeral: true }).catch(() => {});
+          } else {
+            await interaction.reply({ content: `❌ Error: ${error.message}`, ephemeral: true }).catch(() => {});
+          }
+        }
       }
     }
   }
@@ -107,12 +121,5 @@ client.on(Events.InteractionCreate, async (interaction) => {
     if (command) command.run(client, interaction);
   }
 
-  // button handling
-  if (interaction.isButton()) {
-    await interaction.deferUpdate().catch((e) => {});
-  }
-  // menu handling
-  if (interaction.isAnySelectMenu()) {
-    await interaction.deferUpdate().catch((e) => {});
-  }
+  // button handling and menu handling are processed in DistubeHandler.js
 });

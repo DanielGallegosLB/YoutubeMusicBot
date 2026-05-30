@@ -6,7 +6,7 @@ const Database = require("../handlers/Database");
 
 client.once(Events.ClientReady, async () => {
   try {
-    console.log(`${client.user.username} is Online`);
+    client.logger.log(`${client.user.username} is Online`);
 
     // Set bot activity
     client.user.setActivity({
