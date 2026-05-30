@@ -119,7 +119,7 @@ module.exports = {
     const playOpts = {
       member: interaction.member,
       textChannel: interaction.channel,
-      unshift: true,
+      position: queue?.songs?.length ? 1 : 0,
       ...(hqMode ? { volume: 100 } : {}),
     };
 

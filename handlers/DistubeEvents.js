@@ -3,6 +3,48 @@ const JUGNU = require("./Client");
 const AutoresumeHandler = require("./AutoresumeHandler");
 const InitAutoResume = require("./InitAutoResume");
 
+const MAX_SESSION_SONGS = 150;
+
+const buildSessionTrack = (song) => ({
+  memberId: song.member?.id || song.user?.id || null,
+  source: song.source || "youtube",
+  duration: song.duration,
+  formattedDuration: song.formattedDuration,
+  id: song.id,
+  isLive: song.isLive,
+  name: song.name,
+  thumbnail: song.thumbnail,
+  type: "video",
+  uploader: song.uploader,
+  url: song.url,
+  views: song.views,
+});
+
+const saveSession = async (client, guildId, session) => {
+  if (!client.music) return;
+  const key = `${guildId}.sessions`;
+  const sessions = (await client.music.get(key)) || [];
+  sessions.unshift(session);
+  await client.music.set(key, sessions.slice(0, 10));
+};
+
+const createSession = (queue, source, title, url, requestedBy, songs) => {
+  const normalizedSongs = (songs || queue.songs || []).slice(0, MAX_SESSION_SONGS).map(buildSessionTrack);
+  return {
+    id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    createdAt: new Date().toISOString(),
+    source,
+    title: title || queue?.songs?.[0]?.name || "Sesión de música",
+    url: url || queue?.songs?.[0]?.url || null,
+    requestedBy: requestedBy?.tag || requestedBy || "Desconocido",
+    requestedById: requestedBy?.id || null,
+    count: normalizedSongs.length,
+    totalDuration: queue?.duration || normalizedSongs.reduce((sum, track) => sum + (track.duration || 0), 0),
+    truncated: (songs || queue.songs || []).length > MAX_SESSION_SONGS,
+    songs: normalizedSongs,
+  };
+};
+
 /**
  *
  * @param {JUGNU} client
@@ -18,6 +60,12 @@ module.exports = async (client) => {
   // events
   client.distube.on("playSong", async (queue, song) => {
     console.log(`[DisTube] Playing: ${song.name} in ${queue.textChannel.guild.name}`);
+    if (!queue._sessionSaved && queue.songs.length === 1) {
+      const session = createSession(queue, "song", song.name, song.url, song.user, [song]);
+      await saveSession(client, queue.textChannel.guildId, session);
+      queue._sessionSaved = true;
+    }
+
     let data = await client.music.get(`${queue.textChannel.guildId}.music`);
     if (data) {
       await client.updatequeue(queue);
@@ -106,6 +154,12 @@ module.exports = async (client) => {
 
   client.distube.on("addList", async (queue, playlist) => {
     console.log(`[DisTube] Playlist Added: ${playlist.name} (${playlist.songs.length} songs)`);
+    if (!queue._sessionSaved) {
+      const session = createSession(queue, "playlist", playlist.name, playlist.url, playlist.user, playlist.songs);
+      await saveSession(client, queue.textChannel.guildId, session);
+      queue._sessionSaved = true;
+    }
+
     let data = await client.music.get(`${queue.textChannel.guildId}.music`);
     if (data) {
       await client.updatequeue(queue);

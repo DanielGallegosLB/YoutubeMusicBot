@@ -6,12 +6,34 @@ const {
   StringSelectMenuBuilder,
   ActionRowBuilder,
   ComponentType,
+  ButtonBuilder,
+  ButtonStyle,
 } = require("discord.js");
+const { Song, SearchResultVideo } = require("distube");
 const JUGNU = require("../../../handlers/Client");
+
+const buildStoredSong = (track, guild) => {
+  return new Song(
+    new SearchResultVideo({
+      duration: track.duration,
+      formattedDuration: track.formattedDuration,
+      id: track.id,
+      isLive: track.isLive,
+      name: track.name,
+      thumbnail: track.thumbnail,
+      type: "video",
+      uploader: track.uploader,
+      url: track.url,
+      views: track.views,
+    }),
+    guild.members.cache.get(track.memberId) || guild.members.me,
+    track.source
+  );
+};
 
 module.exports = {
   name: "resumir",
-  description: `Resume una de las últimas 3 sesiones de desarrollo`,
+  description: `Resume una de las últimas sesiones de música guardadas`,
   userPermissions: PermissionFlagsBits.SendMessages,
   botPermissions: PermissionFlagsBits.EmbedLinks,
   category: "Information",
@@ -30,103 +52,45 @@ module.exports = {
    */
   run: async (client, interaction, args) => {
     try {
-      // Obtener resumen de las últimas 3 sesiones
-      const summaries = [
-        {
-          id: "session_3",
-          title: "Sesión 3: Arreglo de Playlist y URL",
-          date: "30 de Mayo, 2026",
-          description: `
-**Problemas resueltos:**
-• ❌ Botón de pausa no funcionaba (doble deferUpdate())
-• ❌ Las canciones de playlist no continuaban después de la primera
-• ❌ Error YTDLP con URLs de YouTube con parámetros extra
+      const sessions = (await client.music.get(`${interaction.guildId}.sessions`)) || [];
+      const replyWith = async (payload) =>
+        interaction.deferred || interaction.replied
+          ? await interaction.editReply(payload)
+          : await interaction.reply(payload);
 
-**Soluciones aplicadas:**
-• ✅ Eliminé manejo duplicado de botones en interactionCreate.js
-• ✅ Implementé concurrencia limitada (lotes de 5) en reproducir.js
-• ✅ Agregué normalización de URLs de YouTube en 3 comandos
-• ✅ Arreglé la función send() en DistubeHandler.js
+      if (!sessions.length) {
+        return replyWith({
+          content: `❌ No hay sesiones de música guardadas para este servidor.`,
+          ephemeral: true,
+        });
+      }
 
-**Estado actual:**
-🟢 Bot se inicia correctamente
-🟢 Botones responden adecuadamente
-🟢 Reproducción de playlists mejorada
-🟢 URLs limpias sin parámetros innecesarios
-          `,
-        },
-        {
-          id: "session_2",
-          title: "Sesión 2: Optimización de Carga de Playlists",
-          date: "28 de Mayo, 2026",
-          description: `
-**Objetivos alcanzados:**
-• Reproducción inmediata de primera canción
-• Carga de resto en paralelo sin delays
-• Eliminación de sistema de caché
-
-**Cambios principales:**
-• ✅ Implementé Promise.allSettled() para cargas paralelas
-• ✅ Removí delays de 400ms entre tracks
-• ✅ Optimicé reproducir.js, saltaryreproducir.js, reproducirprimero.js
-• ✅ Canción toca mientras el resto carga en background
-
-**Resultados:**
-✨ Playlists de 100+ canciones cargan sin delays
-✨ Primera canción suena inmediatamente
-✨ Mejor experiencia de usuario
-          `,
-        },
-        {
-          id: "session_1",
-          title: "Sesión 1: Inicialización y Errores Críticos",
-          date: "28 de Mayo, 2026",
-          description: `
-**Errores corregidos:**
-• ❌ RequestChannel undefined client.music
-• ❌ get-intrinsic strict mode violation
-• ❌ Null client.user reference
-• ❌ Undefined client.logger
-• ❌ Missing playlistLoading collection
-
-**Parches aplicados:**
-• ✅ Reordenamiento de handler loading
-• ✅ Parche a node_modules/get-intrinsic/index.js
-• ✅ Optional chaining en Database.js
-• ✅ Logger initialization en Client.js
-• ✅ Collection para playlistLoading
-
-**Validación:**
-✔️ Bot startup sin errores
-✔️ Handlers inicializados correctamente
-✔️ Database y RequestChannel funcionales
-          `,
-        },
-      ];
-
-      // Crear select menu con las sesiones
+      const lastSessions = sessions.slice(0, 3);
       const selectRow = new ActionRowBuilder().addComponents(
         new StringSelectMenuBuilder()
-          .setCustomId("session_select")
-          .setPlaceholder("Selecciona una sesión para resumir")
+          .setCustomId("resumir_session_select")
+          .setPlaceholder("Selecciona una sesión para ver o recuperar")
           .addOptions(
-            summaries.map((s) => ({
-              label: s.title,
-              description: `${s.date}`,
-              value: s.id,
+            lastSessions.map((session) => ({
+              label: session.title.slice(0, 100),
+              description: `${session.count} canciones • ${new Date(session.createdAt).toLocaleDateString("es-ES")}`,
+              value: session.id,
             }))
           )
       );
 
-      const selectMsg = await interaction.followUp({
-        content: "📋 **Selecciona una sesión para ver el resumen:**",
+      const replyData = {
+        content: "📋 **Selecciona una sesión de música anterior:**",
         components: [selectRow],
         ephemeral: true,
-      });
+      };
 
-      // Crear collector para la selección
+      const replyMsg = interaction.deferred || interaction.replied
+        ? await interaction.editReply(replyData)
+        : await interaction.reply({ ...replyData, fetchReply: true });
+
       const filter = (i) => i.user.id === interaction.user.id;
-      const collector = selectMsg.createMessageComponentCollector({
+      const collector = replyMsg.createMessageComponentCollector({
         filter,
         componentType: ComponentType.StringSelect,
         time: 60000,
@@ -134,36 +98,119 @@ module.exports = {
 
       collector.on("collect", async (selectInteraction) => {
         const selectedId = selectInteraction.values[0];
-        const selectedSession = summaries.find((s) => s.id === selectedId);
-
+        const selectedSession = sessions.find((s) => s.id === selectedId);
         if (!selectedSession) {
-          await selectInteraction.reply({
-            content: "❌ Sesión no encontrada",
+          return selectInteraction.reply({
+            content: "❌ Sesión no encontrada.",
             ephemeral: true,
           });
-          return;
         }
+
+        const tracksPreview = selectedSession.songs
+          .slice(0, 5)
+          .map((song, index) => `
+**${index + 1}.** [${song.name}](${song.url}) • ${song.formattedDuration}`)
+          .join("\n");
 
         const embed = new EmbedBuilder()
           .setColor(client.config.embed.color)
           .setTitle(selectedSession.title)
-          .setDescription(selectedSession.description)
-          .setFooter({
-            text: `Fecha: ${selectedSession.date}`,
-            iconURL: client.user.displayAvatarURL(),
-          })
-          .setTimestamp();
+          .setDescription(`**Solicitado por:** ${selectedSession.requestedBy}
+**Tipo:** ${selectedSession.source}
+**Canciones:** ${selectedSession.count}
+**Guardado:** ${new Date(selectedSession.createdAt).toLocaleString("es-ES")}
+${selectedSession.truncated ? "\n**Nota:** sesión truncada a los primeros 150 tracks." : ""}`)
+          .addFields([
+            {
+              name: "Vista previa",
+              value: tracksPreview || "No hay canciones guardadas en esta sesión.",
+            },
+          ])
+          .setFooter({ text: `ID: ${selectedSession.id}` })
+          .setTimestamp(new Date(selectedSession.createdAt));
 
-        await selectInteraction.reply({
-          embeds: [embed],
-          ephemeral: true,
+        const buttonRow = new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId(`resumir_resume_${selectedSession.id}`)
+            .setLabel("Recuperar sesión")
+            .setStyle(ButtonStyle.Primary)
+        );
+
+        await selectInteraction.update({ embeds: [embed], components: [buttonRow], content: "" });
+
+        const buttonCollector = selectInteraction.message.createMessageComponentCollector({
+          filter,
+          componentType: ComponentType.Button,
+          time: 60000,
+        });
+
+        buttonCollector.on("collect", async (buttonInteraction) => {
+          if (buttonInteraction.customId !== `resumir_resume_${selectedSession.id}`) return;
+
+          const member = interaction.member;
+          const guild = interaction.guild;
+          const voiceChannel = member.voice.channel;
+          if (!voiceChannel) {
+            return buttonInteraction.reply({
+              content: "❌ Debes estar en un canal de voz para recuperar la sesión.",
+              ephemeral: true,
+            });
+          }
+
+          const botVoice = guild.members.me.voice.channel;
+          if (botVoice && botVoice.id !== voiceChannel.id) {
+            return buttonInteraction.reply({
+              content: "❌ El bot ya está en otro canal de voz.",
+              ephemeral: true,
+            });
+          }
+
+          const storedSongs = selectedSession.songs.map((track) => buildStoredSong(track, guild));
+          if (!storedSongs.length) {
+            return buttonInteraction.reply({
+              content: "❌ Esta sesión no contiene canciones recuperables.",
+              ephemeral: true,
+            });
+          }
+
+          let queue = client.distube.getQueue(guild.id);
+          try {
+            if (!queue || !queue.songs.length) {
+              await client.distube.play(voiceChannel, selectedSession.songs[0].url, {
+                member,
+                textChannel: interaction.channel,
+              });
+              queue = client.distube.getQueue(guild.id);
+              if (storedSongs.length > 1) {
+                queue.addToQueue(storedSongs.slice(1));
+              }
+            } else {
+              queue.addToQueue(storedSongs, 1);
+            }
+
+            await buttonInteraction.reply({
+              content: `✅ Sesión recuperada: ${storedSongs.length} canciones añadidas.`,
+              ephemeral: true,
+            });
+            buttonCollector.stop();
+          } catch (error) {
+            console.error(error);
+            await buttonInteraction.reply({
+              content: `❌ Error al recuperar la sesión: ${error.message}`,
+              ephemeral: true,
+            });
+          }
+        });
+
+        buttonCollector.on("end", () => {
+          selectInteraction.message.edit({ components: [] }).catch(() => {});
         });
 
         collector.stop();
       });
 
       collector.on("end", () => {
-        selectMsg.edit({ components: [] }).catch(() => {});
+        replyMsg.edit({ components: [] }).catch(() => {});
       });
     } catch (e) {
       client.logger.error(`[Resumir Error]`, e);
