@@ -149,8 +149,11 @@ module.exports = {
       try { await client.distube.voices.join(channel); } catch {}
 
       // Encola primer track y salta actual
+      let queue;
       try {
-        await client.distube.play(channel, urls[0], playOpts);
+        queue = await client.distube.play(channel, urls[0], playOpts);
+        queue._sessionSaved = true;
+        queue._sessionSourcePlaylist = true;
       } catch (e) {
         client.logger.error("[Playlist Skip Track 1 Error]", e);
         return interaction.followUp({
@@ -174,6 +177,19 @@ module.exports = {
           })()
         );
         await Promise.allSettled(promises);
+        if (
+          queue &&
+          typeof client.createMusicSession === "function" &&
+          typeof client.saveMusicSession === "function"
+        ) {
+          try {
+            const session = client.createMusicSession(queue, "playlist", undefined, song, interaction.user, queue.songs);
+            await client.saveMusicSession(interaction.guildId, session);
+            client.logger.log(`[Playlist Skip] Playlist session guardada: ${queue.songs.length} canciones`);
+          } catch (e) {
+            client.logger.error(`[Playlist Skip] Error guardando sesión de playlist:`, e);
+          }
+        }
         client.playlistLoading.delete(interaction.guildId);
         client.logger.log(`[Playlist Skip] ${urls.length} tracks procesados en Guild: ${interaction.guildId}`);
       })();

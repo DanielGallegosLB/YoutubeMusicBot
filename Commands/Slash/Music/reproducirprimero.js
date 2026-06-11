@@ -150,8 +150,11 @@ module.exports = {
 
       const reversedUrls = [...urls].reverse();
 
+      let queue;
       try {
-        await client.distube.play(channel, reversedUrls[0], playOpts);
+        queue = await client.distube.play(channel, reversedUrls[0], playOpts);
+        queue._sessionSaved = true;
+        queue._sessionSourcePlaylist = true;
       } catch (e) {
         client.logger.error("[Playlist Top Track 1 Error]", e);
         return interaction.followUp({
@@ -174,6 +177,19 @@ module.exports = {
           })()
         );
         await Promise.allSettled(promises);
+        if (
+          queue &&
+          typeof client.createMusicSession === "function" &&
+          typeof client.saveMusicSession === "function"
+        ) {
+          try {
+            const session = client.createMusicSession(queue, "playlist", undefined, song, interaction.user, queue.songs);
+            await client.saveMusicSession(interaction.guildId, session);
+            client.logger.log(`[Playlist Top] Playlist session guardada: ${queue.songs.length} canciones`);
+          } catch (e) {
+            client.logger.error(`[Playlist Top] Error guardando sesión de playlist:`, e);
+          }
+        }
         client.playlistLoading.delete(interaction.guildId);
         client.logger.log(`[Playlist Top] ${urls.length} tracks procesados en Guild: ${interaction.guildId}`);
       })();

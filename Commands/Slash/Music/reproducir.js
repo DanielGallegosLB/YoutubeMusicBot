@@ -81,6 +81,24 @@ function fetchPlaylistURLs(playlistUrl) {
   });
 }
 
+async function playFirstAvailableTrack(client, channel, urls, playOpts) {
+  for (let index = 0; index < urls.length; index++) {
+    const url = urls[index];
+    try {
+      await client.distube.play(channel, url, playOpts);
+      const queue = client.distube.getQueue(channel.guild.id);
+      if (!queue) {
+        throw new Error("No se pudo obtener la cola después de iniciar la reproducción.");
+      }
+      return { index, queue };
+    } catch (e) {
+      client.logger.warn(`[Slash Play] Track ${index + 1} no disponible, saltando: ${url}`, e.message);
+      if (index === urls.length - 1) throw e;
+    }
+  }
+  throw new Error("No se encontró ningún track reproducible en la playlist.");
+}
+
 module.exports = {
   name: "reproducir",
   description: `Reproduce una canción o lista de reproducción`,
@@ -155,15 +173,21 @@ module.exports = {
 
       try { await client.distube.voices.join(channel); } catch {}
 
-      // Toca primer track inmediatamente
+      // Toca el primer track reproducible y salta los inválidos
+      let firstPlayedIndex;
+      let queue;
       try {
-        await client.distube.play(channel, urls[0], playOpts);
-        client.logger.log(`[Slash Play Success] First track: ${urls[0]}`);
+        const result = await playFirstAvailableTrack(client, channel, urls, playOpts);
+        firstPlayedIndex = result.index;
+        queue = result.queue;
+        queue._sessionSaved = true;
+        queue._sessionSourcePlaylist = true;
+        client.logger.log(`[Slash Play Success] First playable track index ${firstPlayedIndex + 1}: ${urls[firstPlayedIndex]}`);
       } catch (e) {
         client.logger.error("[Slash Play First Track Error]", e);
         try {
           await interaction.followUp({
-            content: `❌ Error en el primer track: ${e.message}`,
+            content: `❌ Error en el primer track reproducible: ${e.message}`,
             ephemeral: true,
           });
         } catch (err) {}
@@ -175,7 +199,7 @@ module.exports = {
       client.playlistLoading.set(interaction.guildId, true);
       (async () => {
         const batchSize = 5;
-        const remaining = urls.slice(1);
+        const remaining = urls.slice(firstPlayedIndex + 1);
         try {
           for (let i = 0; i < remaining.length; i += batchSize) {
             if (!client.playlistLoading.get(interaction.guildId)) break;
@@ -185,14 +209,31 @@ module.exports = {
                 try {
                   await client.distube.play(channel, url, nextPlayOpts);
                 } catch (e) {
-                  client.logger.warn(`[Slash Play] Track ${i + index + 2} saltado en Guild ${interaction.guildId}:`, e.message);
+                  client.logger.warn(`[Slash Play] Track ${firstPlayedIndex + i + index + 2} saltado en Guild ${interaction.guildId}:`, e.message);
                 }
               })()
             );
             await Promise.allSettled(promises);
-            // small pause between batches to let DisTube settle
             await new Promise((r) => setTimeout(r, 100));
           }
+
+          if (queue && typeof client.createMusicSession === "function" && typeof client.saveMusicSession === "function") {
+            try {
+              const session = client.createMusicSession(
+                queue,
+                "playlist",
+                undefined,
+                song,
+                interaction.user,
+                queue.songs
+              );
+              await client.saveMusicSession(interaction.guildId, session);
+              client.logger.log(`[Slash Play] Playlist session guardada: ${queue.songs.length} canciones`);
+            } catch (e) {
+              client.logger.error(`[Slash Play] Error guardando sesión de playlist:`, e);
+            }
+          }
+
           client.logger.log(`[Slash Play] ${urls.length} tracks procesados en Guild: ${interaction.guildId}`);
         } catch (e) {
           client.logger.error(`[Slash Play] Error en background loading:`, e);

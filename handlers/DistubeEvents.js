@@ -50,6 +50,9 @@ const createSession = (queue, source, title, url, requestedBy, songs) => {
  * @param {JUGNU} client
  */
 module.exports = async (client) => {
+  client.saveMusicSession = async (guildId, session) => saveSession(client, guildId, session);
+  client.createMusicSession = createSession;
+
   client.on(Events.ClientReady, async () => {
     setTimeout(
       async () => await AutoresumeHandler(client),
@@ -60,7 +63,7 @@ module.exports = async (client) => {
   // events
   client.distube.on("playSong", async (queue, song) => {
     console.log(`[DisTube] Playing: ${song.name} in ${queue.textChannel.guild.name}`);
-    if (!queue._sessionSaved && queue.songs.length === 1) {
+    if (!queue._sessionSaved && queue.songs.length === 1 && !queue._sessionSourcePlaylist) {
       const session = createSession(queue, "song", song.name, song.url, song.user, [song]);
       await saveSession(client, queue.textChannel.guildId, session);
       queue._sessionSaved = true;

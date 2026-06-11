@@ -5,24 +5,29 @@ const { msToDuration } = require("../handlers/functions");
 const leaveTimeout = client.config.options.leaveTimeout;
 
 client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
-  if (!newState.guild || newState.member.user.bot) return;
-  const queue = client.distube.getQueue(newState.guild);
+  if (!newState || !newState.guild || !newState.member || newState.member.user.bot) return;
+
+  const guildId = newState.guildId || newState.guild.id;
+  const queue = client.distube.getQueue(guildId);
 
   // Auto speak in stage channel
   if (
     newState.channelId &&
-    newState.channel.type === ChannelType.GuildStageVoice &&
-    newState.guild.me.voice.suppress
+    newState.channel?.type === ChannelType.GuildStageVoice &&
+    newState.guild?.members?.me?.voice?.suppress
   ) {
     try {
-      await newState.guild.me.voice.setSuppressed(false);
+      await newState.guild.members.me.voice.setSuppressed(false);
     } catch (error) {
       console.error("Failed to unsuppress bot's voice:", error);
     }
   }
 
   if (!queue) return;
-  const db = await client.music?.get(`${queue.textChannel.guildId}.vc`);
+  const textChannel = queue.textChannel;
+  const db = textChannel
+    ? await client.music?.get(`${textChannel.guildId}.vc`)
+    : null;
 
   // 24/7 music system
   try {
@@ -36,46 +41,50 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
       const members = channel.members.filter((m) => !m.user.bot);
 
       if (members.size < 1) {
-        // Send message that the bot will leave the voice channel in given time if 24/7 mode is not enabled
-        const textChannel = queue.textChannel;
-        const msg = await textChannel.send({
-          embeds: [
-            {
-              description: `I will leave the voice channel in \`${msToDuration(
-                leaveTimeout
-              )}\` if 24/7 mode is not enabled.`,
-              color: Colors.Red,
-            },
-          ],
-        });
-        setTimeout(() => msg.delete().catch(() => {}), 3000);
-        // Only the bot is in the channel
-        const leaveTimeoutHandle = setTimeout(async () => {
-          await queue.stop();
-          await client.editPlayerMessage(queue.textChannel);
-          const leaveMsg = await textChannel.send({
+        if (textChannel) {
+          const msg = await textChannel.send({
             embeds: [
               {
-                description: "I left the voice channel because I was alone.",
+                description: `I will leave the voice channel in \`${msToDuration(
+                  leaveTimeout
+                )}\` if 24/7 mode is not enabled.`,
                 color: Colors.Red,
               },
             ],
           });
-          setTimeout(() => leaveMsg.delete().catch(() => {}), 3000);
+          setTimeout(() => msg.delete().catch(() => {}), 3000);
+        }
+
+        const leaveTimeoutHandle = setTimeout(async () => {
+          try {
+            await queue.stop();
+            if (textChannel) await client.editPlayerMessage(textChannel);
+            if (textChannel) {
+              const leaveMsg = await textChannel.send({
+                embeds: [
+                  {
+                    description: "I left the voice channel because I was alone.",
+                    color: Colors.Red,
+                  },
+                ],
+              });
+              setTimeout(() => leaveMsg.delete().catch(() => {}), 3000);
+            }
+          } catch (error) {
+            console.error("Error stopping queue after leave timeout:", error);
+          }
         }, leaveTimeout);
 
-        client.leaveTimeoutHandles.set(newState.guildId, leaveTimeoutHandle);
+        client.leaveTimeoutHandles.set(guildId, leaveTimeoutHandle);
       }
     }
 
     // Clear leave timeout if someone joins the voice channel
     if (!twentyFourSevenEnabled && !oldState.channel && newState.channel) {
-      const leaveTimeoutHandle = client.leaveTimeoutHandles.get(
-        oldState.guildId
-      );
+      const leaveTimeoutHandle = client.leaveTimeoutHandles.get(guildId);
       if (leaveTimeoutHandle) {
-        clearTimeout(leaveTimeoutHandle); // Cancel the timeout
-        client.leaveTimeoutHandles.delete(oldState.guildId); // Remove the handle from the map
+        clearTimeout(leaveTimeoutHandle);
+        client.leaveTimeoutHandles.delete(guildId);
       }
     }
   } catch (error) {
