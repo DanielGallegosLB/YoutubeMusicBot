@@ -194,27 +194,25 @@ module.exports = {
         return;
       }
 
-      // Resto en background con concurrencia limitada (lotes)
+      // Resto en background uno por uno con espera para mayor respuesta a instrucciones
       const nextPlayOpts = { ...playOpts, skip: false };
       client.playlistLoading.set(interaction.guildId, true);
       (async () => {
-        const batchSize = 5;
         const remaining = urls.slice(firstPlayedIndex + 1);
         try {
-          for (let i = 0; i < remaining.length; i += batchSize) {
+          for (let i = 0; i < remaining.length; i++) {
+            // Verificar si se detuvo la carga o si el bot salió
             if (!client.playlistLoading.get(interaction.guildId)) break;
-            const batch = remaining.slice(i, i + batchSize);
-            const promises = batch.map((url, index) =>
-              (async () => {
-                try {
-                  await client.distube.play(channel, url, nextPlayOpts);
-                } catch (e) {
-                  client.logger.warn(`[Slash Play] Track ${firstPlayedIndex + i + index + 2} saltado en Guild ${interaction.guildId}:`, e.message);
-                }
-              })()
-            );
-            await Promise.allSettled(promises);
-            await new Promise((r) => setTimeout(r, 100));
+            
+            const url = remaining[i];
+            try {
+              await client.distube.play(channel, url, nextPlayOpts);
+            } catch (e) {
+              client.logger.warn(`[Slash Play] Track ${firstPlayedIndex + i + 2} saltado en Guild ${interaction.guildId}:`, e.message);
+            }
+            
+            // Tiempo de espera para que el bot procese otras instrucciones (interacciones)
+            await new Promise((r) => setTimeout(r, 250));
           }
 
           if (queue && typeof client.createMusicSession === "function" && typeof client.saveMusicSession === "function") {

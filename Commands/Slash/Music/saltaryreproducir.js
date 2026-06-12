@@ -162,36 +162,43 @@ module.exports = {
         });
       }
 
-      // Resto en background en paralelo sin skip
+      // Resto en background secuencialmente para mayor respuesta a instrucciones
       const nextPlayOpts = { ...playOpts, skip: false };
       client.playlistLoading.set(interaction.guildId, true);
       (async () => {
-        const promises = urls.slice(1).map((url, index) =>
-          (async () => {
-            if (!client.playlistLoading.get(interaction.guildId)) return;
+        const remaining = urls.slice(1);
+        try {
+          for (let i = 0; i < remaining.length; i++) {
+            if (!client.playlistLoading.get(interaction.guildId)) break;
+            const url = remaining[i];
             try {
               await client.distube.play(channel, url, nextPlayOpts);
             } catch (e) {
-              client.logger.warn(`[Playlist Skip] Track ${index + 2} saltado en Guild ${interaction.guildId}:`, e.message);
+              client.logger.warn(`[Playlist Skip] Track ${i + 2} saltado en Guild ${interaction.guildId}:`, e.message);
             }
-          })()
-        );
-        await Promise.allSettled(promises);
-        if (
-          queue &&
-          typeof client.createMusicSession === "function" &&
-          typeof client.saveMusicSession === "function"
-        ) {
-          try {
-            const session = client.createMusicSession(queue, "playlist", undefined, song, interaction.user, queue.songs);
-            await client.saveMusicSession(interaction.guildId, session);
-            client.logger.log(`[Playlist Skip] Playlist session guardada: ${queue.songs.length} canciones`);
-          } catch (e) {
-            client.logger.error(`[Playlist Skip] Error guardando sesión de playlist:`, e);
+            // Tiempo de espera para procesar interacciones
+            await new Promise((r) => setTimeout(r, 250));
           }
+
+          if (
+            queue &&
+            typeof client.createMusicSession === "function" &&
+            typeof client.saveMusicSession === "function"
+          ) {
+            try {
+              const session = client.createMusicSession(queue, "playlist", undefined, song, interaction.user, queue.songs);
+              await client.saveMusicSession(interaction.guildId, session);
+              client.logger.log(`[Playlist Skip] Playlist session guardada: ${queue.songs.length} canciones`);
+            } catch (e) {
+              client.logger.error(`[Playlist Skip] Error guardando sesión de playlist:`, e);
+            }
+          }
+          client.logger.log(`[Playlist Skip] ${urls.length} tracks procesados en Guild: ${interaction.guildId}`);
+        } catch (e) {
+          client.logger.error(`[Playlist Skip] Error en background loading:`, e);
+        } finally {
+          client.playlistLoading.delete(interaction.guildId);
         }
-        client.playlistLoading.delete(interaction.guildId);
-        client.logger.log(`[Playlist Skip] ${urls.length} tracks procesados en Guild: ${interaction.guildId}`);
       })();
 
       return;

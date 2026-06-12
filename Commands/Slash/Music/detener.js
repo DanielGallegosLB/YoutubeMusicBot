@@ -28,6 +28,7 @@ module.exports = {
    */
   run: async (client, interaction, args, queue) => {
     // Code
+    client.playlistLoading.delete(interaction.guildId);
     queue.songs = [];
     await queue.stop().catch(() => {});
     try {

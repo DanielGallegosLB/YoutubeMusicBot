@@ -27,16 +27,28 @@ module.exports = {
         ephemeral: true,
       });
 
-      const playlist = await client.distube.createCustomPlaylist(pl.tracks, {
-        member: interaction.member,
-        properties: { name: pl.name, url: interaction.url },
-        parallel: true
-      });
-
-      await client.distube.play(vc, playlist, {
+      const first = pl.tracks[0];
+      await client.distube.play(vc, first.url || first.name, {
         member: interaction.member,
         textChannel: interaction.channel,
       });
+
+      client.playlistLoading.set(interaction.guild.id, true);
+      (async () => {
+        for (const t of pl.tracks.slice(1)) {
+          if (!client.playlistLoading.get(interaction.guild.id)) break;
+          try {
+            await client.distube.play(vc, t.url || t.name, {
+              member: interaction.member,
+              textChannel: interaction.channel,
+            });
+          } catch (e) {
+            client.logger.error("Error al cargar pista de lista:", e);
+          }
+          await new Promise((r) => setTimeout(r, 250));
+        }
+        client.playlistLoading.delete(interaction.guild.id);
+      })();
 
       setTimeout(() => interaction.deleteReply().catch(() => {}), 5000);
     } catch (e) {

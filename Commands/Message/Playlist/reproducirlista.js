@@ -29,13 +29,20 @@ module.exports = {
       textChannel: message.channel,
       message,
     });
+
+    client.playlistLoading.set(message.guild.id, true);
     for (const t of pl.tracks.slice(1)) {
+      if (!client.playlistLoading.get(message.guild.id)) break;
       await client.distube.play(vc, t.url || t.name, {
         member: message.member,
         textChannel: message.channel,
         message,
       });
+      // Tiempo de espera para procesar interacciones
+      await new Promise((r) => setTimeout(r, 250));
     }
-    return client.embed(message, `${client.config.emoji.SUCCESS} Playing playlist \`${pl.name}\` (${pl.tracks.length} tracks).`);
+    client.playlistLoading.delete(message.guild.id);
+
+    return client.embed(message, `${client.config.emoji.SUCCESS} Reproduciendo lista \`${pl.name}\` (${pl.tracks.length} pistas).`);
   },
 };
