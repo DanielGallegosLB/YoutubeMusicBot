@@ -4,7 +4,7 @@ const Store = require("../../../handlers/PlaylistStore");
 
 module.exports = {
   name: "renombrarlista",
-  aliases: ["plrename"],
+  aliases: ["plrename", "renameplaylist"],
   description: `Renombra una de tus listas de reproducción`,
   userPermissions: PermissionFlagsBits.SendMessages,
   botPermissions: PermissionFlagsBits.SendMessages,

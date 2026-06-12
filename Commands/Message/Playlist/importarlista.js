@@ -4,7 +4,7 @@ const Store = require("../../../handlers/PlaylistStore");
 
 module.exports = {
   name: "importarlista",
-  aliases: ["plimport"],
+  aliases: ["plimport", "importplaylist"],
   description: `Importa una lista de reproducción desde un enlace`,
   userPermissions: PermissionFlagsBits.SendMessages,
   botPermissions: PermissionFlagsBits.SendMessages,

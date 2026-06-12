@@ -4,7 +4,7 @@ const { Queue } = require("distube");
 
 module.exports = {
   name: "repetir",
-  aliases: ["lp", "lop"],
+  aliases: ["lp", "lop", "loop"],
   description: `Cambia el modo de repetición`,
   userPermissions: PermissionFlagsBits.Connect,
   botPermissions: PermissionFlagsBits.Connect,

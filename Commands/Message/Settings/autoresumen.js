@@ -4,7 +4,7 @@ const { Queue } = require("distube");
 
 module.exports = {
   name: "autoresumen",
-  aliases: ["atresume"],
+  aliases: ["atresume", "autoresume"],
   description: `Activa o desactiva el resumen automático tras un reinicio`,
   userPermissions: PermissionFlagsBits.ManageGuild,
   botPermissions: PermissionFlagsBits.ManageGuild,

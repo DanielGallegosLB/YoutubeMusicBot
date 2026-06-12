@@ -3,14 +3,26 @@ const Store = require("../../../handlers/PlaylistStore");
 
 module.exports = {
   name: "renombrarlista",
+  name_localizations: {
+    "en-US": "renameplaylist",
+    "en-GB": "renameplaylist",
+  },
   description: `Renombra una de tus listas de reproducción`,
+  description_localizations: {
+    "en-US": "Rename a playlist",
+    "en-GB": "Rename a playlist",
+  },
   userPermissions: PermissionFlagsBits.SendMessages,
   botPermissions: PermissionFlagsBits.SendMessages,
   category: "Playlist",
   cooldown: 3,
   type: ApplicationCommandType.ChatInput,
   options: [
-    { name: "old", description: "Renombra una de tus listas de reproducción", type: ApplicationCommandOptionType.String, required: true, autocomplete: true },
+    { name: "old", description: "Renombra una de tus listas de reproducción",
+  description_localizations: {
+    "en-US": "Rename a playlist",
+    "en-GB": "Rename a playlist",
+  }, type: ApplicationCommandOptionType.String, required: true, autocomplete: true },
     { name: "new", description: "New playlist name", type: ApplicationCommandOptionType.String, required: true },
   ],
   run: async (client, interaction) => {

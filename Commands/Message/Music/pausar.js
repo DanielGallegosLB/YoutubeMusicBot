@@ -4,7 +4,7 @@ const { Queue } = require("distube");
 
 module.exports = {
   name: "pausar",
-  aliases: ["pu", "pj"],
+  aliases: ["pu", "pj", "pause"],
   description: `Pausa la música actual`,
   userPermissions: PermissionFlagsBits.Connect,
   botPermissions: PermissionFlagsBits.Connect,

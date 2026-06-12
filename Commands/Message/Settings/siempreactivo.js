@@ -4,7 +4,7 @@ const { Queue } = require("distube");
 
 module.exports = {
   name: "siempreactivo",
-  aliases: ["24vc"],
+  aliases: ["24vc", "247"],
   description: `Activa o desactiva el modo 24/7`,
   userPermissions: PermissionFlagsBits.ManageGuild,
   botPermissions: PermissionFlagsBits.ManageGuild,

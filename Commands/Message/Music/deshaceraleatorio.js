@@ -4,7 +4,7 @@ const { Queue } = require("distube");
 
 module.exports = {
   name: "deshaceraleatorio",
-  aliases: ["unsfl"],
+  aliases: ["unsfl", "unshuffle"],
   description: `Deshace la mezcla de la cola`,
   userPermissions: PermissionFlagsBits.Connect,
   botPermissions: PermissionFlagsBits.Connect,

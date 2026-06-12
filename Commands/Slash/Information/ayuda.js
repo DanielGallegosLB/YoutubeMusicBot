@@ -8,7 +8,15 @@ const { Queue } = require("distube");
 
 module.exports = {
   name: "ayuda",
+  name_localizations: {
+    "en-US": "help",
+    "en-GB": "help",
+  },
   description: `¿Necesitas ayuda? Mira todos mis comandos`,
+  description_localizations: {
+    "en-US": "Need help? View all my commands",
+    "en-GB": "Need help? View all my commands",
+  },
   userPermissions: PermissionFlagsBits.SendMessages,
   botPermissions: PermissionFlagsBits.EmbedLinks,
   category: "Information",

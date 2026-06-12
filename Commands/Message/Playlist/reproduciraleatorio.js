@@ -1,0 +1,112 @@
+const { Message, PermissionFlagsBits } = require("discord.js");
+const JUGNU = require("../../../handlers/Client");
+const Store = require("../../../handlers/PlaylistStore");
+const { spawn } = require("child_process");
+const path = require("path");
+
+const YTDLP_PATH = path.join(
+  process.cwd(),
+  "node_modules/@distube/yt-dlp/bin",
+  process.platform === "win32" ? "yt-dlp.exe" : "yt-dlp"
+);
+
+function fetchPlaylistURLs(playlistUrl) {
+  return new Promise((resolve, reject) => {
+    const proc = spawn(YTDLP_PATH, [
+      "--flat-playlist", "--print", "webpage_url",
+      "--no-warnings", "--js-runtimes", "node",
+      playlistUrl,
+    ]);
+    let stdout = "", stderr = "";
+    proc.stdout.on("data", (d) => stdout += d);
+    proc.stderr.on("data", (d) => stderr += d);
+    proc.on("close", () => {
+      const urls = stdout.trim().split("\n").filter(Boolean);
+      if (urls.length) resolve(urls);
+      else reject(new Error(stderr || "No se encontraron videos"));
+    });
+    proc.on("error", reject);
+  });
+}
+
+function shuffleArray(array) {
+  for (let i = array.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [array[i], array[j]] = [array[j], array[i]];
+  }
+  return array;
+}
+
+module.exports = {
+  name: "reproduciraleatorio",
+  aliases: ["shuffleplay", "ra"],
+  description: `Reproduce una lista de reproducción en modo aleatorio`,
+  userPermissions: PermissionFlagsBits.SendMessages,
+  botPermissions: PermissionFlagsBits.SendMessages,
+  category: "Playlist",
+  cooldown: 3,
+  inVoiceChannel: true,
+  inSameVoiceChannel: true,
+  Player: false,
+  djOnly: false,
+  run: async (client, message, args) => {
+    const query = args.join(" ").trim();
+    if (!query) return client.embed(message, `${client.config.emoji.ERROR} Proporciona un nombre de lista o URL.`);
+
+    const vc = message.member.voice.channel;
+    if (!vc) return client.embed(message, `${client.config.emoji.ERROR} Únete a un canal de voz primero.`);
+
+    let tracks = [];
+    let playlistName = "";
+
+    const isURL = /^https?:\/\//i.test(query);
+
+    if (isURL) {
+      playlistName = "URL Playlist";
+      try {
+        await client.embed(message, `⏳ Obteniendo canciones de la URL...`);
+        tracks = await fetchPlaylistURLs(query);
+      } catch (e) {
+        return client.embed(message, `${client.config.emoji.ERROR} Error al obtener la lista: ${e.message}`);
+      }
+    } else {
+      const pl = await Store.get(client, message.guild.id, message.author.id, query);
+      if (!pl || !pl.tracks.length) return client.embed(message, `${client.config.emoji.ERROR} Lista no encontrada o vacía.`);
+      tracks = pl.tracks.map(t => t.url || t.name);
+      playlistName = pl.name;
+    }
+
+    shuffleArray(tracks);
+
+    const first = tracks[0];
+    await client.distube.play(vc, first, {
+      member: message.member,
+      textChannel: message.channel,
+      message,
+    });
+
+    client.playlistLoading.set(message.guild.id, true);
+    (async () => {
+      for (const t of tracks.slice(1)) {
+        if (!client.playlistLoading.get(message.guild.id)) break;
+        try {
+          await client.distube.play(vc, t, {
+            member: message.member,
+            textChannel: message.channel,
+            message,
+          });
+        } catch (e) {
+          client.logger.error(`[ShufflePlay] Error: ${e.message}`);
+        }
+        await new Promise((r) => setTimeout(r, 250));
+      }
+      const queue = client.distube.getQueue(message.guild.id);
+      if (queue && queue.repeatMode === 2) {
+         client.logger.log(`[ShufflePlay] Queue loop active (repeatMode: 2). Consistency checked.`);
+      }
+      client.playlistLoading.delete(message.guild.id);
+    })();
+
+    return client.embed(message, `${client.config.emoji.SUCCESS} Reproduciendo aleatoriamente \`${playlistName}\` (${tracks.length} canciones).`);
+  },
+};

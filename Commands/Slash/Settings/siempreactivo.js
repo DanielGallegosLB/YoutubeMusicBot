@@ -8,7 +8,15 @@ const { Queue } = require("distube");
 
 module.exports = {
   name: "siempreactivo",
+  name_localizations: {
+    "en-US": "247",
+    "en-GB": "247",
+  },
   description: `Activa o desactiva el modo 24/7`,
+  description_localizations: {
+    "en-US": "Toggle 24/7 mode on or off",
+    "en-GB": "Toggle 24/7 mode on or off",
+  },
   userPermissions: PermissionFlagsBits.ManageGuild,
   botPermissions: PermissionFlagsBits.EmbedLinks,
   category: "Settings",

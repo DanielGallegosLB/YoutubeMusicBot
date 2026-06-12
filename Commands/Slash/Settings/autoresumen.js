@@ -8,7 +8,15 @@ const { Queue } = require("distube");
 
 module.exports = {
   name: "autoresumen",
+  name_localizations: {
+    "en-US": "autoresume",
+    "en-GB": "autoresume",
+  },
   description: `Activa o desactiva el resumen automático tras un reinicio`,
+  description_localizations: {
+    "en-US": "Toggle autoresume on or off",
+    "en-GB": "Toggle autoresume on or off",
+  },
   userPermissions: PermissionFlagsBits.ManageGuild,
   botPermissions: PermissionFlagsBits.EmbedLinks,
   category: "Settings",

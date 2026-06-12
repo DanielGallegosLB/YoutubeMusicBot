@@ -9,7 +9,15 @@ const { Queue } = require("distube");
 
 module.exports = {
   name: "configurarmusica",
+  name_localizations: {
+    "en-US": "musicsetup",
+    "en-GB": "musicsetup",
+  },
   description: `Configura el canal de música`,
+  description_localizations: {
+    "en-US": "Set up the music channel",
+    "en-GB": "Set up the music channel",
+  },
   userPermissions: PermissionFlagsBits.ManageChannels,
   botPermissions: PermissionFlagsBits.ManageChannels,
   category: "Settings",

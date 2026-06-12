@@ -4,7 +4,7 @@ const { Queue } = require("distube");
 
 module.exports = {
   name: "avanzara",
-  aliases: ["sk"],
+  aliases: ["sk", "forward"],
   description: `Avanza a un tiempo específico en la canción`,
   userPermissions: PermissionFlagsBits.Connect,
   botPermissions: PermissionFlagsBits.Connect,

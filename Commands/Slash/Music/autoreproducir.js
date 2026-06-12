@@ -8,7 +8,15 @@ const { Queue } = require("distube");
 
 module.exports = {
   name: "autoreproducir",
+  name_localizations: {
+    "en-US": "autoplay",
+    "en-GB": "autoplay",
+  },
   description: `Activa o desactiva la autorreproducción`,
+  description_localizations: {
+    "en-US": "Toggle autoplay on or off",
+    "en-GB": "Toggle autoplay on or off",
+  },
   userPermissions: PermissionFlagsBits.Connect,
   botPermissions: PermissionFlagsBits.Connect,
   category: "Music",

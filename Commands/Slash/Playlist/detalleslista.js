@@ -3,14 +3,36 @@ const Store = require("../../../handlers/PlaylistStore");
 
 module.exports = {
   name: "detalleslista",
+  name_localizations: {
+    "en-US": "playlistdetails",
+    "en-GB": "playlistdetails",
+  },
   description: `Muestra los detalles de una lista de reproducción`,
+  description_localizations: {
+    "en-US": "View playlist details",
+    "en-GB": "View playlist details",
+  },
   userPermissions: PermissionFlagsBits.SendMessages,
   botPermissions: PermissionFlagsBits.SendMessages,
   category: "Playlist",
   cooldown: 3,
   type: ApplicationCommandType.ChatInput,
   options: [
-    { name: "nombre", description: "Nombre de la lista", type: ApplicationCommandOptionType.String, required: true, autocomplete: true },
+    {
+      name: "nombre",
+      name_localizations: {
+        "en-US": "name",
+        "en-GB": "name",
+      },
+      description: "Nombre de la lista",
+      description_localizations: {
+        "en-US": "The name of the playlist",
+        "en-GB": "The name of the playlist",
+      },
+  description_localizations: {
+    "en-US": "View playlist details",
+    "en-GB": "View playlist details",
+  }, type: ApplicationCommandOptionType.String, required: true, autocomplete: true },
   ],
   run: async (client, interaction) => {
     const name = interaction.options.getString("nombre");

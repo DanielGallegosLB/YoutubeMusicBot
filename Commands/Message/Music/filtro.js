@@ -10,7 +10,7 @@ const { Queue } = require("distube");
 
 module.exports = {
   name: "filtro",
-  aliases: ["fl", "filters"],
+  aliases: ["fl", "filters", "filter"],
   description: `Añade un filtro a la música`,
   userPermissions: PermissionFlagsBits.Connect,
   botPermissions: PermissionFlagsBits.Connect,

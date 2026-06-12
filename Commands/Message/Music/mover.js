@@ -4,7 +4,7 @@ const { Queue } = require("distube");
 
 module.exports = {
   name: "mover",
-  aliases: ["mv", "nvs"],
+  aliases: ["mv", "nvs", "move"],
   description: `Mueve una canción en la cola`,
   userPermissions: PermissionFlagsBits.Connect,
   botPermissions: PermissionFlagsBits.Connect,

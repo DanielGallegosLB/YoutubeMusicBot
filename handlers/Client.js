@@ -128,7 +128,7 @@ class JUGNU extends Client {
 
   embed(interaction, data) {
     let user = interaction.user ? interaction.user : interaction.author;
-    if (interaction.deferred) {
+    if (interaction.deferred || interaction.replied) {
       interaction
         .followUp({
           embeds: [

@@ -4,7 +4,7 @@ const { Queue } = require("distube");
 
 module.exports = {
   name: "autoreproducir",
-  aliases: ["ap", "atp"],
+  aliases: ["ap", "atp", "autoplay"],
   description: `Activa o desactiva la autorreproducción`,
   userPermissions: PermissionFlagsBits.Connect,
   botPermissions: PermissionFlagsBits.Connect,

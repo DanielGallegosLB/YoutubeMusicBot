@@ -4,7 +4,7 @@ const Store = require("../../../handlers/PlaylistStore");
 
 module.exports = {
   name: "exportarlista",
-  aliases: ["plexport"],
+  aliases: ["plexport", "exportplaylist"],
   description: `Exporta tu lista de reproducción`,
   userPermissions: PermissionFlagsBits.SendMessages,
   botPermissions: PermissionFlagsBits.SendMessages,

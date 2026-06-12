@@ -4,7 +4,7 @@ const { Queue } = require("distube");
 
 module.exports = {
   name: "saltaryreproducir",
-  aliases: ["ps", "pskip"],
+  aliases: ["ps", "pskip", "skipandplay"],
   description: `Salta la canción actual y reproduce una nueva`,
   userPermissions: PermissionFlagsBits.Connect,
   botPermissions: PermissionFlagsBits.Connect,

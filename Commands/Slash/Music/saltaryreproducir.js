@@ -83,7 +83,15 @@ function fetchPlaylistURLs(playlistUrl) {
 
 module.exports = {
   name: "saltaryreproducir",
+  name_localizations: {
+    "en-US": "skipandplay",
+    "en-GB": "skipandplay",
+  },
   description: `Salta la canción actual y reproduce una nueva`,
+  description_localizations: {
+    "en-US": "Skip current song and play a new one",
+    "en-GB": "Skip current song and play a new one",
+  },
   userPermissions: PermissionFlagsBits.Connect,
   botPermissions: PermissionFlagsBits.Connect,
   category: "Music",
@@ -96,7 +104,15 @@ module.exports = {
   options: [
     {
       name: "cancion",
-      description: `La canción que quieres reproducir`,
+      name_localizations: {
+        "en-US": "song",
+        "en-GB": "song",
+      },
+      description: "La canción que quieres reproducir",
+      description_localizations: {
+        "en-US": "The name or link of the song/playlist",
+        "en-GB": "The name or link of the song/playlist",
+      },
       type: ApplicationCommandOptionType.String,
       required: true,
     },
@@ -178,6 +194,10 @@ module.exports = {
             }
             // Tiempo de espera para procesar interacciones
             await new Promise((r) => setTimeout(r, 250));
+          }
+
+          if (queue && queue.repeatMode === 2) {
+            client.logger.log(`[Playlist Skip] Queue loop is active (repeatMode: 2) in Guild ${interaction.guildId}. New items included.`);
           }
 
           if (

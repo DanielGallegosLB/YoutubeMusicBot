@@ -4,7 +4,7 @@ const { Queue } = require("distube");
 
 module.exports = {
   name: "configurarmusica",
-  aliases: ["setmusic", "setup"],
+  aliases: ["setmusic", "setup", "musicsetup"],
   description: `Configura el canal de música`,
   userPermissions: PermissionFlagsBits.ManageGuild,
   botPermissions: PermissionFlagsBits.ManageChannels,

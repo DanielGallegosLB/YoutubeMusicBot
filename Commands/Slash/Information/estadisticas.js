@@ -12,7 +12,15 @@ const { msToDuration, formatBytes } = require("../../../handlers/functions");
 
 module.exports = {
   name: "estadisticas",
+  name_localizations: {
+    "en-US": "stats",
+    "en-GB": "stats",
+  },
   description: `Ver las estadísticas del bot`,
+  description_localizations: {
+    "en-US": "View bot statistics",
+    "en-GB": "View bot statistics",
+  },
   userPermissions: PermissionFlagsBits.SendMessages,
   botPermissions: PermissionFlagsBits.EmbedLinks,
   category: "Information",

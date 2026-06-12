@@ -6,7 +6,7 @@ const { swap_pages } = require("../../../handlers/functions");
 
 module.exports = {
   name: "letra",
-  aliases: ["lr"],
+  aliases: ["lr", "lyrics"],
   description: `Obtén la letra de una canción`,
   userPermissions: PermissionFlagsBits.Connect,
   botPermissions: PermissionFlagsBits.Connect,

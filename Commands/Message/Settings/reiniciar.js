@@ -4,7 +4,7 @@ const { Queue } = require("distube");
 
 module.exports = {
   name: "reiniciar",
-  aliases: ["reset"],
+  aliases: ["reset", "restart"],
   description: `Reinicia la configuración del bot`,
   userPermissions: PermissionFlagsBits.ManageGuild,
   botPermissions: PermissionFlagsBits.ManageGuild,

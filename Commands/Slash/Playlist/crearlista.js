@@ -4,14 +4,36 @@ const JUGNU = require("../../../handlers/Client");
 
 module.exports = {
   name: "crearlista",
+  name_localizations: {
+    "en-US": "createplaylist",
+    "en-GB": "createplaylist",
+  },
   description: `Crea una nueva lista de reproducción personalizada`,
+  description_localizations: {
+    "en-US": "Create a new playlist",
+    "en-GB": "Create a new playlist",
+  },
   userPermissions: PermissionFlagsBits.SendMessages,
   botPermissions: PermissionFlagsBits.SendMessages,
   category: "Playlist",
   cooldown: 3,
   type: ApplicationCommandType.ChatInput,
   options: [
-    { name: "nombre", description: "Nombre de la lista", type: ApplicationCommandOptionType.String, required: true },
+    {
+      name: "nombre",
+      name_localizations: {
+        "en-US": "name",
+        "en-GB": "name",
+      },
+      description: "Nombre de la lista",
+      description_localizations: {
+        "en-US": "The name of the playlist",
+        "en-GB": "The name of the playlist",
+      },
+  description_localizations: {
+    "en-US": "Create a new playlist",
+    "en-GB": "Create a new playlist",
+  }, type: ApplicationCommandOptionType.String, required: true },
   ],
   run: async (client, interaction) => {
     const name = interaction.options.getString("nombre");

@@ -4,7 +4,7 @@ const Store = require("../../../handlers/PlaylistStore");
 
 module.exports = {
   name: "quitarcancionlista",
-  aliases: ["plremovetrack", "plrm"],
+  aliases: ["plremovetrack", "plrm", "removefromplaylist"],
   description: `Quita una canción de tu lista de reproducción`,
   userPermissions: PermissionFlagsBits.SendMessages,
   botPermissions: PermissionFlagsBits.SendMessages,

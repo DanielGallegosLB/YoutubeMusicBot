@@ -3,14 +3,36 @@ const Store = require("../../../handlers/PlaylistStore");
 
 module.exports = {
   name: "importarlista",
+  name_localizations: {
+    "en-US": "importplaylist",
+    "en-GB": "importplaylist",
+  },
   description: `Importa una lista de reproducción desde un enlace`,
+  description_localizations: {
+    "en-US": "Import a playlist",
+    "en-GB": "Import a playlist",
+  },
   userPermissions: PermissionFlagsBits.SendMessages,
   botPermissions: PermissionFlagsBits.SendMessages,
   category: "Playlist",
   cooldown: 3,
   type: ApplicationCommandType.ChatInput,
   options: [
-    { name: "nombre", description: "Nombre para la nueva lista", type: ApplicationCommandOptionType.String, required: true, autocomplete: true },
+    {
+      name: "nombre",
+      name_localizations: {
+        "en-US": "name",
+        "en-GB": "name",
+      },
+      description: "Nombre para la nueva lista",
+      description_localizations: {
+        "en-US": "The name of the playlist",
+        "en-GB": "The name of the playlist",
+      },
+  description_localizations: {
+    "en-US": "Import a playlist",
+    "en-GB": "Import a playlist",
+  }, type: ApplicationCommandOptionType.String, required: true, autocomplete: true },
     { name: "json", description: "Nombre para la nueva lista", type: ApplicationCommandOptionType.String, required: false },
     { name: "attachment", description: "Nombre para la nueva lista", type: ApplicationCommandOptionType.Attachment, required: false },
   ],

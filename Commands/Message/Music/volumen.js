@@ -4,7 +4,7 @@ const { Queue } = require("distube");
 
 module.exports = {
   name: "volumen",
-  aliases: ["vol"],
+  aliases: ["vol", "volume"],
   description: `Cambia el volumen del bot`,
   userPermissions: PermissionFlagsBits.Connect,
   botPermissions: PermissionFlagsBits.Connect,

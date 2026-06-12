@@ -11,7 +11,7 @@ const { numberEmojis } = require("../../../settings/config");
 
 module.exports = {
   name: "buscar",
-  aliases: ["sr", "find"],
+  aliases: ["sr", "find", "search"],
   description: `Busca canciones en YouTube`,
   userPermissions: PermissionFlagsBits.Connect,
   botPermissions: PermissionFlagsBits.Connect,

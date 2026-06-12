@@ -4,7 +4,7 @@ const { Queue } = require("distube");
 
 module.exports = {
   name: "dj",
-  aliases: ["setupdj"],
+  aliases: ["setupdj", "dj"],
   description: `Configura el sistema DJ`,
   userPermissions: PermissionFlagsBits.ManageGuild,
   botPermissions: PermissionFlagsBits.ManageGuild,

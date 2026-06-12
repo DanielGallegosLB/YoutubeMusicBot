@@ -4,7 +4,7 @@ const Store = require("../../../handlers/PlaylistStore");
 
 module.exports = {
   name: "detalleslista",
-  aliases: ["pldetails", "plinfo"],
+  aliases: ["pldetails", "plinfo", "playlistdetails"],
   description: `Muestra los detalles de una lista de reproducción`,
   userPermissions: PermissionFlagsBits.SendMessages,
   botPermissions: PermissionFlagsBits.SendMessages,

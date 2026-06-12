@@ -4,7 +4,7 @@ const { Queue } = require("distube");
 
 module.exports = {
   name: "quitarrepetidos",
-  aliases: ["rmdupes", "rmd"],
+  aliases: ["rmdupes", "rmd", "removedupes"],
   description: `Quita las canciones repetidas de la cola`,
   userPermissions: PermissionFlagsBits.Connect,
   botPermissions: PermissionFlagsBits.Connect,

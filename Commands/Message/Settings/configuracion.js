@@ -4,7 +4,7 @@ const { Queue } = require("distube");
 
 module.exports = {
   name: "configuracion",
-  aliases: ["cnf"],
+  aliases: ["cnf", "settings"],
   description: `Muestra la configuración del bot`,
   userPermissions: PermissionFlagsBits.SendMessages,
   botPermissions: PermissionFlagsBits.EmbedLinks,

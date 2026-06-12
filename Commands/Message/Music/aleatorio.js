@@ -4,7 +4,7 @@ const { Queue } = require("distube");
 
 module.exports = {
   name: "aleatorio",
-  aliases: ["sfl"],
+  aliases: ["sfl", "shuffle"],
   description: `Mezcla la cola de canciones`,
   userPermissions: PermissionFlagsBits.Connect,
   botPermissions: PermissionFlagsBits.Connect,

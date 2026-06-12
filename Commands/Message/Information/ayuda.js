@@ -4,7 +4,7 @@ const { Queue } = require("distube");
 
 module.exports = {
   name: "ayuda",
-  aliases: ["h","cmds","comandos"],
+  aliases: ["h", "cmds", "comandos", "help"],
   description: `¿Necesitas ayuda? Mira todos mis comandos`,
   userPermissions: PermissionFlagsBits.SendMessages,
   botPermissions: PermissionFlagsBits.EmbedLinks,

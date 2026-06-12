@@ -7,7 +7,15 @@ const JUGNU = require("../../../handlers/Client");
 
 module.exports = {
   name: "calidadalta",
+  name_localizations: {
+    "en-US": "highquality",
+    "en-GB": "highquality",
+  },
   description: "Activa o desactiva el modo de alta calidad",
+  description_localizations: {
+    "en-US": "Toggle high quality on or off",
+    "en-GB": "Toggle high quality on or off",
+  },
   userPermissions: PermissionFlagsBits.ManageGuild,
   botPermissions: PermissionFlagsBits.SendMessages,
   category: "Settings",

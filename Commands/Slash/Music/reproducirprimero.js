@@ -83,7 +83,15 @@ function fetchPlaylistURLs(playlistUrl) {
 
 module.exports = {
   name: "reproducirprimero",
+  name_localizations: {
+    "en-US": "playfirst",
+    "en-GB": "playfirst",
+  },
   description: `Añade una canción al principio de la cola`,
+  description_localizations: {
+    "en-US": "Play a song at the beginning of the queue",
+    "en-GB": "Play a song at the beginning of the queue",
+  },
   userPermissions: PermissionFlagsBits.Connect,
   botPermissions: PermissionFlagsBits.Connect,
   category: "Music",
@@ -96,7 +104,15 @@ module.exports = {
   options: [
     {
       name: "cancion",
-      description: `La canción que quieres añadir`,
+      name_localizations: {
+        "en-US": "song",
+        "en-GB": "song",
+      },
+      description: "La canción que quieres añadir",
+      description_localizations: {
+        "en-US": "The name or link of the song/playlist",
+        "en-GB": "The name or link of the song/playlist",
+      },
       type: ApplicationCommandOptionType.String,
       required: true,
     },
@@ -178,6 +194,10 @@ module.exports = {
             }
             // Tiempo de espera para procesar interacciones
             await new Promise((r) => setTimeout(r, 250));
+          }
+
+          if (queue && queue.repeatMode === 2) {
+            client.logger.log(`[Playlist Top] Queue loop is active (repeatMode: 2) in Guild ${interaction.guildId}. New items included.`);
           }
 
           if (

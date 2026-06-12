@@ -9,7 +9,15 @@ const { Queue } = require("distube");
 
 module.exports = {
   name: "avanzara",
+  name_localizations: {
+    "en-US": "forward",
+    "en-GB": "forward",
+  },
   description: `Avanza a un tiempo específico en la canción`,
+  description_localizations: {
+    "en-US": "Forward the current song",
+    "en-GB": "Forward the current song",
+  },
   userPermissions: PermissionFlagsBits.Connect,
   botPermissions: PermissionFlagsBits.Connect,
   category: "Music",

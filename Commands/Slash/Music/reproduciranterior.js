@@ -8,7 +8,15 @@ const { Queue } = require("distube");
 
 module.exports = {
   name: "reproduciranterior",
+  name_localizations: {
+    "en-US": "previous",
+    "en-GB": "previous",
+  },
   description: `Reproduce la canción anterior`,
+  description_localizations: {
+    "en-US": "Play the previous song",
+    "en-GB": "Play the previous song",
+  },
   userPermissions: PermissionFlagsBits.Connect,
   botPermissions: PermissionFlagsBits.Connect,
   category: "Music",

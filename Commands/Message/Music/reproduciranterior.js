@@ -4,7 +4,7 @@ const { Queue } = require("distube");
 
 module.exports = {
   name: "reproduciranterior",
-  aliases: ["pp", "playp"],
+  aliases: ["pp", "playp", "previous"],
   description: `Reproduce la canción anterior`,
   userPermissions: PermissionFlagsBits.Connect,
   botPermissions: PermissionFlagsBits.Connect,

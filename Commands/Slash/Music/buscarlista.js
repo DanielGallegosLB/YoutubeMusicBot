@@ -10,7 +10,15 @@ const { Queue } = require("distube");
 
 module.exports = {
   name: "buscarlista",
+  name_localizations: {
+    "en-US": "searchplaylist",
+    "en-GB": "searchplaylist",
+  },
   description: `Busca una canción dentro de la lista actual`,
+  description_localizations: {
+    "en-US": "Search for a playlist",
+    "en-GB": "Search for a playlist",
+  },
   userPermissions: PermissionFlagsBits.SendMessages,
   botPermissions: PermissionFlagsBits.EmbedLinks,
   category: "Music",

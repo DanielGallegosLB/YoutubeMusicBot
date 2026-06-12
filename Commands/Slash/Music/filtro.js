@@ -11,7 +11,15 @@ const { Queue } = require("distube");
 
 module.exports = {
   name: "filtro",
+  name_localizations: {
+    "en-US": "filter",
+    "en-GB": "filter",
+  },
   description: `Añade un filtro a la música`,
+  description_localizations: {
+    "en-US": "Apply a filter to the music",
+    "en-GB": "Apply a filter to the music",
+  },
   userPermissions: PermissionFlagsBits.Connect,
   botPermissions: PermissionFlagsBits.Connect,
   category: "Music",

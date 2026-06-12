@@ -4,7 +4,7 @@ const Store = require("../../../handlers/PlaylistStore");
 
 module.exports = {
   name: "borrarlista",
-  aliases: ["pldelete", "pldel"],
+  aliases: ["pldelete", "pldel", "deleteplaylist"],
   description: `Borra una lista de reproducción personalizada`,
   userPermissions: PermissionFlagsBits.SendMessages,
   botPermissions: PermissionFlagsBits.SendMessages,

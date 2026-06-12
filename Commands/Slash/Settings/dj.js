@@ -9,7 +9,15 @@ const { Queue } = require("distube");
 
 module.exports = {
   name: "dj",
+  name_localizations: {
+    "en-US": "dj",
+    "en-GB": "dj",
+  },
   description: `Configura el sistema DJ`,
+  description_localizations: {
+    "en-US": "Configure the DJ role",
+    "en-GB": "Configure the DJ role",
+  },
   userPermissions: PermissionFlagsBits.ManageGuild,
   botPermissions: PermissionFlagsBits.ManageGuild,
   category: "Settings",
@@ -26,8 +34,16 @@ module.exports = {
       type: ApplicationCommandOptionType.Subcommand,
       options: [
         {
-          name: "rol",
-          description: `Rol para el sistema DJ`,
+      name: "rol",
+      name_localizations: {
+        "en-US": "role",
+        "en-GB": "role",
+      },
+      description: "Rol para el sistema DJ",
+      description_localizations: {
+        "en-US": "The DJ role",
+        "en-GB": "The DJ role",
+      },
           type: ApplicationCommandOptionType.Role,
           required: true,
         },

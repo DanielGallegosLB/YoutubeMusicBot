@@ -3,14 +3,33 @@ const Store = require("../../../handlers/PlaylistStore");
 
 module.exports = {
   name: "reproducirlista",
+  name_localizations: {
+    "en-US": "playplaylist",
+    "en-GB": "playplaylist",
+  },
   description: `Reproduce una de tus listas de reproducción`,
+  description_localizations: {
+    "en-US": "Play a saved playlist",
+    "en-GB": "Play a saved playlist",
+  },
   userPermissions: PermissionFlagsBits.SendMessages,
   botPermissions: PermissionFlagsBits.SendMessages,
   category: "Playlist",
   cooldown: 3,
   type: ApplicationCommandType.ChatInput,
   options: [
-    { name: "nombre", description: "Nombre de la lista", type: ApplicationCommandOptionType.String, required: true, autocomplete: true },
+    {
+      name: "nombre",
+      name_localizations: {
+        "en-US": "name",
+        "en-GB": "name",
+      },
+      description: "Nombre de la lista",
+      description_localizations: {
+        "en-US": "The name of the playlist",
+        "en-GB": "The name of the playlist",
+      },
+      type: ApplicationCommandOptionType.String, required: true, autocomplete: true },
   ],
   run: async (client, interaction) => {
     const name = interaction.options.getString("nombre");
@@ -22,10 +41,16 @@ module.exports = {
       return client.embed(interaction, `${client.config.emoji.ERROR} Debes unirte a __mi__ canal de voz.`);
 
     try {
-      await interaction.reply({
-        content: `⏳ Cargando lista \`${pl.name}\` (${pl.tracks.length} canciones)...`,
-        ephemeral: true,
-      });
+      if (!interaction.deferred && !interaction.replied) {
+        await interaction.reply({
+          content: `⏳ Cargando lista \`${pl.name}\` (${pl.tracks.length} canciones)...`,
+          ephemeral: true,
+        });
+      } else {
+        await interaction.editReply({
+          content: `⏳ Cargando lista \`${pl.name}\` (${pl.tracks.length} canciones)...`,
+        });
+      }
 
       const first = pl.tracks[0];
       await client.distube.play(vc, first.url || first.name, {
@@ -46,6 +71,10 @@ module.exports = {
             client.logger.error("Error al cargar pista de lista:", e);
           }
           await new Promise((r) => setTimeout(r, 250));
+        }
+        const queue = client.distube.getQueue(interaction.guild.id);
+        if (queue && queue.repeatMode === 2) {
+          client.logger.log(`[Playlist Play] Queue loop is active (repeatMode: 2) in Guild ${interaction.guildId}. New items included.`);
         }
         client.playlistLoading.delete(interaction.guild.id);
       })();

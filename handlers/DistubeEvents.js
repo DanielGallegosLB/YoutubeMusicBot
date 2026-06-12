@@ -63,6 +63,11 @@ module.exports = async (client) => {
   // events
   client.distube.on("playSong", async (queue, song) => {
     console.log(`[DisTube] Playing: ${song.name} in ${queue.textChannel.guild.name}`);
+    
+    // Update persistent request channel if it exists
+    await client.updatequeue(queue);
+    await client.updateplayer(queue);
+
     if (!queue._sessionSaved && queue.songs.length === 1 && !queue._sessionSourcePlaylist) {
       const session = createSession(queue, "song", song.name, song.url, song.user, [song]);
       await saveSession(client, queue.textChannel.guildId, session);
@@ -70,11 +75,7 @@ module.exports = async (client) => {
     }
 
     let data = await client.music.get(`${queue.textChannel.guildId}.music`);
-    if (data) {
-      await client.updatequeue(queue);
-      await client.updateplayer(queue);
-      if (data.channel === queue.textChannel.id) return;
-    }
+    if (data && data.channel === queue.textChannel.id) return;
 
     queue.textChannel
       .send({
@@ -110,12 +111,14 @@ module.exports = async (client) => {
 
   client.distube.on("addSong", async (queue, song) => {
     console.log(`[DisTube] Song Added: ${song.name}`);
+    
+    // Update persistent request channel if it exists
+    await client.updatequeue(queue);
+    await client.updateplayer(queue);
+
     let data = await client.music.get(`${queue.textChannel.guildId}.music`);
-    if (data) {
-      await client.updatequeue(queue);
-      await client.updateplayer(queue);
-      if (data.channel === queue.textChannel.id) return;
-    }
+    if (data && data.channel === queue.textChannel.id) return;
+
     queue.textChannel
       .send({
         embeds: [
@@ -157,6 +160,11 @@ module.exports = async (client) => {
 
   client.distube.on("addList", async (queue, playlist) => {
     console.log(`[DisTube] Playlist Added: ${playlist.name} (${playlist.songs.length} songs)`);
+    
+    // Update persistent request channel if it exists
+    await client.updatequeue(queue);
+    await client.updateplayer(queue);
+
     if (!queue._sessionSaved) {
       const session = createSession(queue, "playlist", playlist.name, playlist.url, playlist.user, playlist.songs);
       await saveSession(client, queue.textChannel.guildId, session);
@@ -164,11 +172,7 @@ module.exports = async (client) => {
     }
 
     let data = await client.music.get(`${queue.textChannel.guildId}.music`);
-    if (data) {
-      await client.updatequeue(queue);
-      await client.updateplayer(queue);
-      if (data.channel === queue.textChannel.id) return;
-    }
+    if (data && data.channel === queue.textChannel.id) return;
 
     queue.textChannel
       .send({

@@ -4,7 +4,7 @@ const { Queue } = require("distube");
 
 module.exports = {
   name: "sonandoahora",
-  aliases: ["np"],
+  aliases: ["np", "nowplaying"],
   description: `Muestra la canción que se está reproduciendo ahora`,
   userPermissions: PermissionFlagsBits.Connect,
   botPermissions: PermissionFlagsBits.Connect,

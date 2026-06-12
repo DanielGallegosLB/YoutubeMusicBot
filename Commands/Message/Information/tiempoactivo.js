@@ -4,7 +4,7 @@ const { Queue } = require("distube");
 
 module.exports = {
   name: "tiempoactivo",
-  aliases: ["up"],
+  aliases: ["up", "uptime"],
   description: `Ver desde cuándo el bot está en línea`,
   userPermissions: PermissionFlagsBits.SendMessages,
   botPermissions: PermissionFlagsBits.EmbedLinks,

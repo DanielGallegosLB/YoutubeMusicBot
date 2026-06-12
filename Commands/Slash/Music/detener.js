@@ -8,7 +8,15 @@ const { Queue } = require("distube");
 
 module.exports = {
   name: "detener",
+  name_localizations: {
+    "en-US": "stop",
+    "en-GB": "stop",
+  },
   description: `Detiene la música y limpia la cola`,
+  description_localizations: {
+    "en-US": "Stop the music and clear the queue",
+    "en-GB": "Stop the music and clear the queue",
+  },
   userPermissions: PermissionFlagsBits.Connect,
   botPermissions: PermissionFlagsBits.Connect,
   category: "Music",

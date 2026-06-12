@@ -5,7 +5,7 @@ const { swap_pages } = require("../../../handlers/functions");
 
 module.exports = {
   name: "lista",
-  aliases: ["q", "list"],
+  aliases: ["q", "list", "queue"],
   description: `Muestra la cola de canciones actual`,
   userPermissions: PermissionFlagsBits.Connect,
   botPermissions: PermissionFlagsBits.Connect,

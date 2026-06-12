@@ -2272,3 +2272,40 @@ ERROR: [youtube] 8qmsG43X1gM: This video has been removed for violating YouTube'
 
 [11/6/2026, 9:14:54 p.m.] [INFO] [Slash Play] Playlist session guardada: 99 canciones
 [11/6/2026, 9:14:54 p.m.] [INFO] [Slash Play] 106 tracks procesados en Guild: 311402172820619274
+[11/6/2026, 9:28:58 p.m.] [INFO] Clubot Music is Online
+[11/6/2026, 9:30:46 p.m.] [ERROR] [Command Error] reproduciraleatorio DiscordjsError [InteractionAlreadyReplied]: The reply to this interaction has already been sent or deferred.
+    at ChatInputCommandInteraction.reply (C:\Users\Dani\Downloads\Proyectos\JUGNU-MUSIC\node_modules\discord.js\src\structures\interfaces\InteractionResponses.js:162:46)
+    at Object.run (C:\Users\Dani\Downloads\Proyectos\JUGNU-MUSIC\Commands\Slash\Playlist\reproduciraleatorio.js:86:23)
+    at JUGNU.<anonymous> (C:\Users\Dani\Downloads\Proyectos\JUGNU-MUSIC\events\interactionCreate.js:104:21) {
+  code: 'InteractionAlreadyReplied'
+}
+[11/6/2026, 9:34:41 p.m.] [INFO] Clubot Music is Online
+[11/6/2026, 9:34:46 p.m.] [ERROR] [Command Error] reproduciraleatorio DiscordjsError [InteractionAlreadyReplied]: The reply to this interaction has already been sent or deferred.
+    at ChatInputCommandInteraction.deferReply (C:\Users\Dani\Downloads\Proyectos\JUGNU-MUSIC\node_modules\discord.js\src\structures\interfaces\InteractionResponses.js:93:46)
+    at Object.run (C:\Users\Dani\Downloads\Proyectos\JUGNU-MUSIC\Commands\Slash\Playlist\reproduciraleatorio.js:86:23)
+    at JUGNU.<anonymous> (C:\Users\Dani\Downloads\Proyectos\JUGNU-MUSIC\events\interactionCreate.js:104:21) {
+  code: 'InteractionAlreadyReplied'
+}
+[11/6/2026, 9:46:18 p.m.] [INFO] Clubot Music is Online
+[11/6/2026, 9:52:08 p.m.] [ERROR] [ShufflePlay Slash] Error: Error: ERROR: [youtube] FOJdADjAIi0: Video unavailable. This video is no longer available due to a copyright claim by Yeezy LLC
+
+[11/6/2026, 9:54:23 p.m.] [ERROR] [ShufflePlay Slash] Error: Error: ERROR: [youtube] wP6aCXsFaHE: Video unavailable. This video is not available
+
+[11/6/2026, 9:54:47 p.m.] [ERROR] [ShufflePlay Slash] Error: Error: ERROR: [youtube] BWyOqO90Ue8: Video unavailable. This video is no longer available due to a copyright claim by Warner Music Group
+
+[11/6/2026, 9:54:58 p.m.] [INFO] Clubot Music is Online
+[11/6/2026, 9:56:12 p.m.] [ERROR] [ShufflePlay Slash] Error: Error: ERROR: [youtube] E2kGhgGSi78: Video unavailable. This video is not available
+
+[11/6/2026, 9:58:18 p.m.] [INFO] Clubot Music is Online
+[11/6/2026, 9:58:32 p.m.] [ERROR] [Command Error] reproduciraleatorio DisTubeError [YTDLP_ERROR]: Error: ERROR: [youtube] b-sX0EqZZZI: This video has been removed for violating YouTube's policy on hate speech. Learn more about combating hate speech in your country.
+
+    at C:\Users\Dani\Downloads\Proyectos\JUGNU-MUSIC\node_modules\@distube\yt-dlp\dist\index.js:158:13
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async YtDlpPlugin.resolve (C:\Users\Dani\Downloads\Proyectos\JUGNU-MUSIC\node_modules\@distube\yt-dlp\dist\index.js:150:18)
+    at async DisTube.play (C:\Users\Dani\Downloads\Proyectos\JUGNU-MUSIC\node_modules\distube\dist\index.js:2332:24)
+    at async Object.run (C:\Users\Dani\Downloads\Proyectos\JUGNU-MUSIC\Commands\Slash\Playlist\reproduciraleatorio.js:115:5)
+    at async JUGNU.<anonymous> (C:\Users\Dani\Downloads\Proyectos\JUGNU-MUSIC\events\interactionCreate.js:104:11) {
+  errorCode: 'YTDLP_ERROR'
+}
+[11/6/2026, 10:01:49 p.m.] [ERROR] [ShufflePlay Slash] Error: Error: ERROR: [youtube] BWyOqO90Ue8: Video unavailable. This video is no longer available due to a copyright claim by Warner Music Group
+

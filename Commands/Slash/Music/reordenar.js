@@ -9,7 +9,15 @@ const { Queue } = require("distube");
 
 module.exports = {
   name: "reordenar",
+  name_localizations: {
+    "en-US": "reorder",
+    "en-GB": "reorder",
+  },
   description: `Mueve una canción de la lista a una nueva posición`,
+  description_localizations: {
+    "en-US": "Reorder the playback queue",
+    "en-GB": "Reorder the playback queue",
+  },
   userPermissions: PermissionFlagsBits.Connect,
   botPermissions: PermissionFlagsBits.Connect,
   category: "Music",

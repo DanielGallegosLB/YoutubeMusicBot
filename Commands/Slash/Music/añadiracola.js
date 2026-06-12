@@ -6,6 +6,10 @@ const JUGNU = require("../../../handlers/Client");
 
 module.exports = {
   name: "añadiracola",
+  name_localizations: {
+    "en-US": "addtoqueue",
+    "en-GB": "addtoqueue",
+  },
   type: ApplicationCommandType.Message,
 
   /**

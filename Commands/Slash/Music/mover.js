@@ -9,7 +9,15 @@ const { Queue } = require("distube");
 
 module.exports = {
   name: "mover",
+  name_localizations: {
+    "en-US": "move",
+    "en-GB": "move",
+  },
   description: `Mueve una canción en la cola`,
+  description_localizations: {
+    "en-US": "Move a song's position in the queue",
+    "en-GB": "Move a song's position in the queue",
+  },
   userPermissions: PermissionFlagsBits.Connect,
   botPermissions: PermissionFlagsBits.Connect,
   category: "Music",

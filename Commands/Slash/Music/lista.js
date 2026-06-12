@@ -9,7 +9,15 @@ const { swap_pages } = require("../../../handlers/functions");
 
 module.exports = {
   name: "lista",
+  name_localizations: {
+    "en-US": "queue",
+    "en-GB": "queue",
+  },
   description: `Muestra la cola de canciones actual`,
+  description_localizations: {
+    "en-US": "View the current playback queue",
+    "en-GB": "View the current playback queue",
+  },
   userPermissions: PermissionFlagsBits.Connect,
   botPermissions: PermissionFlagsBits.Connect,
   category: "Music",

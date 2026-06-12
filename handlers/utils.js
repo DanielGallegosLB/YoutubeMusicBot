@@ -315,11 +315,17 @@ module.exports = async (client) => {
 
       if (!queueembed) return;
 
-      const currentSong = queue.songs[0];
+      // Always get the freshest state from distube
+      const freshQueue = client.distube.getQueue(guild.id) || queue;
+      const currentSong = freshQueue.songs[0];
+
+      if (!currentSong) {
+        return await queueembed.edit({ embeds: [client.queueembed(guild)] });
+      }
 
       let queueString = "";
-      for (let index = 1; index < Math.min(queue.songs.length, 10); index++) {
-        const track = queue.songs[index];
+      for (let index = 1; index < Math.min(freshQueue.songs.length, 10); index++) {
+        const track = freshQueue.songs[index];
         queueString += `\`${index}.\` **${client.getTitle(track)}** - ${
           track.isLive ? "LIVE STREAM" : track.formattedDuration.split(" | ")[0]
         } - \`${track.user.tag}\`\n`;
@@ -328,7 +334,7 @@ module.exports = async (client) => {
       const newQueueEmbed = new EmbedBuilder()
         .setColor(client.config.embed.color)
         .setAuthor({
-          name: `Jugnu Queue - [${queue.songs.length} Tracks]`,
+          name: `Jugnu Queue - [${freshQueue.songs.length} Tracks]`,
           iconURL: guild.iconURL({ dynamic: true }),
         })
         .addFields([
@@ -344,6 +350,8 @@ module.exports = async (client) => {
 
       if (queueString.length > 0) {
         newQueueEmbed.setDescription(queueString.substring(0, 2048));
+      } else {
+        newQueueEmbed.setDescription("No more songs in queue.");
       }
 
       await queueembed.edit({ embeds: [newQueueEmbed] });
@@ -360,7 +368,7 @@ module.exports = async (client) => {
    */
   client.updateplayer = async (queue) => {
     try {
-  const guild = client.guilds.cache.get(queue.textChannel.guildId);
+      const guild = client.guilds.cache.get(queue.textChannel.guildId);
       if (!guild) return;
 
       const data = await client.music.get(`${guild.id}.music`);
@@ -374,11 +382,16 @@ module.exports = async (client) => {
         .catch(() => {});
       if (!playembed) return;
 
-  // Refresh queue snapshot to avoid stale state (e.g., after addSong/addList)
-  const freshQueue = client.distube.getQueue(guild.id) || queue;
+      // Always get the freshest state from distube
+      const freshQueue = client.distube.getQueue(guild.id);
+      if (!freshQueue || !freshQueue.songs.length) {
+        return await playembed.edit({
+          embeds: [client.playembed(guild)],
+          components: client.buttons(true),
+        });
+      }
 
-  const track = freshQueue.songs[0];
-
+      const track = freshQueue.songs[0];
       if (!track || !track.name) return;
 
       const newEmbed = new EmbedBuilder()

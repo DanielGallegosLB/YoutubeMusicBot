@@ -8,7 +8,15 @@ const { Queue } = require("distube");
 
 module.exports = {
   name: "quitarrepetidos",
+  name_localizations: {
+    "en-US": "removedupes",
+    "en-GB": "removedupes",
+  },
   description: `Quita las canciones repetidas de la cola`,
+  description_localizations: {
+    "en-US": "Remove duplicate songs from the queue",
+    "en-GB": "Remove duplicate songs from the queue",
+  },
   userPermissions: PermissionFlagsBits.Connect,
   botPermissions: PermissionFlagsBits.Connect,
   category: "Music",

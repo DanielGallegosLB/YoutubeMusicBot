@@ -3,14 +3,36 @@ const Store = require("../../../handlers/PlaylistStore");
 
 module.exports = {
   name: "quitarcancionlista",
+  name_localizations: {
+    "en-US": "removefromplaylist",
+    "en-GB": "removefromplaylist",
+  },
   description: `Quita una canción de tu lista de reproducción`,
+  description_localizations: {
+    "en-US": "Remove a song from a playlist",
+    "en-GB": "Remove a song from a playlist",
+  },
   userPermissions: PermissionFlagsBits.SendMessages,
   botPermissions: PermissionFlagsBits.SendMessages,
   category: "Playlist",
   cooldown: 3,
   type: ApplicationCommandType.ChatInput,
   options: [
-    { name: "nombre", description: "Índice de la canción", type: ApplicationCommandOptionType.String, required: true, autocomplete: true },
+    {
+      name: "nombre",
+      name_localizations: {
+        "en-US": "name",
+        "en-GB": "name",
+      },
+      description: "Índice de la canción",
+      description_localizations: {
+        "en-US": "The name of the playlist",
+        "en-GB": "The name of the playlist",
+      },
+  description_localizations: {
+    "en-US": "Remove a song from a playlist",
+    "en-GB": "Remove a song from a playlist",
+  }, type: ApplicationCommandOptionType.String, required: true, autocomplete: true },
     { name: "indice", description: "Índice de la canción", type: ApplicationCommandOptionType.Integer, required: true },
   ],
   run: async (client, interaction) => {

@@ -13,7 +13,15 @@ const { numberEmojis } = require("../../../settings/config");
 
 module.exports = {
   name: "buscar",
+  name_localizations: {
+    "en-US": "search",
+    "en-GB": "search",
+  },
   description: `Busca canciones en YouTube`,
+  description_localizations: {
+    "en-US": "Search for a song",
+    "en-GB": "Search for a song",
+  },
   userPermissions: PermissionFlagsBits.Connect,
   botPermissions: PermissionFlagsBits.Connect,
   category: "Music",

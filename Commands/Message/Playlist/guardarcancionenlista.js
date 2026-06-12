@@ -4,7 +4,7 @@ const Store = require("../../../handlers/PlaylistStore");
 
 module.exports = {
   name: "guardarcancionenlista",
-  aliases: ["plsavenowplaying", "plsavenc", "plsavenp"],
+  aliases: ["plsavenowplaying", "plsavenc", "plsavenp", "addtoplaylist"],
   description: `Guarda la canción actual en una lista`,
   userPermissions: PermissionFlagsBits.SendMessages,
   botPermissions: PermissionFlagsBits.SendMessages,

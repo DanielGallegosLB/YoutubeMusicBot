@@ -4,7 +4,7 @@ const { Queue } = require("distube");
 
 module.exports = {
   name: "reproducirprimero",
-  aliases: ["pt", "ptop"],
+  aliases: ["pt", "ptop", "playfirst"],
   description: `Añade una canción al principio de la cola`,
   userPermissions: PermissionFlagsBits.Connect,
   botPermissions: PermissionFlagsBits.Connect,

@@ -4,7 +4,7 @@ const Store = require("../../../handlers/PlaylistStore");
 
 module.exports = {
   name: "guardarlistaactual",
-  aliases: ["plsavequeue"],
+  aliases: ["plsavequeue", "savequeue"],
   description: `Guarda la cola actual en una lista`,
   userPermissions: PermissionFlagsBits.SendMessages,
   botPermissions: PermissionFlagsBits.SendMessages,

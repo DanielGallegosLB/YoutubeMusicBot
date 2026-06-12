@@ -9,7 +9,15 @@ const { Queue } = require("distube");
 
 module.exports = {
   name: "volumen",
+  name_localizations: {
+    "en-US": "volume",
+    "en-GB": "volume",
+  },
   description: `Cambia el volumen del bot`,
+  description_localizations: {
+    "en-US": "Change the music volume",
+    "en-GB": "Change the music volume",
+  },
   userPermissions: PermissionFlagsBits.Connect,
   botPermissions: PermissionFlagsBits.Connect,
   category: "Music",

@@ -101,7 +101,15 @@ async function playFirstAvailableTrack(client, channel, urls, playOpts) {
 
 module.exports = {
   name: "reproducir",
+  name_localizations: {
+    "en-US": "play",
+    "en-GB": "play",
+  },
   description: `Reproduce una canción o lista de reproducción`,
+  description_localizations: {
+    "en-US": "Play a song or playlist",
+    "en-GB": "Play a song or playlist",
+  },
   userPermissions: PermissionFlagsBits.Connect,
   botPermissions: PermissionFlagsBits.Connect,
   category: "Music",
@@ -114,7 +122,15 @@ module.exports = {
   options: [
     {
       name: "cancion",
-      description: `El nombre o enlace de la canción/lista`,
+      name_localizations: {
+        "en-US": "song",
+        "en-GB": "song",
+      },
+      description: "El nombre o enlace de la canción/lista",
+      description_localizations: {
+        "en-US": "The name or link of the song/playlist",
+        "en-GB": "The name or link of the song/playlist",
+      },
       type: ApplicationCommandOptionType.String,
       required: true,
     },
@@ -213,6 +229,10 @@ module.exports = {
             
             // Tiempo de espera para que el bot procese otras instrucciones (interacciones)
             await new Promise((r) => setTimeout(r, 250));
+          }
+
+          if (queue && queue.repeatMode === 2) {
+            client.logger.log(`[Playlist Load] Queue loop is active (repeatMode: 2) in Guild ${interaction.guildId}. New items included.`);
           }
 
           if (queue && typeof client.createMusicSession === "function" && typeof client.saveMusicSession === "function") {

@@ -1,4 +1,3 @@
 :start
-npm start
-pause
+call npm start
 goto start

@@ -4,7 +4,7 @@ const Store = require("../../../handlers/PlaylistStore");
 
 module.exports = {
   name: "reproducirlista",
-  aliases: ["plplay"],
+  aliases: ["plplay", "playplaylist"],
   description: `Reproduce una de tus listas de reproducción`,
   userPermissions: PermissionFlagsBits.SendMessages,
   botPermissions: PermissionFlagsBits.SendMessages,

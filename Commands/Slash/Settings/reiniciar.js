@@ -8,7 +8,15 @@ const { Queue } = require("distube");
 
 module.exports = {
   name: "reiniciar",
+  name_localizations: {
+    "en-US": "restart",
+    "en-GB": "restart",
+  },
   description: `Reinicia la configuración del bot`,
+  description_localizations: {
+    "en-US": "Restart the bot",
+    "en-GB": "Restart the bot",
+  },
   userPermissions: PermissionFlagsBits.ManageGuild,
   botPermissions: PermissionFlagsBits.EmbedLinks,
   category: "Settings",

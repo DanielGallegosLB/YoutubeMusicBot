@@ -3,14 +3,36 @@ const Store = require("../../../handlers/PlaylistStore");
 
 module.exports = {
   name: "borrarlista",
+  name_localizations: {
+    "en-US": "deleteplaylist",
+    "en-GB": "deleteplaylist",
+  },
   description: `Borra una lista de reproducción personalizada`,
+  description_localizations: {
+    "en-US": "Delete a saved playlist",
+    "en-GB": "Delete a saved playlist",
+  },
   userPermissions: PermissionFlagsBits.SendMessages,
   botPermissions: PermissionFlagsBits.SendMessages,
   category: "Playlist",
   cooldown: 3,
   type: ApplicationCommandType.ChatInput,
   options: [
-    { name: "nombre", description: "Nombre de la lista", type: ApplicationCommandOptionType.String, required: true, autocomplete: true },
+    {
+      name: "nombre",
+      name_localizations: {
+        "en-US": "name",
+        "en-GB": "name",
+      },
+      description: "Nombre de la lista",
+      description_localizations: {
+        "en-US": "The name of the playlist",
+        "en-GB": "The name of the playlist",
+      },
+  description_localizations: {
+    "en-US": "Delete a saved playlist",
+    "en-GB": "Delete a saved playlist",
+  }, type: ApplicationCommandOptionType.String, required: true, autocomplete: true },
   ],
   run: async (client, interaction) => {
     const name = interaction.options.getString("nombre");

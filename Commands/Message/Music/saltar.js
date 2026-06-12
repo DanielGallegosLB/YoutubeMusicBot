@@ -5,7 +5,7 @@ const { skip } = require("../../../handlers/functions");
 
 module.exports = {
   name: "saltar",
-  aliases: ["s", "skp"],
+  aliases: ["s", "skp", "skip"],
   description: `Salta la canción actual`,
   userPermissions: PermissionFlagsBits.Connect,
   botPermissions: PermissionFlagsBits.Connect,

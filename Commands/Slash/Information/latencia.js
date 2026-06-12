@@ -9,7 +9,15 @@ const { Queue } = require("distube");
 
 module.exports = {
   name: "latencia",
+  name_localizations: {
+    "en-US": "ping",
+    "en-GB": "ping",
+  },
   description: `Obtén la información de ping y latencia del bot`,
+  description_localizations: {
+    "en-US": "View the bot's latency",
+    "en-GB": "View the bot's latency",
+  },
   userPermissions: PermissionFlagsBits.SendMessages,
   botPermissions: PermissionFlagsBits.EmbedLinks,
   category: "Information",
@@ -28,14 +36,17 @@ module.exports = {
    * @param {Queue} queue
    */
   run: async (client, interaction, args, queue) => {
-    await interaction.deferReply({ ephemeral: true }).catch(() => {});
     const startTime = Date.now();
 
     // Send an initial message to calculate latencies
-    const tempMessage = await interaction.followUp({
+    const tempMessage = await interaction.editReply({
       embeds: [
         {
           description: "Obtén la información de ping y latencia del bot",
+          description_localizations: {
+            "en-US": "View the bot's latency",
+            "en-GB": "View the bot's latency",
+          },
           color: Colors.Blurple,
           footer: { text: "Por favor espera un momento..." },
         },

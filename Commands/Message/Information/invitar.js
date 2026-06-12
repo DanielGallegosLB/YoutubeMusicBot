@@ -5,7 +5,7 @@ const { links } = require("../../../settings/config");
 
 module.exports = {
   name: "invitar",
-  aliases: ["inv","añadirme"],
+  aliases: ["inv", "añadirme", "invite"],
   description: `¡Obtén mi enlace de invitación para añadirme!`,
   userPermissions: PermissionFlagsBits.SendMessages,
   botPermissions: PermissionFlagsBits.EmbedLinks,

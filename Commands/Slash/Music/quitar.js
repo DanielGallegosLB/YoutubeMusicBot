@@ -9,7 +9,15 @@ const { Queue } = require("distube");
 
 module.exports = {
   name: "quitar",
+  name_localizations: {
+    "en-US": "remove",
+    "en-GB": "remove",
+  },
   description: `Quita una canción de la cola`,
+  description_localizations: {
+    "en-US": "Remove a song from the queue",
+    "en-GB": "Remove a song from the queue",
+  },
   userPermissions: PermissionFlagsBits.Connect,
   botPermissions: PermissionFlagsBits.Connect,
   category: "Music",

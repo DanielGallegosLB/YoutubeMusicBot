@@ -3,14 +3,36 @@ const Store = require("../../../handlers/PlaylistStore");
 
 module.exports = {
   name: "guardarlistaactual",
+  name_localizations: {
+    "en-US": "savequeue",
+    "en-GB": "savequeue",
+  },
   description: `Guarda la cola actual en una lista`,
+  description_localizations: {
+    "en-US": "Save the current queue",
+    "en-GB": "Save the current queue",
+  },
   userPermissions: PermissionFlagsBits.SendMessages,
   botPermissions: PermissionFlagsBits.SendMessages,
   category: "Playlist",
   cooldown: 3,
   type: ApplicationCommandType.ChatInput,
   options: [
-    { name: "nombre", description: "Nombre de la lista", type: ApplicationCommandOptionType.String, required: true, autocomplete: true },
+    {
+      name: "nombre",
+      name_localizations: {
+        "en-US": "name",
+        "en-GB": "name",
+      },
+      description: "Nombre de la lista",
+      description_localizations: {
+        "en-US": "The name of the playlist",
+        "en-GB": "The name of the playlist",
+      },
+  description_localizations: {
+    "en-US": "Save the current queue",
+    "en-GB": "Save the current queue",
+  }, type: ApplicationCommandOptionType.String, required: true, autocomplete: true },
   ],
   run: async (client, interaction) => {
     const name = interaction.options.getString("nombre");

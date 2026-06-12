@@ -8,7 +8,15 @@ const { Queue } = require("distube");
 
 module.exports = {
   name: "continuar",
+  name_localizations: {
+    "en-US": "resume",
+    "en-GB": "resume",
+  },
   description: `Continúa la música pausada`,
+  description_localizations: {
+    "en-US": "Resume paused music",
+    "en-GB": "Resume paused music",
+  },
   userPermissions: PermissionFlagsBits.Connect,
   botPermissions: PermissionFlagsBits.Connect,
   category: "Music",

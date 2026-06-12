@@ -9,7 +9,15 @@ const { Queue } = require("distube");
 
 module.exports = {
   name: "saltara",
+  name_localizations: {
+    "en-US": "skipto",
+    "en-GB": "skipto",
+  },
   description: `Salta a una canción específica en la cola`,
+  description_localizations: {
+    "en-US": "Skip to a specific song in the queue",
+    "en-GB": "Skip to a specific song in the queue",
+  },
   userPermissions: PermissionFlagsBits.Connect,
   botPermissions: PermissionFlagsBits.Connect,
   category: "Music",

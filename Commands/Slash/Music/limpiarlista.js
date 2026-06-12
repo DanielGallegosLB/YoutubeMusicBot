@@ -8,7 +8,15 @@ const { Queue } = require("distube");
 
 module.exports = {
   name: "limpiarlista",
+  name_localizations: {
+    "en-US": "clearqueue",
+    "en-GB": "clearqueue",
+  },
   description: `Limpia la cola de reproducción`,
+  description_localizations: {
+    "en-US": "Clear the playback queue",
+    "en-GB": "Clear the playback queue",
+  },
   userPermissions: PermissionFlagsBits.Connect,
   botPermissions: PermissionFlagsBits.Connect,
   category: "Music",

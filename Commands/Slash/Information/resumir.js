@@ -33,7 +33,15 @@ const buildStoredSong = (track, guild) => {
 
 module.exports = {
   name: "resumir",
+  name_localizations: {
+    "en-US": "summary",
+    "en-GB": "summary",
+  },
   description: `Resume una de las últimas sesiones de música guardadas`,
+  description_localizations: {
+    "en-US": "Resume one of the last saved music sessions",
+    "en-GB": "Resume one of the last saved music sessions",
+  },
   userPermissions: PermissionFlagsBits.SendMessages,
   botPermissions: PermissionFlagsBits.EmbedLinks,
   category: "Information",

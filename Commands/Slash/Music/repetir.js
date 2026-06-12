@@ -9,7 +9,15 @@ const { Queue } = require("distube");
 
 module.exports = {
   name: "repetir",
+  name_localizations: {
+    "en-US": "loop",
+    "en-GB": "loop",
+  },
   description: `Cambia el modo de repetición`,
+  description_localizations: {
+    "en-US": "Change the repeat mode",
+    "en-GB": "Change the repeat mode",
+  },
   userPermissions: PermissionFlagsBits.Connect,
   botPermissions: PermissionFlagsBits.Connect,
   category: "Music",

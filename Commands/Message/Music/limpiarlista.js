@@ -4,7 +4,7 @@ const { Queue } = require("distube");
 
 module.exports = {
   name: "limpiarlista",
-  aliases: ["clq", "clearq"],
+  aliases: ["clq", "clearq", "clearqueue"],
   description: `Limpia la cola de reproducción`,
   userPermissions: PermissionFlagsBits.Connect,
   botPermissions: PermissionFlagsBits.Connect,

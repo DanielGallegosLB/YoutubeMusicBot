@@ -4,7 +4,7 @@ const { Queue } = require("distube");
 
 module.exports = {
   name: "buscarlista",
-  aliases: ["qsearch", "findq"],
+  aliases: ["qsearch", "findq", "searchplaylist"],
   description: `Busca una canción dentro de la cola actual`,
   userPermissions: PermissionFlagsBits.SendMessages,
   botPermissions: PermissionFlagsBits.EmbedLinks,

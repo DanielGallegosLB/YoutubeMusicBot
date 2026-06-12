@@ -4,7 +4,7 @@ const Store = require("../../../handlers/PlaylistStore");
 
 module.exports = {
   name: "crearlista",
-  aliases: ["plcreate"],
+  aliases: ["plcreate", "createplaylist"],
   description: `Crea una nueva lista de reproducción personalizada`,
   userPermissions: PermissionFlagsBits.SendMessages,
   botPermissions: PermissionFlagsBits.SendMessages,

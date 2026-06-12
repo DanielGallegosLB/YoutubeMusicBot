@@ -3,14 +3,36 @@ const Store = require("../../../handlers/PlaylistStore");
 
 module.exports = {
   name: "guardarcancionenlista",
+  name_localizations: {
+    "en-US": "addtoplaylist",
+    "en-GB": "addtoplaylist",
+  },
   description: `Guarda la canción actual en una lista`,
+  description_localizations: {
+    "en-US": "Save a song to a playlist",
+    "en-GB": "Save a song to a playlist",
+  },
   userPermissions: PermissionFlagsBits.SendMessages,
   botPermissions: PermissionFlagsBits.SendMessages,
   category: "Playlist",
   cooldown: 3,
   type: ApplicationCommandType.ChatInput,
   options: [
-    { name: "nombre", description: "Nombre de la lista", type: ApplicationCommandOptionType.String, required: true, autocomplete: true },
+    {
+      name: "nombre",
+      name_localizations: {
+        "en-US": "name",
+        "en-GB": "name",
+      },
+      description: "Nombre de la lista",
+      description_localizations: {
+        "en-US": "The name of the playlist",
+        "en-GB": "The name of the playlist",
+      },
+  description_localizations: {
+    "en-US": "Save a song to a playlist",
+    "en-GB": "Save a song to a playlist",
+  }, type: ApplicationCommandOptionType.String, required: true, autocomplete: true },
   ],
   inVoiceChannel: false,
   inSameVoiceChannel: false,

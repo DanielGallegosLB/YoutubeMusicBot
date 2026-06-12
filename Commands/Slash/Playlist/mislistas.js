@@ -3,7 +3,15 @@ const Store = require("../../../handlers/PlaylistStore");
 
 module.exports = {
   name: "mislistas",
+  name_localizations: {
+    "en-US": "myplaylists",
+    "en-GB": "myplaylists",
+  },
   description: `Muestra todas tus listas de reproducción`,
+  description_localizations: {
+    "en-US": "View your playlists",
+    "en-GB": "View your playlists",
+  },
   userPermissions: PermissionFlagsBits.SendMessages,
   botPermissions: PermissionFlagsBits.SendMessages,
   category: "Playlist",

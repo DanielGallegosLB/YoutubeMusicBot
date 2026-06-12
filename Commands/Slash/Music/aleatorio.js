@@ -9,7 +9,15 @@ const { Queue } = require("distube");
 
 module.exports = {
   name: "aleatorio",
+  name_localizations: {
+    "en-US": "shuffle",
+    "en-GB": "shuffle",
+  },
   description: `Mezcla la cola de canciones`,
+  description_localizations: {
+    "en-US": "Enable shuffle mode for the queue",
+    "en-GB": "Enable shuffle mode for the queue",
+  },
   userPermissions: PermissionFlagsBits.Connect,
   botPermissions: PermissionFlagsBits.Connect,
   category: "Music",

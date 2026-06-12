@@ -9,7 +9,15 @@ const { Queue } = require("distube");
 
 module.exports = {
   name: "sonandoahora",
+  name_localizations: {
+    "en-US": "nowplaying",
+    "en-GB": "nowplaying",
+  },
   description: `Muestra la canción que se está reproduciendo ahora`,
+  description_localizations: {
+    "en-US": "View what song is currently playing",
+    "en-GB": "View what song is currently playing",
+  },
   userPermissions: PermissionFlagsBits.Connect,
   botPermissions: PermissionFlagsBits.Connect,
   category: "Music",

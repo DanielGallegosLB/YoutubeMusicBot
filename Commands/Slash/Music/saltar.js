@@ -9,7 +9,15 @@ const { skip } = require("../../../handlers/functions");
 
 module.exports = {
   name: "saltar",
+  name_localizations: {
+    "en-US": "skip",
+    "en-GB": "skip",
+  },
   description: `Salta la canción actual`,
+  description_localizations: {
+    "en-US": "Skip to the next song",
+    "en-GB": "Skip to the next song",
+  },
   userPermissions: PermissionFlagsBits.Connect,
   botPermissions: PermissionFlagsBits.Connect,
   category: "Music",
