@@ -111,33 +111,57 @@ module.exports = {
 
     shuffleArray(tracks);
 
+    await interaction.editReply({ content: `✅ Cargando \`${playlistName}\`... (0/${tracks.length})` });
+
     const first = tracks[0];
-    await client.distube.play(vc, first, {
-      member: interaction.member,
-      textChannel: interaction.channel,
-    });
+    let addedCount = 0;
+    try {
+      await client.distube.play(vc, first, {
+        member: interaction.member,
+        textChannel: interaction.channel,
+      });
+      addedCount++;
+    } catch (e) {
+      client.logger.error(`[ShufflePlay Slash] Error en primer track: ${e.message}`);
+    }
 
     client.playlistLoading.set(interaction.guildId, true);
     (async () => {
-      for (const t of tracks.slice(1)) {
+      const remaining = tracks.slice(1);
+      for (let i = 0; i < remaining.length; i++) {
         if (!client.playlistLoading.get(interaction.guildId)) break;
+        const t = remaining[i];
         try {
           await client.distube.play(vc, t, {
             member: interaction.member,
             textChannel: interaction.channel,
           });
+          addedCount++;
         } catch (e) {
-          client.logger.error(`[ShufflePlay Slash] Error: ${e.message}`);
+          client.logger.error(`[ShufflePlay Slash] Error en track ${i + 2}: ${e.message}`);
+        }
+
+        // Actualizar progreso cada 5 canciones o al final
+        if (addedCount % 5 === 0 || i === remaining.length - 1) {
+          await interaction.editReply({ 
+            content: `⏳ Cargando \`${playlistName}\`... (${addedCount}/${tracks.length} canciones añadidas)` 
+          }).catch(() => {});
         }
         await new Promise((r) => setTimeout(r, 250));
       }
+      
       const queue = client.distube.getQueue(interaction.guildId);
       if (queue && queue.repeatMode === 2) {
          client.logger.log(`[ShufflePlay Slash] Queue loop active (repeatMode: 2). Consistency checked.`);
       }
+      
+      await interaction.editReply({ 
+        content: `✅ Carga finalizada: \`${playlistName}\` (${addedCount} canciones añadidas exitosamente).` 
+      }).catch(() => {});
+      
       client.playlistLoading.delete(interaction.guildId);
     })();
 
-    return interaction.editReply({ content: `✅ Reproduciendo aleatoriamente \`${playlistName}\` (${tracks.length} canciones).` });
+    return;
   },
 };

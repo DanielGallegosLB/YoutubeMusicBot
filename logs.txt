@@ -2309,3 +2309,27 @@ ERROR: [youtube] 8qmsG43X1gM: This video has been removed for violating YouTube'
 }
 [11/6/2026, 10:01:49 p.m.] [ERROR] [ShufflePlay Slash] Error: Error: ERROR: [youtube] BWyOqO90Ue8: Video unavailable. This video is no longer available due to a copyright claim by Warner Music Group
 
+[11/6/2026, 10:04:11 p.m.] [ERROR] [ShufflePlay Slash] Error: Error: ERROR: [youtube] b-sX0EqZZZI: This video has been removed for violating YouTube's policy on hate speech. Learn more about combating hate speech in your country.
+
+[11/6/2026, 10:06:08 p.m.] [ERROR] [ShufflePlay Slash] Error: Error: ERROR: [youtube] FOJdADjAIi0: Video unavailable. This video is no longer available due to a copyright claim by Yeezy LLC
+
+[11/6/2026, 10:06:21 p.m.] [ERROR] [ShufflePlay Slash] Error: Error: ERROR: [youtube] NVgebSuZjwE: Video unavailable. This video is no longer available due to a copyright claim by Universal Music Group
+
+[11/6/2026, 10:06:56 p.m.] [ERROR] [ShufflePlay Slash] Error: Error: ERROR: [youtube] wP6aCXsFaHE: Video unavailable. This video is not available
+
+[11/6/2026, 10:07:11 p.m.] [INFO] Clubot Music is Online
+[11/6/2026, 10:08:14 p.m.] [ERROR] [ShufflePlay Slash] Error en track 8: Error: ERROR: [youtube] NVgebSuZjwE: Video unavailable. This video is no longer available due to a copyright claim by Universal Music Group
+
+[11/6/2026, 10:09:45 p.m.] [ERROR] [ShufflePlay Slash] Error en track 23: Error: ERROR: [youtube] wP6aCXsFaHE: Video unavailable. This video is not available
+
+[11/6/2026, 10:11:13 p.m.] [ERROR] [ShufflePlay Slash] Error en track 38: Error: ERROR: [youtube] FOJdADjAIi0: Video unavailable. This video is no longer available due to a copyright claim by Yeezy LLC
+
+[11/6/2026, 10:13:01 p.m.] [ERROR] [ShufflePlay Slash] Error en track 55: Error: ERROR: [youtube] BWyOqO90Ue8: Video unavailable. This video is no longer available due to a copyright claim by Warner Music Group
+
+[11/6/2026, 10:14:00 p.m.] [ERROR] [ShufflePlay Slash] Error en track 65: Error: ERROR: [youtube] E2kGhgGSi78: Video unavailable. This video is not available
+
+[11/6/2026, 10:14:23 p.m.] [ERROR] [ShufflePlay Slash] Error en track 69: Error: ERROR: [youtube] b-sX0EqZZZI: This video has been removed for violating YouTube's policy on hate speech. Learn more about combating hate speech in your country.
+
+[12/6/2026, 2:15:19 p.m.] [INFO] [Slash Play] User: dani_sas Guild: 311402172820619274 Query: https://www.youtube.com/playlist?list=PLWjrvqpXVE9WeNLEDdEzVh--gtJCVWbvr
+[12/6/2026, 2:15:26 p.m.] [INFO] [Slash Play] Playlist cargada: 106 tracks
+[12/6/2026, 2:15:41 p.m.] [INFO] [Slash Play Success] First playable track index 1: https://www.youtube.com/watch?v=m3lF2qEA2cw

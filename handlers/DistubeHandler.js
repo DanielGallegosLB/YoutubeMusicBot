@@ -26,8 +26,23 @@ module.exports = async (client) => {
 
         const refresh = (q, ms = 0) => {
           try {
-            setTimeout(() => {
-              client.updateplayer(q).catch(() => {});
+            setTimeout(async () => {
+              const guild = interaction.guild;
+              // Trigger a global update for this guild
+              await client.updatequeue(q).catch(() => {});
+              await client.updateplayer(q).catch(() => {});
+              
+              // Also update standard temp player message if it exists
+              const ID = client.temp.get(guild.id);
+              if (ID) {
+                const msg = interaction.channel.messages.cache.get(ID) || 
+                          await interaction.channel.messages.fetch(ID).catch(() => null);
+                if (msg) {
+                  msg.edit({
+                    components: client.buttons(false, q),
+                  }).catch(() => {});
+                }
+              }
             }, ms);
           } catch {}
         };

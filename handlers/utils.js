@@ -300,7 +300,9 @@ module.exports = async (client) => {
    */
   client.updatequeue = async (queue) => {
     try {
-      const guild = client.guilds.cache.get(queue.textChannel.guildId);
+      const guildId = queue?.textChannel?.guildId || queue?.guildId;
+      if (!guildId) return;
+      const guild = client.guilds.cache.get(guildId);
       if (!guild) return;
 
       const data = await client.music.get(`${guild.id}.music`);
@@ -317,14 +319,16 @@ module.exports = async (client) => {
 
       // Always get the freshest state from distube
       const freshQueue = client.distube.getQueue(guild.id) || queue;
-      const currentSong = freshQueue.songs[0];
-
-      if (!currentSong) {
+      
+      // If no queue, reset to empty
+      if (!freshQueue || !freshQueue.songs.length) {
         return await queueembed.edit({ embeds: [client.queueembed(guild)] });
       }
 
+      const currentSong = freshQueue.songs[0];
+
       let queueString = "";
-      for (let index = 1; index < Math.min(freshQueue.songs.length, 10); index++) {
+      for (let index = 1; index < Math.min(freshQueue.songs.length, 11); index++) {
         const track = freshQueue.songs[index];
         queueString += `\`${index}.\` **${client.getTitle(track)}** - ${
           track.isLive ? "LIVE STREAM" : track.formattedDuration.split(" | ")[0]
@@ -368,7 +372,9 @@ module.exports = async (client) => {
    */
   client.updateplayer = async (queue) => {
     try {
-      const guild = client.guilds.cache.get(queue.textChannel.guildId);
+      const guildId = queue?.textChannel?.guildId || queue?.guildId;
+      if (!guildId) return;
+      const guild = client.guilds.cache.get(guildId);
       if (!guild) return;
 
       const data = await client.music.get(`${guild.id}.music`);
@@ -396,18 +402,18 @@ module.exports = async (client) => {
 
       const newEmbed = new EmbedBuilder()
         .setColor(client.config.embed.color)
-        .setImage(track?.thumbnail)
+        .setImage(track?.thumbnail || null)
         .setTitle(client.getTitle(track))
         .setURL(track?.url)
         .addFields(
           {
             name: "**Requested By**",
-            value: `\`${track.user.tag}\``,
+            value: `\`${track.user?.tag || "Unknown"}\``,
             inline: true,
           },
           {
             name: "**Author**",
-            value: `\`${track.uploader.name || "😏"}\``,
+            value: `\`${track.uploader?.name || "😏"}\``,
             inline: true,
           },
           {
@@ -416,7 +422,7 @@ module.exports = async (client) => {
             inline: true,
           }
         )
-        .setFooter(client.getFooter(track.user));
+        .setFooter(client.getFooter(track.user || client.user));
 
       await playembed.edit({
         embeds: [newEmbed],
