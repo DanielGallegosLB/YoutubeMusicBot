@@ -1,4 +1,4 @@
-const { Message, PermissionFlagsBits } = require("discord.js");
+const { Message, PermissionFlagsBits, EmbedBuilder } = require("discord.js");
 const JUGNU = require("../../../handlers/Client");
 const Store = require("../../../handlers/PlaylistStore");
 
@@ -23,26 +23,65 @@ module.exports = {
     if (!vc) return client.embed(message, `${client.config.emoji.ERROR} Join a voice channel first.`);
     if (message.guild.members.me.voice.channel && !message.guild.members.me.voice.channel.equals(vc))
       return client.embed(message, `${client.config.emoji.ERROR} You need to join my voice channel.`);
-    const first = pl.tracks[0];
-    await client.distube.play(vc, first.url || first.name, {
-      member: message.member,
-      textChannel: message.channel,
-      message,
-    });
+    const statusMsg = await client.embed(message, `⏳ Cargando lista \`${pl.name}\`... (0/${pl.tracks.length})`);
 
-    client.playlistLoading.set(message.guild.id, true);
-    for (const t of pl.tracks.slice(1)) {
-      if (!client.playlistLoading.get(message.guild.id)) break;
-      await client.distube.play(vc, t.url || t.name, {
+    let addedCount = 0;
+    try {
+      await client.distube.play(vc, pl.tracks[0].url || pl.tracks[0].name, {
         member: message.member,
         textChannel: message.channel,
         message,
       });
+      addedCount++;
+    } catch (e) {
+      client.logger.error("Error al cargar primer track:", e);
+    }
+
+    client.playlistLoading.set(message.guild.id, true);
+    const tracks = pl.tracks.slice(1);
+    for (let i = 0; i < tracks.length; i++) {
+      if (!client.playlistLoading.get(message.guild.id)) break;
+      const t = tracks[i];
+      try {
+        await client.distube.play(vc, t.url || t.name, {
+          member: message.member,
+          textChannel: message.channel,
+          message,
+        });
+        addedCount++;
+      } catch (e) {
+        client.logger.error("Error al cargar track de lista:", e);
+      }
+      
+      // Actualizar progreso cada 5 canciones o al final
+      if (addedCount % 5 === 0 || i === tracks.length - 1) {
+        if (statusMsg && statusMsg.edit) {
+          statusMsg.edit({
+            embeds: [
+              new EmbedBuilder()
+                .setColor(client.config.embed.color)
+                .setDescription(`⏳ Cargando lista \`${pl.name}\`... (${addedCount}/${pl.tracks.length} canciones añadidas)`)
+                .setFooter(client.getFooter(message.author)),
+            ],
+          }).catch(() => {});
+        }
+      }
       // Tiempo de espera para procesar interacciones
       await new Promise((r) => setTimeout(r, 250));
     }
+
+    if (statusMsg && statusMsg.edit) {
+      statusMsg.edit({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(client.config.embed.color)
+            .setDescription(`✅ Lista cargada: \`${pl.name}\` (${addedCount} canciones añadidas).`)
+            .setFooter(client.getFooter(message.author)),
+        ],
+      }).catch(() => {});
+    }
     client.playlistLoading.delete(message.guild.id);
 
-    return client.embed(message, `${client.config.emoji.SUCCESS} Reproduciendo lista \`${pl.name}\` (${pl.tracks.length} pistas).`);
+    return;
   },
 };

@@ -215,6 +215,7 @@ module.exports = {
       client.playlistLoading.set(interaction.guildId, true);
       (async () => {
         const remaining = urls.slice(firstPlayedIndex + 1);
+        let addedCount = firstPlayedIndex + 1;
         try {
           for (let i = 0; i < remaining.length; i++) {
             // Verificar si se detuvo la carga o si el bot salió
@@ -223,10 +224,18 @@ module.exports = {
             const url = remaining[i];
             try {
               await client.distube.play(channel, url, nextPlayOpts);
+              addedCount++;
             } catch (e) {
               client.logger.warn(`[Slash Play] Track ${firstPlayedIndex + i + 2} saltado en Guild ${interaction.guildId}:`, e.message);
             }
             
+            // Actualizar progreso cada 5 canciones o al final
+            if (addedCount % 5 === 0 || i === remaining.length - 1) {
+              await interaction.editReply({ 
+                content: `⏳ Procesando lista: \`${addedCount}/${urls.length}\` canciones cargadas...` 
+              }).catch(() => {});
+            }
+
             // Tiempo de espera para que el bot procese otras instrucciones (interacciones)
             await new Promise((r) => setTimeout(r, 250));
           }
@@ -234,6 +243,10 @@ module.exports = {
           if (queue && queue.repeatMode === 2) {
             client.logger.log(`[Playlist Load] Queue loop is active (repeatMode: 2) in Guild ${interaction.guildId}. New items included.`);
           }
+
+          await interaction.editReply({ 
+            content: `✅ Lista cargada exitosamente: \`${addedCount}/${urls.length}\` canciones procesadas.` 
+          }).catch(() => {});
 
           if (queue && typeof client.createMusicSession === "function" && typeof client.saveMusicSession === "function") {
             try {

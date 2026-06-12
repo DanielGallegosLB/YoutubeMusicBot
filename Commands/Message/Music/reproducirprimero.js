@@ -1,6 +1,38 @@
-const { Message, PermissionFlagsBits } = require("discord.js");
+const { Message, PermissionFlagsBits, EmbedBuilder } = require("discord.js");
 const JUGNU = require("../../../handlers/Client");
 const { Queue } = require("distube");
+const { spawn } = require("child_process");
+const path = require("path");
+
+const YTDLP_PATH = path.join(
+  process.cwd(),
+  "node_modules/@distube/yt-dlp/bin",
+  process.platform === "win32" ? "yt-dlp.exe" : "yt-dlp"
+);
+
+function isPlaylistURL(url) {
+  return /youtube\.com\/playlist\?list=/.test(url) ||
+    (/[?&]list=/.test(url) && !/watch\?v=/.test(url));
+}
+
+function fetchPlaylistURLs(playlistUrl) {
+  return new Promise((resolve, reject) => {
+    const proc = spawn(YTDLP_PATH, [
+      "--flat-playlist", "--print", "webpage_url",
+      "--no-warnings", "--js-runtimes", "node",
+      playlistUrl,
+    ]);
+    let stdout = "", stderr = "";
+    proc.stdout.on("data", (d) => stdout += d);
+    proc.stderr.on("data", (d) => stderr += d);
+    proc.on("close", () => {
+      const urls = stdout.trim().split("\n").filter(Boolean);
+      if (urls.length) resolve(urls);
+      else reject(new Error(stderr || "No se encontraron videos"));
+    });
+    proc.on("error", reject);
+  });
+}
 
 module.exports = {
   name: "reproducirprimero",
@@ -13,7 +45,7 @@ module.exports = {
   inVoiceChannel: true,
   inSameVoiceChannel: true,
   Player: false,
-  djOnly: true,
+  djOnly: false,
 
   /**
    *
@@ -24,41 +56,95 @@ module.exports = {
    * @param {Queue} queue
    */
   run: async (client, message, args, prefix, queue) => {
-    // Code
     const song = args.join(" ");
 
     if (!song) {
-      return client.embed(
-        message,
-        `${client.config.emoji.ERROR} Por favor, proporciona el nombre o enlace de una canción.`
-      );
-    } else {
-      let { channel } = message.member.voice;
-      const hqStored = await client.music.get(`${message.guildId}.hqmode`);
-      const hqMode =
-        (hqStored === undefined ? process.env.HQ_MODE === "true" : hqStored) ||
-        false;
-      // Pre-join voice to parallelize Discord voice handshake with search/resolve
-      try {
-        await client.distube.voices.join(channel);
-      } catch {}
-      // If not a URL, use yt-dlp single-result search for faster resolution
-      const isURL = /^(https?:\/\/)/i.test(song);
-      const query = isURL ? song : `ytsearch1:${song}`;
-      await client.distube.play(channel, query, {
-        member: message.member,
-        textChannel: message.channel,
-        message: message,
-        unshift: true,
-        // Keep transforms off in HQ mode for Opus passthrough where possible
-        // (Filters/volume adjustments force re-encode)
-        // DisTube handles format selection internally; HQ_MODE is a hint not to alter audio
-        // You can still toggle filters separately via existing commands
-        // eslint-disable-next-line no-unused-vars
-        ...(hqMode ? { volume: 100 } : {}),
-      });
+      return client.embed(message, `${client.config.emoji.ERROR} Proporciona una canción.`);
+    }
 
-      await message.delete().catch((err) => {});
+    let { channel } = message.member.voice;
+    const hqStored = await client.music.get(`${message.guildId}.hqmode`);
+    const hqMode = (hqStored === undefined ? process.env.HQ_MODE === "true" : hqStored) || false;
+    
+    const playOpts = {
+      member: message.member,
+      textChannel: message.channel,
+      message: message,
+      position: queue?.songs?.length ? 1 : 0,
+      ...(hqMode ? { volume: 100 } : {}),
+    };
+
+    const isURL = /^(https?:\/\/)/i.test(song);
+
+    // --- Playlist ---
+    if (isURL && isPlaylistURL(song)) {
+      const statusMsg = await client.embed(message, `⏳ Obteniendo playlist...`);
+      let urls;
+      try {
+        urls = await fetchPlaylistURLs(song);
+      } catch (e) {
+        return client.embed(message, `${client.config.emoji.ERROR} No se pudo cargar: ${e.message}`);
+      }
+
+      try { await client.distube.voices.join(channel); } catch {}
+
+      const reversedUrls = [...urls].reverse();
+      let addedCount = 0;
+      try {
+        await client.distube.play(channel, reversedUrls[0], playOpts);
+        addedCount++;
+      } catch (e) {
+        client.logger.warn(`[PlayTop Msg] Primer track falló.`);
+      }
+
+      client.playlistLoading.set(message.guildId, true);
+      (async () => {
+        const remaining = reversedUrls.slice(1);
+        for (let i = 0; i < remaining.length; i++) {
+          if (!client.playlistLoading.get(message.guildId)) break;
+          try {
+            await client.distube.play(channel, remaining[i], playOpts);
+            addedCount++;
+          } catch (e) {}
+
+          if (addedCount % 5 === 0 || i === remaining.length - 1) {
+            if (statusMsg && statusMsg.edit) {
+              statusMsg.edit({
+                embeds: [
+                  new EmbedBuilder()
+                    .setColor(client.config.embed.color)
+                    .setDescription(`⏳ Procesando lista: \`${addedCount}/${urls.length}\` canciones cargadas al principio...`)
+                    .setFooter(client.getFooter(message.author)),
+                ],
+              }).catch(() => {});
+            }
+          }
+          await new Promise((r) => setTimeout(r, 250));
+        }
+        
+        if (statusMsg && statusMsg.edit) {
+          statusMsg.edit({
+            embeds: [
+              new EmbedBuilder()
+                .setColor(client.config.embed.color)
+                .setDescription(`✅ Lista cargada exitosamente: \`${addedCount}/${urls.length}\` canciones procesadas al principio.`)
+                .setFooter(client.getFooter(message.author)),
+            ],
+          }).catch(() => {});
+        }
+        client.playlistLoading.delete(message.guildId);
+      })();
+      return;
+    }
+
+    // --- Normal ---
+    try {
+      await client.distube.voices.join(channel);
+      const query = isURL ? song : `ytsearch1:${song}`;
+      await client.distube.play(channel, query, { ...playOpts, unshift: true });
+      await message.delete().catch(() => {});
+    } catch (e) {
+      client.embed(message, `${client.config.emoji.ERROR} Error: ${e.message}`);
     }
   },
 };

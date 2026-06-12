@@ -1,4 +1,4 @@
-const { Message, PermissionFlagsBits } = require("discord.js");
+const { Message, PermissionFlagsBits, EmbedBuilder } = require("discord.js");
 const JUGNU = require("../../../handlers/Client");
 const Store = require("../../../handlers/PlaylistStore");
 const { spawn } = require("child_process");
@@ -78,35 +78,73 @@ module.exports = {
 
     shuffleArray(tracks);
 
+    const statusMsg = await client.embed(message, `✅ Cargando \`${playlistName}\`... (0/${tracks.length})`);
+
     const first = tracks[0];
-    await client.distube.play(vc, first, {
-      member: message.member,
-      textChannel: message.channel,
-      message,
-    });
+    let addedCount = 0;
+    try {
+      await client.distube.play(vc, first, {
+        member: message.member,
+        textChannel: message.channel,
+        message,
+      });
+      addedCount++;
+    } catch (e) {
+      client.logger.error(`[ShufflePlay Msg] Error en primer track: ${e.message}`);
+    }
 
     client.playlistLoading.set(message.guild.id, true);
     (async () => {
-      for (const t of tracks.slice(1)) {
+      const remaining = tracks.slice(1);
+      for (let i = 0; i < remaining.length; i++) {
         if (!client.playlistLoading.get(message.guild.id)) break;
+        const t = remaining[i];
         try {
           await client.distube.play(vc, t, {
             member: message.member,
             textChannel: message.channel,
             message,
           });
+          addedCount++;
         } catch (e) {
-          client.logger.error(`[ShufflePlay] Error: ${e.message}`);
+          client.logger.error(`[ShufflePlay Msg] Error en track ${i + 2}: ${e.message}`);
+        }
+
+        // Actualizar progreso cada 5 canciones o al final
+        if (addedCount % 5 === 0 || i === remaining.length - 1) {
+          if (statusMsg && statusMsg.edit) {
+            statusMsg.edit({
+              embeds: [
+                new EmbedBuilder()
+                  .setColor(client.config.embed.color)
+                  .setDescription(`⏳ Cargando \`${playlistName}\`... (${addedCount}/${tracks.length} canciones añadidas)`)
+                  .setFooter(client.getFooter(message.author)),
+              ],
+            }).catch(() => {});
+          }
         }
         await new Promise((r) => setTimeout(r, 250));
       }
+
       const queue = client.distube.getQueue(message.guild.id);
       if (queue && queue.repeatMode === 2) {
-         client.logger.log(`[ShufflePlay] Queue loop active (repeatMode: 2). Consistency checked.`);
+         client.logger.log(`[ShufflePlay Msg] Queue loop active (repeatMode: 2). Consistency checked.`);
       }
+
+      if (statusMsg && statusMsg.edit) {
+        statusMsg.edit({
+          embeds: [
+            new EmbedBuilder()
+              .setColor(client.config.embed.color)
+              .setDescription(`✅ Carga finalizada: \`${playlistName}\` (${addedCount} canciones añadidas exitosamente).`)
+              .setFooter(client.getFooter(message.author)),
+          ],
+        }).catch(() => {});
+      }
+
       client.playlistLoading.delete(message.guild.id);
     })();
 
-    return client.embed(message, `${client.config.emoji.SUCCESS} Reproduciendo aleatoriamente \`${playlistName}\` (${tracks.length} canciones).`);
+    return;
   },
 };

@@ -183,15 +183,25 @@ module.exports = {
       client.playlistLoading.set(interaction.guildId, true);
       (async () => {
         const remaining = urls.slice(1);
+        let processedCount = 1;
         try {
           for (let i = 0; i < remaining.length; i++) {
             if (!client.playlistLoading.get(interaction.guildId)) break;
             const url = remaining[i];
             try {
               await client.distube.play(channel, url, nextPlayOpts);
+              processedCount++;
             } catch (e) {
               client.logger.warn(`[Playlist Skip] Track ${i + 2} saltado en Guild ${interaction.guildId}:`, e.message);
             }
+
+            // Actualizar progreso cada 5 canciones o al final
+            if (processedCount % 5 === 0 || i === remaining.length - 1) {
+              await interaction.editReply({ 
+                content: `⏳ Procesando lista: \`${processedCount}/${urls.length}\` canciones cargadas...` 
+              }).catch(() => {});
+            }
+
             // Tiempo de espera para procesar interacciones
             await new Promise((r) => setTimeout(r, 250));
           }
@@ -199,6 +209,10 @@ module.exports = {
           if (queue && queue.repeatMode === 2) {
             client.logger.log(`[Playlist Skip] Queue loop is active (repeatMode: 2) in Guild ${interaction.guildId}. New items included.`);
           }
+
+          await interaction.editReply({ 
+            content: `✅ Lista cargada exitosamente: \`${processedCount}/${urls.length}\` canciones procesadas.` 
+          }).catch(() => {});
 
           if (
             queue &&

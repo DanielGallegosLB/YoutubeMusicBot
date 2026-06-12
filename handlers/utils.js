@@ -265,27 +265,45 @@ module.exports = async (client) => {
   client.updateembed = async (client, guild) => {
     try {
       const data = await client.music.get(`${guild.id}.music`);
-      if (!data) return;
+      if (!data || !data.channel) return;
 
-      const musicchannel = guild.channels.cache.get(data.channel);
+      const musicchannel = guild.channels.cache.get(data.channel) || await guild.channels.fetch(data.channel).catch(() => null);
       if (!musicchannel) return;
 
-      // Fetch both playmsg and queuemsg simultaneously using Promise.all()
-      const [playmsg, queuemsg] = await Promise.all([
-        musicchannel.messages.fetch(data.pmsg).catch(() => {}),
-        musicchannel.messages.fetch(data.qmsg).catch(() => {}),
-      ]);
+      // Fetch both playmsg and queuemsg simultaneously
+      let playmsg = await musicchannel.messages.fetch(data.pmsg).catch(() => null);
+      let queuemsg = await musicchannel.messages.fetch(data.qmsg).catch(() => null);
 
-      // If either playmsg or queuemsg is not found, return
-      if (!playmsg || !queuemsg) return;
+      // Self-Repair: If messages are missing, recreate them
+      if (!playmsg || !queuemsg) {
+        client.logger.warn(`[Self-Repair] Missing messages in ${guild.name}. Recreating...`);
+        // Clean up any remaining one if it exists
+        if (playmsg) await playmsg.delete().catch(() => {});
+        if (queuemsg) await queuemsg.delete().catch(() => {});
 
-      // Edit playmsg and queuemsg simultaneously using Promise.all()
+        const pMsg = await musicchannel.send({
+          embeds: [client.playembed(guild)],
+          components: client.buttons(true),
+        });
+        const qMsg = await musicchannel.send({
+          embeds: [client.queueembed(guild)],
+        });
+
+        await client.music.set(`${guild.id}.music`, {
+          channel: data.channel,
+          pmsg: pMsg.id,
+          qmsg: qMsg.id,
+        });
+        return;
+      }
+
+      // Edit playmsg and queuemsg simultaneously
       await Promise.all([
         playmsg.edit({
           embeds: [client.playembed(guild)],
           components: client.buttons(true),
-        }),
-        queuemsg.edit({ embeds: [client.queueembed(guild)] }),
+        }).catch(() => {}),
+        queuemsg.edit({ embeds: [client.queueembed(guild)] }).catch(() => {}),
       ]);
     } catch (error) {
       console.error("Error updating embed:", error);
@@ -302,27 +320,28 @@ module.exports = async (client) => {
     try {
       const guildId = queue?.textChannel?.guildId || queue?.guildId;
       if (!guildId) return;
-      const guild = client.guilds.cache.get(guildId);
+      const guild = client.guilds.cache.get(guildId) || await client.guilds.fetch(guildId).catch(() => null);
       if (!guild) return;
 
       const data = await client.music.get(`${guild.id}.music`);
-      if (!data) return;
+      if (!data || !data.channel) return;
 
-      const musicchannel = guild.channels.cache.get(data.channel);
+      const musicchannel = guild.channels.cache.get(data.channel) || await guild.channels.fetch(data.channel).catch(() => null);
       if (!musicchannel) return;
 
-      let queueembed = await musicchannel.messages
-        .fetch(data.qmsg)
-        .catch(() => {});
+      let queueembed = await musicchannel.messages.fetch(data.qmsg).catch(() => null);
 
-      if (!queueembed) return;
+      // Self-Repair Trigger
+      if (!queueembed) {
+        return await client.updateembed(client, guild);
+      }
 
       // Always get the freshest state from distube
       const freshQueue = client.distube.getQueue(guild.id) || queue;
       
       // If no queue, reset to empty
       if (!freshQueue || !freshQueue.songs.length) {
-        return await queueembed.edit({ embeds: [client.queueembed(guild)] });
+        return await queueembed.edit({ embeds: [client.queueembed(guild)] }).catch(() => {});
       }
 
       const currentSong = freshQueue.songs[0];
@@ -358,7 +377,7 @@ module.exports = async (client) => {
         newQueueEmbed.setDescription("No more songs in queue.");
       }
 
-      await queueembed.edit({ embeds: [newQueueEmbed] });
+      await queueembed.edit({ embeds: [newQueueEmbed] }).catch(() => {});
     } catch (error) {
       console.error("Error updating queue:", error);
     }
@@ -374,19 +393,21 @@ module.exports = async (client) => {
     try {
       const guildId = queue?.textChannel?.guildId || queue?.guildId;
       if (!guildId) return;
-      const guild = client.guilds.cache.get(guildId);
+      const guild = client.guilds.cache.get(guildId) || await client.guilds.fetch(guildId).catch(() => null);
       if (!guild) return;
 
       const data = await client.music.get(`${guild.id}.music`);
-      if (!data) return;
+      if (!data || !data.channel) return;
 
-      const musicchannel = guild.channels.cache.get(data.channel);
+      const musicchannel = guild.channels.cache.get(data.channel) || await guild.channels.fetch(data.channel).catch(() => null);
       if (!musicchannel) return;
 
-      let playembed = await musicchannel.messages
-        .fetch(data.pmsg)
-        .catch(() => {});
-      if (!playembed) return;
+      let playembed = await musicchannel.messages.fetch(data.pmsg).catch(() => null);
+
+      // Self-Repair Trigger
+      if (!playembed) {
+        return await client.updateembed(client, guild);
+      }
 
       // Always get the freshest state from distube
       const freshQueue = client.distube.getQueue(guild.id);
@@ -394,7 +415,7 @@ module.exports = async (client) => {
         return await playembed.edit({
           embeds: [client.playembed(guild)],
           components: client.buttons(true),
-        });
+        }).catch(() => {});
       }
 
       const track = freshQueue.songs[0];
@@ -427,7 +448,7 @@ module.exports = async (client) => {
       await playembed.edit({
         embeds: [newEmbed],
         components: client.buttons(false, freshQueue),
-      });
+      }).catch(() => {});
     } catch (error) {
       console.error("Error updating player:", error);
     }
