@@ -2364,3 +2364,503 @@ ERROR: [youtube] 8qmsG43X1gM: This video has been removed for violating YouTube'
 [12/6/2026, 3:13:44 p.m.] [INFO] [Slash Play] User: dani_sas Guild: 311402172820619274 Query: https://www.youtube.com/playlist?list=PLWjrvqpXVE9WeNLEDdEzVh--gtJCVWbvr
 [12/6/2026, 3:13:51 p.m.] [INFO] [Slash Play] Playlist cargada: 106 tracks
 [12/6/2026, 3:14:03 p.m.] [INFO] [Slash Play Success] First playable track index 1: https://www.youtube.com/watch?v=IxGvm6btP1A
+[12/6/2026, 3:16:04 p.m.] [WARN] [Slash Play] Track 18 saltado en Guild 311402172820619274: Error: ERROR: [youtube] NVgebSuZjwE: Video unavailable. This video is no longer available due to a copyright claim by Universal Music Group
+
+[12/6/2026, 3:17:40 p.m.] [WARN] [Slash Play] Track 31 saltado en Guild 311402172820619274: Error: ERROR: [youtube] wP6aCXsFaHE: Video unavailable. This video is not available
+
+[12/6/2026, 3:21:08 p.m.] [WARN] [Slash Play] Track 61 saltado en Guild 311402172820619274: Error: ERROR: [youtube] BWyOqO90Ue8: Video unavailable. This video is no longer available due to a copyright claim by Warner Music Group
+
+[12/6/2026, 3:21:26 p.m.] [WARN] [Slash Play] Track 64 saltado en Guild 311402172820619274: Error: ERROR: [youtube] FOJdADjAIi0: Video unavailable. This video is no longer available due to a copyright claim by Yeezy LLC
+
+[12/6/2026, 3:22:17 p.m.] [INFO] Clubot Music is Online
+[12/6/2026, 3:22:24 p.m.] [INFO] [Slash Play] User: dani_sas Guild: 311402172820619274 Query: https://www.youtube.com/playlist?list=PLWjrvqpXVE9WeNLEDdEzVh--gtJCVWbvr
+[12/6/2026, 3:22:31 p.m.] [INFO] [Slash Play] Playlist cargada: 106 tracks
+[12/6/2026, 3:22:43 p.m.] [INFO] [Slash Play Success] First playable track index 1: https://www.youtube.com/watch?v=IxGvm6btP1A
+[12/6/2026, 3:24:44 p.m.] [WARN] [Slash Play] Track 18 saltado en Guild 311402172820619274: Error: ERROR: [youtube] NVgebSuZjwE: Video unavailable. This video is no longer available due to a copyright claim by Universal Music Group
+
+[12/6/2026, 3:26:18 p.m.] [WARN] [Slash Play] Track 31 saltado en Guild 311402172820619274: Error: ERROR: [youtube] wP6aCXsFaHE: Video unavailable. This video is not available
+
+[12/6/2026, 3:30:03 p.m.] [WARN] [Slash Play] Track 61 saltado en Guild 311402172820619274: Error: ERROR: [youtube] BWyOqO90Ue8: Video unavailable. This video is no longer available due to a copyright claim by Warner Music Group
+
+[12/6/2026, 3:30:31 p.m.] [WARN] [Slash Play] Track 64 saltado en Guild 311402172820619274: Error: ERROR: [youtube] FOJdADjAIi0: Video unavailable. This video is no longer available due to a copyright claim by Yeezy LLC
+
+[12/6/2026, 3:31:55 p.m.] [WARN] [Slash Play] Track 77 saltado en Guild 311402172820619274: Error: ERROR: [youtube] E2kGhgGSi78: Video unavailable. This video is not available
+
+[12/6/2026, 3:32:06 p.m.] [WARN] [Slash Play] Track 79 saltado en Guild 311402172820619274: Error: ERROR: [youtube] b-sX0EqZZZI: This video has been removed for violating YouTube's policy on hate speech. Learn more about combating hate speech in your country.
+
+[12/6/2026, 3:35:03 p.m.] [INFO] [Slash Play] Playlist session guardada: 97 canciones
+[12/6/2026, 3:35:03 p.m.] [INFO] [Slash Play] 106 tracks procesados en Guild: 311402172820619274
+[12/6/2026, 3:41:56 p.m.] [INFO] Clubot Music is Online
+[12/6/2026, 3:42:01 p.m.] [INFO] [Slash Play] User: dani_sas Guild: 311402172820619274 Query: https://www.youtube.com/playlist?list=PLWjrvqpXVE9WeNLEDdEzVh--gtJCVWbvr
+[12/6/2026, 3:42:22 p.m.] [INFO] [Slash Play] Playlist cargada: 295 tracks
+[12/6/2026, 3:42:30 p.m.] [WARN] [Slash Play] Track 1 no disponible, saltando: https://www.youtube.com/watch?v=IxGvm6btP1A Error: ERROR: [youtube] IxGvm6btP1A: Requested format is not available. Use --list-formats for a list of available formats
+
+[12/6/2026, 3:42:37 p.m.] [WARN] [Slash Play] Track 2 no disponible, saltando: https://www.youtube.com/watch?v=uC-bgFCwwn4 Error: ERROR: [youtube] uC-bgFCwwn4: Requested format is not available. Use --list-formats for a list of available formats
+
+[12/6/2026, 3:42:45 p.m.] [WARN] [Slash Play] Track 3 no disponible, saltando: https://www.youtube.com/watch?v=xyxV2p10k7s Error: ERROR: [youtube] xyxV2p10k7s: Requested format is not available. Use --list-formats for a list of available formats
+
+[12/6/2026, 3:42:53 p.m.] [WARN] [Slash Play] Track 4 no disponible, saltando: https://www.youtube.com/watch?v=VOYTORQAN8A Error: ERROR: [youtube] VOYTORQAN8A: Requested format is not available. Use --list-formats for a list of available formats
+
+[12/6/2026, 3:43:01 p.m.] [WARN] [Slash Play] Track 5 no disponible, saltando: https://www.youtube.com/watch?v=uLIs0j2WnlM Error: ERROR: [youtube] uLIs0j2WnlM: Requested format is not available. Use --list-formats for a list of available formats
+
+[12/6/2026, 3:43:11 p.m.] [WARN] [Slash Play] Track 6 no disponible, saltando: https://www.youtube.com/watch?v=KvknOXGPzCQ Error: ERROR: [youtube] KvknOXGPzCQ: Requested format is not available. Use --list-formats for a list of available formats
+
+[12/6/2026, 3:43:20 p.m.] [WARN] [Slash Play] Track 7 no disponible, saltando: https://www.youtube.com/watch?v=Y_8mUx4VOmo Error: ERROR: [youtube] Y_8mUx4VOmo: Requested format is not available. Use --list-formats for a list of available formats
+
+[12/6/2026, 3:43:29 p.m.] [WARN] [Slash Play] Track 8 no disponible, saltando: https://www.youtube.com/watch?v=1jYzsP_ETgo Error: ERROR: [youtube] 1jYzsP_ETgo: Requested format is not available. Use --list-formats for a list of available formats
+
+[12/6/2026, 3:43:37 p.m.] [WARN] [Slash Play] Track 9 no disponible, saltando: https://www.youtube.com/watch?v=dzuZVyotEn8 Error: ERROR: [youtube] dzuZVyotEn8: Requested format is not available. Use --list-formats for a list of available formats
+
+[12/6/2026, 3:43:47 p.m.] [WARN] [Slash Play] Track 10 no disponible, saltando: https://www.youtube.com/watch?v=m3lF2qEA2cw Error: ERROR: [youtube] m3lF2qEA2cw: Requested format is not available. Use --list-formats for a list of available formats
+
+[12/6/2026, 3:43:55 p.m.] [WARN] [Slash Play] Track 11 no disponible, saltando: https://www.youtube.com/watch?v=TFWXqLSr4ZM Error: ERROR: [youtube] TFWXqLSr4ZM: Requested format is not available. Use --list-formats for a list of available formats
+
+[12/6/2026, 3:44:03 p.m.] [WARN] [Slash Play] Track 12 no disponible, saltando: https://www.youtube.com/watch?v=zwV1ElnnA84 Error: ERROR: [youtube] zwV1ElnnA84: Requested format is not available. Use --list-formats for a list of available formats
+
+[12/6/2026, 3:44:09 p.m.] [WARN] [Slash Play] Track 13 no disponible, saltando: https://www.youtube.com/watch?v=jk41SyhPC1E Error: ERROR: [youtube] jk41SyhPC1E: Requested format is not available. Use --list-formats for a list of available formats
+
+[12/6/2026, 3:44:16 p.m.] [WARN] [Slash Play] Track 14 no disponible, saltando: https://www.youtube.com/watch?v=un92EJx33YQ Error: ERROR: [youtube] un92EJx33YQ: Requested format is not available. Use --list-formats for a list of available formats
+
+[12/6/2026, 3:44:23 p.m.] [WARN] [Slash Play] Track 15 no disponible, saltando: https://www.youtube.com/watch?v=Cy1LdAaGASw Error: ERROR: [youtube] Cy1LdAaGASw: Requested format is not available. Use --list-formats for a list of available formats
+
+[12/6/2026, 3:44:31 p.m.] [WARN] [Slash Play] Track 16 no disponible, saltando: https://www.youtube.com/watch?v=cvq7Jy-TFAU Error: ERROR: [youtube] cvq7Jy-TFAU: Requested format is not available. Use --list-formats for a list of available formats
+
+[12/6/2026, 3:44:41 p.m.] [INFO] Clubot Music is Online
+[12/6/2026, 3:44:56 p.m.] [INFO] [Slash Play] User: dani_sas Guild: 311402172820619274 Query: https://www.youtube.com/playlist?list=PLWjrvqpXVE9WeNLEDdEzVh--gtJCVWbvr
+[12/6/2026, 3:45:17 p.m.] [INFO] [Slash Play] Playlist cargada: 295 tracks
+[12/6/2026, 3:45:25 p.m.] [WARN] [Slash Play] Track 1 no disponible, saltando: https://www.youtube.com/watch?v=IxGvm6btP1A Error: ERROR: [youtube] IxGvm6btP1A: Requested format is not available. Use --list-formats for a list of available formats
+
+[12/6/2026, 3:45:32 p.m.] [WARN] [Slash Play] Track 2 no disponible, saltando: https://www.youtube.com/watch?v=uC-bgFCwwn4 Error: ERROR: [youtube] uC-bgFCwwn4: Requested format is not available. Use --list-formats for a list of available formats
+
+[12/6/2026, 3:45:40 p.m.] [WARN] [Slash Play] Track 3 no disponible, saltando: https://www.youtube.com/watch?v=xyxV2p10k7s Error: ERROR: [youtube] xyxV2p10k7s: Requested format is not available. Use --list-formats for a list of available formats
+
+[12/6/2026, 3:45:48 p.m.] [WARN] [Slash Play] Track 4 no disponible, saltando: https://www.youtube.com/watch?v=VOYTORQAN8A Error: ERROR: [youtube] VOYTORQAN8A: Requested format is not available. Use --list-formats for a list of available formats
+
+[12/6/2026, 3:45:56 p.m.] [WARN] [Slash Play] Track 5 no disponible, saltando: https://www.youtube.com/watch?v=uLIs0j2WnlM Error: ERROR: [youtube] uLIs0j2WnlM: Requested format is not available. Use --list-formats for a list of available formats
+
+[12/6/2026, 3:46:06 p.m.] [WARN] [Slash Play] Track 6 no disponible, saltando: https://www.youtube.com/watch?v=KvknOXGPzCQ Error: ERROR: [youtube] KvknOXGPzCQ: Requested format is not available. Use --list-formats for a list of available formats
+
+[12/6/2026, 3:46:15 p.m.] [WARN] [Slash Play] Track 7 no disponible, saltando: https://www.youtube.com/watch?v=Y_8mUx4VOmo Error: ERROR: [youtube] Y_8mUx4VOmo: Requested format is not available. Use --list-formats for a list of available formats
+
+[12/6/2026, 3:46:25 p.m.] [WARN] [Slash Play] Track 8 no disponible, saltando: https://www.youtube.com/watch?v=1jYzsP_ETgo Error: ERROR: [youtube] 1jYzsP_ETgo: Requested format is not available. Use --list-formats for a list of available formats
+
+[12/6/2026, 3:46:34 p.m.] [WARN] [Slash Play] Track 9 no disponible, saltando: https://www.youtube.com/watch?v=dzuZVyotEn8 Error: ERROR: [youtube] dzuZVyotEn8: Requested format is not available. Use --list-formats for a list of available formats
+
+[12/6/2026, 3:46:45 p.m.] [WARN] [Slash Play] Track 10 no disponible, saltando: https://www.youtube.com/watch?v=m3lF2qEA2cw Error: ERROR: [youtube] m3lF2qEA2cw: Requested format is not available. Use --list-formats for a list of available formats
+
+[12/6/2026, 3:46:55 p.m.] [WARN] [Slash Play] Track 11 no disponible, saltando: https://www.youtube.com/watch?v=TFWXqLSr4ZM Error: ERROR: [youtube] TFWXqLSr4ZM: Requested format is not available. Use --list-formats for a list of available formats
+
+[12/6/2026, 3:47:05 p.m.] [WARN] [Slash Play] Track 12 no disponible, saltando: https://www.youtube.com/watch?v=zwV1ElnnA84 Error: ERROR: [youtube] zwV1ElnnA84: Requested format is not available. Use --list-formats for a list of available formats
+
+[12/6/2026, 3:47:13 p.m.] [WARN] [Slash Play] Track 13 no disponible, saltando: https://www.youtube.com/watch?v=jk41SyhPC1E Error: ERROR: [youtube] jk41SyhPC1E: Requested format is not available. Use --list-formats for a list of available formats
+
+[12/6/2026, 3:47:23 p.m.] [WARN] [Slash Play] Track 14 no disponible, saltando: https://www.youtube.com/watch?v=un92EJx33YQ Error: ERROR: [youtube] un92EJx33YQ: Requested format is not available. Use --list-formats for a list of available formats
+
+[12/6/2026, 3:47:32 p.m.] [WARN] [Slash Play] Track 15 no disponible, saltando: https://www.youtube.com/watch?v=Cy1LdAaGASw Error: ERROR: [youtube] Cy1LdAaGASw: Requested format is not available. Use --list-formats for a list of available formats
+
+[12/6/2026, 3:47:42 p.m.] [WARN] [Slash Play] Track 16 no disponible, saltando: https://www.youtube.com/watch?v=cvq7Jy-TFAU Error: ERROR: [youtube] cvq7Jy-TFAU: Requested format is not available. Use --list-formats for a list of available formats
+
+[12/6/2026, 3:47:50 p.m.] [WARN] [Slash Play] Track 17 no disponible, saltando: https://www.youtube.com/watch?v=ECMgYqdldfA Error: ERROR: [youtube] ECMgYqdldfA: Requested format is not available. Use --list-formats for a list of available formats
+
+[12/6/2026, 3:47:56 p.m.] [WARN] [Slash Play] Track 18 no disponible, saltando: https://www.youtube.com/watch?v=NVgebSuZjwE Error: ERROR: [youtube] NVgebSuZjwE: Video unavailable. This video is no longer available due to a copyright claim by Universal Music Group
+
+[12/6/2026, 3:48:05 p.m.] [WARN] [Slash Play] Track 19 no disponible, saltando: https://www.youtube.com/watch?v=PyN6aslxHzQ Error: ERROR: [youtube] PyN6aslxHzQ: Requested format is not available. Use --list-formats for a list of available formats
+
+[12/6/2026, 3:48:14 p.m.] [WARN] [Slash Play] Track 20 no disponible, saltando: https://www.youtube.com/watch?v=uxGQiGfFVEs Error: ERROR: [youtube] uxGQiGfFVEs: Requested format is not available. Use --list-formats for a list of available formats
+
+[12/6/2026, 3:48:23 p.m.] [WARN] [Slash Play] Track 21 no disponible, saltando: https://www.youtube.com/watch?v=2gmJijgLdaY Error: ERROR: [youtube] 2gmJijgLdaY: Requested format is not available. Use --list-formats for a list of available formats
+
+[12/6/2026, 3:48:32 p.m.] [WARN] [Slash Play] Track 22 no disponible, saltando: https://www.youtube.com/watch?v=BuUYrc1v6lw Error: ERROR: [youtube] BuUYrc1v6lw: Requested format is not available. Use --list-formats for a list of available formats
+
+[12/6/2026, 3:48:41 p.m.] [WARN] [Slash Play] Track 23 no disponible, saltando: https://www.youtube.com/watch?v=Pb7pjz8CqyE Error: ERROR: [youtube] Pb7pjz8CqyE: Requested format is not available. Use --list-formats for a list of available formats
+
+[12/6/2026, 3:48:50 p.m.] [WARN] [Slash Play] Track 24 no disponible, saltando: https://www.youtube.com/watch?v=KaumK4b6DqQ Error: ERROR: [youtube] KaumK4b6DqQ: Requested format is not available. Use --list-formats for a list of available formats
+
+[12/6/2026, 3:48:59 p.m.] [WARN] [Slash Play] Track 25 no disponible, saltando: https://www.youtube.com/watch?v=agNvdSIIkXA Error: ERROR: [youtube] agNvdSIIkXA: Requested format is not available. Use --list-formats for a list of available formats
+
+[12/6/2026, 3:49:09 p.m.] [WARN] [Slash Play] Track 26 no disponible, saltando: https://www.youtube.com/watch?v=xiZUf98A1Ts Error: ERROR: [youtube] xiZUf98A1Ts: Requested format is not available. Use --list-formats for a list of available formats
+
+[12/6/2026, 3:49:18 p.m.] [WARN] [Slash Play] Track 27 no disponible, saltando: https://www.youtube.com/watch?v=teprNzF6J1I Error: ERROR: [youtube] teprNzF6J1I: Requested format is not available. Use --list-formats for a list of available formats
+
+[12/6/2026, 3:49:28 p.m.] [WARN] [Slash Play] Track 28 no disponible, saltando: https://www.youtube.com/watch?v=GbZYtHHrmG4 Error: ERROR: [youtube] GbZYtHHrmG4: Requested format is not available. Use --list-formats for a list of available formats
+
+[12/6/2026, 3:49:37 p.m.] [WARN] [Slash Play] Track 29 no disponible, saltando: https://www.youtube.com/watch?v=hzRltUL5M3k Error: ERROR: [youtube] hzRltUL5M3k: Requested format is not available. Use --list-formats for a list of available formats
+
+[12/6/2026, 3:49:47 p.m.] [WARN] [Slash Play] Track 30 no disponible, saltando: https://www.youtube.com/watch?v=Hx6WuGfOV0Q Error: ERROR: [youtube] Hx6WuGfOV0Q: Requested format is not available. Use --list-formats for a list of available formats
+
+[12/6/2026, 3:49:53 p.m.] [WARN] [Slash Play] Track 31 no disponible, saltando: https://www.youtube.com/watch?v=wP6aCXsFaHE Error: ERROR: [youtube] wP6aCXsFaHE: Video unavailable. This video is not available
+
+[12/6/2026, 3:50:03 p.m.] [WARN] [Slash Play] Track 32 no disponible, saltando: https://www.youtube.com/watch?v=Ck7ibM-GVYA Error: ERROR: [youtube] Ck7ibM-GVYA: Requested format is not available. Use --list-formats for a list of available formats
+
+[12/6/2026, 3:50:13 p.m.] [WARN] [Slash Play] Track 33 no disponible, saltando: https://www.youtube.com/watch?v=eW2qlKa6oHw Error: ERROR: [youtube] eW2qlKa6oHw: Requested format is not available. Use --list-formats for a list of available formats
+
+[12/6/2026, 3:50:22 p.m.] [WARN] [Slash Play] Track 34 no disponible, saltando: https://www.youtube.com/watch?v=LXeQ6bmV7oU Error: ERROR: [youtube] LXeQ6bmV7oU: Requested format is not available. Use --list-formats for a list of available formats
+
+[12/6/2026, 3:50:31 p.m.] [WARN] [Slash Play] Track 35 no disponible, saltando: https://www.youtube.com/watch?v=HBMy-y2wb4I Error: ERROR: [youtube] HBMy-y2wb4I: Requested format is not available. Use --list-formats for a list of available formats
+
+[12/6/2026, 3:50:41 p.m.] [WARN] [Slash Play] Track 36 no disponible, saltando: https://www.youtube.com/watch?v=U2beixNMeWA Error: ERROR: [youtube] U2beixNMeWA: Requested format is not available. Use --list-formats for a list of available formats
+
+[12/6/2026, 3:50:49 p.m.] [WARN] [Slash Play] Track 37 no disponible, saltando: https://www.youtube.com/watch?v=fc8-lG6Wnus Error: ERROR: [youtube] fc8-lG6Wnus: Requested format is not available. Use --list-formats for a list of available formats
+
+[12/6/2026, 3:50:57 p.m.] [WARN] [Slash Play] Track 38 no disponible, saltando: https://www.youtube.com/watch?v=s40BTpfAELs Error: ERROR: [youtube] s40BTpfAELs: Requested format is not available. Use --list-formats for a list of available formats
+
+[12/6/2026, 3:51:06 p.m.] [INFO] Clubot Music is Online
+[12/6/2026, 3:51:47 p.m.] [INFO] [Slash Play] User: dani_sas Guild: 311402172820619274 Query: https://www.youtube.com/playlist?list=PLWjrvqpXVE9WeNLEDdEzVh--gtJCVWbvr
+[12/6/2026, 3:52:08 p.m.] [INFO] [Slash Play] Playlist cargada: 295 tracks
+[12/6/2026, 3:52:26 p.m.] [INFO] [Slash Play Success] First playable track index 1: https://www.youtube.com/watch?v=IxGvm6btP1A
+[12/6/2026, 3:54:58 p.m.] [WARN] [Slash Play] Track 18 saltado en Guild 311402172820619274: Error: ERROR: [youtube] NVgebSuZjwE: Video unavailable. This video is no longer available due to a copyright claim by Universal Music Group
+
+[12/6/2026, 3:56:58 p.m.] [WARN] [Slash Play] Track 31 saltado en Guild 311402172820619274: Error: ERROR: [youtube] wP6aCXsFaHE: Video unavailable. This video is not available
+
+[12/6/2026, 4:01:29 p.m.] [WARN] [Slash Play] Track 61 saltado en Guild 311402172820619274: Error: ERROR: [youtube] BWyOqO90Ue8: Video unavailable. This video is no longer available due to a copyright claim by Warner Music Group
+
+[12/6/2026, 4:01:52 p.m.] [WARN] [Slash Play] Track 64 saltado en Guild 311402172820619274: Error: ERROR: [youtube] FOJdADjAIi0: Video unavailable. This video is no longer available due to a copyright claim by Yeezy LLC
+
+[12/6/2026, 4:03:44 p.m.] [WARN] [Slash Play] Track 77 saltado en Guild 311402172820619274: Error: ERROR: [youtube] E2kGhgGSi78: Video unavailable. This video is not available
+
+[12/6/2026, 4:03:57 p.m.] [WARN] [Slash Play] Track 79 saltado en Guild 311402172820619274: Error: ERROR: [youtube] b-sX0EqZZZI: This video has been removed for violating YouTube's policy on hate speech. Learn more about combating hate speech in your country.
+
+[12/6/2026, 4:17:10 p.m.] [WARN] [Slash Play] Track 165 saltado en Guild 311402172820619274: Error: ERROR: [youtube] 1QsATOApciw: Video unavailable. This video is not available
+
+[12/6/2026, 4:19:36 p.m.] [WARN] [Slash Play] Track 182 saltado en Guild 311402172820619274: Error: ERROR: [youtube] 8BCXvyYmDW4: Video unavailable. This video is not available
+
+[12/6/2026, 4:19:59 p.m.] [WARN] [Slash Play] Track 185 saltado en Guild 311402172820619274: Error: ERROR: [youtube] jzjIJ56wi-k: Video unavailable. This video is not available
+
+[12/6/2026, 4:20:13 p.m.] [WARN] [Slash Play] Track 187 saltado en Guild 311402172820619274: Error: ERROR: [youtube] 91CgneMIe_A: Video unavailable. This video is not available
+
+[12/6/2026, 4:21:11 p.m.] [WARN] [Slash Play] Track 193 saltado en Guild 311402172820619274: Error: ERROR: [youtube] lqVpXC4QFZI: Video unavailable. This video is not available
+
+[12/6/2026, 4:21:42 p.m.] [WARN] [Slash Play] Track 197 saltado en Guild 311402172820619274: Error: ERROR: [youtube] gzV_ztI1Qbs: Video unavailable. This video is not available
+
+[12/6/2026, 4:24:29 p.m.] [WARN] [Slash Play] Track 216 saltado en Guild 311402172820619274: Error: ERROR: [youtube] ab_abD33TzU: Video unavailable. This video contains content from AltraModaMusic, who has blocked it in your country on copyright grounds
+
+[12/6/2026, 4:26:49 p.m.] [WARN] [Slash Play] Track 231 saltado en Guild 311402172820619274: Error: ERROR: [youtube] 8qmsG43X1gM: This video has been removed for violating YouTube's Terms of Service
+
+[12/6/2026, 4:36:25 p.m.] [INFO] [Playlist Load] Queue loop is active (repeatMode: 2) in Guild 311402172820619274. New items included.
+[12/6/2026, 4:36:25 p.m.] [INFO] [Slash Play] Playlist session guardada: 0 canciones
+[12/6/2026, 4:36:25 p.m.] [INFO] [Slash Play] 295 tracks procesados en Guild: 311402172820619274
+[14/6/2026, 7:02:34 p.m.] [INFO] [Slash Play] User: dani_sas Guild: 311402172820619274 Query: https://www.youtube.com/watch?v=bzni5Pr1puA
+[14/6/2026, 7:02:54 p.m.] [INFO] [Slash Play Success] Guild: 311402172820619274 Query: https://www.youtube.com/watch?v=bzni5Pr1puA
+[14/6/2026, 9:15:32 p.m.] [INFO] [Slash Play] User: dani_sas Guild: 311402172820619274 Query: https://www.youtube.com/watch?v=1YRBnSHyB2k
+[14/6/2026, 9:15:50 p.m.] [INFO] [Slash Play Success] Guild: 311402172820619274 Query: https://www.youtube.com/watch?v=1YRBnSHyB2k
+[16/6/2026, 4:11:59 p.m.] [INFO] [Slash Play] User: dani_sas Guild: 311402172820619274 Query: https://www.youtube.com/playlist?list=PLWjrvqpXVE9WeNLEDdEzVh--gtJCVWbvr
+[16/6/2026, 4:12:11 p.m.] [INFO] [Slash Play] Playlist cargada: 106 tracks
+[16/6/2026, 4:12:30 p.m.] [INFO] [Slash Play Success] First playable track index 1: https://www.youtube.com/watch?v=IxGvm6btP1A
+[16/6/2026, 4:14:56 p.m.] [WARN] [Slash Play] Track 18 saltado en Guild 311402172820619274: Error: ERROR: [youtube] NVgebSuZjwE: Video unavailable. This video is no longer available due to a copyright claim by Universal Music Group
+
+[16/6/2026, 4:16:55 p.m.] [WARN] [Slash Play] Track 31 saltado en Guild 311402172820619274: Error: ERROR: [youtube] wP6aCXsFaHE: Video unavailable. This video is not available
+
+[16/6/2026, 4:21:19 p.m.] [WARN] [Slash Play] Track 61 saltado en Guild 311402172820619274: Error: ERROR: [youtube] BWyOqO90Ue8: Video unavailable. This video is no longer available due to a copyright claim by Warner Music Group
+
+[16/6/2026, 4:21:41 p.m.] [WARN] [Slash Play] Track 64 saltado en Guild 311402172820619274: Error: ERROR: [youtube] FOJdADjAIi0: Video unavailable. This video is no longer available due to a copyright claim by Yeezy LLC
+
+[16/6/2026, 4:23:31 p.m.] [WARN] [Slash Play] Track 77 saltado en Guild 311402172820619274: Error: ERROR: [youtube] E2kGhgGSi78: Video unavailable. This video is not available
+
+[16/6/2026, 4:23:44 p.m.] [WARN] [Slash Play] Track 79 saltado en Guild 311402172820619274: Error: ERROR: [youtube] b-sX0EqZZZI: This video has been removed for violating YouTube's policy on hate speech. Learn more about combating hate speech in your country.
+
+[16/6/2026, 4:27:49 p.m.] [INFO] [Playlist Load] Queue loop is active (repeatMode: 2) in Guild 311402172820619274. New items included.
+[16/6/2026, 4:27:49 p.m.] [INFO] [Slash Play] Playlist session guardada: 100 canciones
+[16/6/2026, 4:27:49 p.m.] [INFO] [Slash Play] 106 tracks procesados en Guild: 311402172820619274
+[18/6/2026, 6:12:13 a.m.] [INFO] Clubot Music is Online
+[19/6/2026, 1:06:02 a.m.] [INFO] [Slash PlayTop] User: dani_sas Guild: 311402172820619274 Query: https://www.youtube.com/watch?v=DJmloRHjbRU
+[19/6/2026, 1:06:12 a.m.] [INFO] [Slash PlayTop Success] Guild: 311402172820619274 Query: https://www.youtube.com/watch?v=DJmloRHjbRU
+[20/6/2026, 6:15:28 p.m.] [INFO] [Playlist Top] Playlist cargada: 106 tracks
+[20/6/2026, 6:16:12 p.m.] [ERROR] [Playlist Top Track 1 Error] TypeError: Cannot set properties of undefined (setting '_sessionSaved')
+    at Object.run (C:\Users\Dani\Downloads\Proyectos\JUGNU-MUSIC\Commands\Slash\Music\reproducirprimero.js:208:29)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async JUGNU.<anonymous> (C:\Users\Dani\Downloads\Proyectos\JUGNU-MUSIC\events\interactionCreate.js:104:11)
+[20/6/2026, 6:21:39 p.m.] [INFO] [Playlist Top] Playlist cargada: 106 tracks
+[20/6/2026, 6:22:06 p.m.] [ERROR] [Playlist Top Track 1 Error] TypeError: Cannot set properties of undefined (setting '_sessionSaved')
+    at Object.run (C:\Users\Dani\Downloads\Proyectos\JUGNU-MUSIC\Commands\Slash\Music\reproducirprimero.js:208:29)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async JUGNU.<anonymous> (C:\Users\Dani\Downloads\Proyectos\JUGNU-MUSIC\events\interactionCreate.js:104:11)
+[20/6/2026, 6:33:02 p.m.] [INFO] Clubot Music is Online
+[20/6/2026, 6:33:50 p.m.] [INFO] [Playlist Top] Playlist cargada: 106 tracks
+[20/6/2026, 6:59:27 p.m.] [WARN] [Playlist Top] Track saltado en Guild 311402172820619274: Error: ERROR: [youtube] b-sX0EqZZZI: This video has been removed for violating YouTube's policy on hate speech. Learn more about combating hate speech in your country.
+
+[20/6/2026, 7:00:04 p.m.] [WARN] [Playlist Top] Track saltado en Guild 311402172820619274: Error: ERROR: [youtube] E2kGhgGSi78: Video unavailable. This video is not available
+
+[20/6/2026, 7:06:46 p.m.] [WARN] [Playlist Top] Track saltado en Guild 311402172820619274: Error: ERROR: [youtube] FOJdADjAIi0: Video unavailable. This video is no longer available due to a copyright claim by Yeezy LLC
+
+[20/6/2026, 7:07:33 p.m.] [WARN] [Playlist Top] Track saltado en Guild 311402172820619274: Error: ERROR: [youtube] BWyOqO90Ue8: Video unavailable. This video is no longer available due to a copyright claim by Warner Music Group
+
+[20/6/2026, 7:15:46 p.m.] [WARN] [Playlist Top] Track saltado en Guild 311402172820619274: Error: ERROR: [youtube] wP6aCXsFaHE: Video unavailable. This video is not available
+
+[20/6/2026, 7:19:25 p.m.] [WARN] [Playlist Top] Track saltado en Guild 311402172820619274: Error: ERROR: [youtube] NVgebSuZjwE: Video unavailable. This video is no longer available due to a copyright claim by Universal Music Group
+
+[20/6/2026, 7:23:22 p.m.] [INFO] [Playlist Top] Queue loop is active (repeatMode: 2) in Guild 311402172820619274. New items included.
+[20/6/2026, 7:23:22 p.m.] [INFO] [Playlist Top] Playlist session guardada: 98 canciones
+[20/6/2026, 7:23:22 p.m.] [INFO] [Playlist Top] 106 tracks procesados en Guild: 311402172820619274
+[20/6/2026, 8:07:57 p.m.] [INFO] Clubot Music is Online
+[20/6/2026, 8:49:05 p.m.] [ERROR] [Interaction Defer Error] Guild: 311402172820619274 DiscordAPIError[10062]: Unknown interaction
+    at handleErrors (C:\Users\Dani\Downloads\Proyectos\JUGNU-MUSIC\node_modules\@discordjs\rest\dist\index.js:762:13)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async BurstHandler.runRequest (C:\Users\Dani\Downloads\Proyectos\JUGNU-MUSIC\node_modules\@discordjs\rest\dist\index.js:866:23)
+    at async _REST.request (C:\Users\Dani\Downloads\Proyectos\JUGNU-MUSIC\node_modules\@discordjs\rest\dist\index.js:1307:22)
+    at async ChatInputCommandInteraction.deferReply (C:\Users\Dani\Downloads\Proyectos\JUGNU-MUSIC\node_modules\discord.js\src\structures\interfaces\InteractionResponses.js:122:22)
+    at async JUGNU.<anonymous> (C:\Users\Dani\Downloads\Proyectos\JUGNU-MUSIC\events\interactionCreate.js:28:7) {
+  requestBody: { files: undefined, json: { type: 5, data: [Object] } },
+  rawError: { message: 'Unknown interaction', code: 10062 },
+  code: 10062,
+  status: 404,
+  method: 'POST',
+  url: 'https://discord.com/api/v10/interactions/1518055111233114412/aW50ZXJhY3Rpb246MTUxODA1NTExMTIzMzExNDQxMjo4Y2Q1Uk5LVm5uWEJRR3ZiOFhwR1JCaWxKR2xCNWdHRXA3a2lhb1I0Rk5ObTlsVFRjNGJtbUJCcGRCdDhhcXNpQUdVQTVNRFB1SVg4aUpRYWVGbzNJRTluNEk4SGNZaDRjaHpjN0JzRWMxVVpBY2F1VEZKVllTY3liUXhDYUt6cw/callback?with_response=false'
+}
+[20/6/2026, 8:49:09 p.m.] [INFO] [Slash Play] User: dani_sas Guild: 311402172820619274 Query: https://www.youtube.com/playlist?list=PLWjrvqpXVE9WeNLEDdEzVh--gtJCVWbvr
+[20/6/2026, 8:49:47 p.m.] [INFO] [Slash Play] User: dani_sas Guild: 311402172820619274 Query: https://www.youtube.com/playlist?list=PLWjrvqpXVE9WeNLEDdEzVh--gtJCVWbvr
+[20/6/2026, 8:51:17 p.m.] [INFO] [Slash Play] Playlist cargada: 106 tracks
+[20/6/2026, 8:51:22 p.m.] [INFO] [Slash Play] Playlist cargada: 106 tracks
+[20/6/2026, 8:52:09 p.m.] [INFO] [Slash Play Success] First playable track index 1: https://www.youtube.com/watch?v=IxGvm6btP1A
+[20/6/2026, 8:52:39 p.m.] [INFO] [Slash Play Success] First playable track index 1: https://www.youtube.com/watch?v=IxGvm6btP1A
+[20/6/2026, 9:19:59 p.m.] [WARN] [Slash Play] Track 18 saltado en Guild 311402172820619274: Error: ERROR: [youtube] NVgebSuZjwE: Video unavailable. This video is no longer available due to a copyright claim by Universal Music Group
+
+[20/6/2026, 9:20:10 p.m.] [WARN] [Slash Play] Track 18 saltado en Guild 311402172820619274: Error: ERROR: [youtube] NVgebSuZjwE: Video unavailable. This video is no longer available due to a copyright claim by Universal Music Group
+
+[20/6/2026, 9:28:45 p.m.] [WARN] [Slash Play] Track 31 saltado en Guild 311402172820619274: Error: ERROR: [youtube] wP6aCXsFaHE: Video unavailable. This video is not available
+
+[20/6/2026, 9:29:02 p.m.] [WARN] [Slash Play] Track 31 saltado en Guild 311402172820619274: Error: ERROR: [youtube] wP6aCXsFaHE: Video unavailable. This video is not available
+
+[20/6/2026, 9:44:05 p.m.] [WARN] [Slash Play] Track 61 saltado en Guild 311402172820619274: Error: ERROR: [youtube] BWyOqO90Ue8: Video unavailable. This video is no longer available due to a copyright claim by Warner Music Group
+
+[20/6/2026, 9:44:11 p.m.] [WARN] [Slash Play] Track 61 saltado en Guild 311402172820619274: Error: ERROR: [youtube] BWyOqO90Ue8: Video unavailable. This video is no longer available due to a copyright claim by Warner Music Group
+
+[20/6/2026, 9:45:03 p.m.] [WARN] [Slash Play] Track 64 saltado en Guild 311402172820619274: Error: ERROR: [youtube] FOJdADjAIi0: Video unavailable. This video is no longer available due to a copyright claim by Yeezy LLC
+
+[20/6/2026, 9:45:09 p.m.] [WARN] [Slash Play] Track 64 saltado en Guild 311402172820619274: Error: ERROR: [youtube] FOJdADjAIi0: Video unavailable. This video is no longer available due to a copyright claim by Yeezy LLC
+
+[20/6/2026, 9:49:51 p.m.] [WARN] [Slash Play] Track 77 saltado en Guild 311402172820619274: Error: ERROR: [youtube] E2kGhgGSi78: Video unavailable. This video is not available
+
+[20/6/2026, 9:49:58 p.m.] [WARN] [Slash Play] Track 77 saltado en Guild 311402172820619274: Error: ERROR: [youtube] E2kGhgGSi78: Video unavailable. This video is not available
+
+[20/6/2026, 9:50:26 p.m.] [WARN] [Slash Play] Track 79 saltado en Guild 311402172820619274: Error: ERROR: [youtube] b-sX0EqZZZI: This video has been removed for violating YouTube's policy on hate speech. Learn more about combating hate speech in your country.
+
+[20/6/2026, 9:50:33 p.m.] [WARN] [Slash Play] Track 79 saltado en Guild 311402172820619274: Error: ERROR: [youtube] b-sX0EqZZZI: This video has been removed for violating YouTube's policy on hate speech. Learn more about combating hate speech in your country.
+
+[20/6/2026, 10:00:59 p.m.] [INFO] [Slash Play] Playlist session guardada: 184 canciones
+[20/6/2026, 10:00:59 p.m.] [INFO] [Slash Play] 106 tracks procesados en Guild: 311402172820619274
+[20/6/2026, 10:01:08 p.m.] [INFO] [Slash Play] Playlist session guardada: 185 canciones
+[20/6/2026, 10:01:08 p.m.] [INFO] [Slash Play] 106 tracks procesados en Guild: 311402172820619274
+[22/6/2026, 11:11:44 p.m.] [INFO] [Slash Play] User: dani_sas Guild: 311402172820619274 Query: https://www.youtube.com/watch?v=KXsQbKQyfFA
+[22/6/2026, 11:12:12 p.m.] [INFO] [Slash Play Success] Guild: 311402172820619274 Query: https://www.youtube.com/watch?v=KXsQbKQyfFA
+[22/6/2026, 11:13:14 p.m.] [INFO] [Slash Play] User: dani_sas Guild: 311402172820619274 Query: https://www.youtube.com/watch?v=woXkTHBpCNw
+[22/6/2026, 11:13:25 p.m.] [INFO] [Slash Play Success] Guild: 311402172820619274 Query: https://www.youtube.com/watch?v=woXkTHBpCNw
+[22/6/2026, 11:19:39 p.m.] [INFO] [Slash Play] User: dani_sas Guild: 311402172820619274 Query: https://www.youtube.com/watch?v=ktZnPItJbJw
+[22/6/2026, 11:19:47 p.m.] [ERROR] [Slash Play Error] Guild: 311402172820619274 Query: https://www.youtube.com/watch?v=ktZnPItJbJw DisTubeError [YTDLP_ERROR]: Error: ERROR: [youtube] ktZnPItJbJw: Sign in to confirm your age. This video may be inappropriate for some users. Use --cookies-from-browser or --cookies for the authentication. See  https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp  for how to manually pass cookies. Also see  https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies  for tips on effectively exporting YouTube cookies
+
+    at C:\Users\Dani\Downloads\Proyectos\JUGNU-MUSIC\node_modules\@distube\yt-dlp\dist\index.js:158:13
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async YtDlpPlugin.resolve (C:\Users\Dani\Downloads\Proyectos\JUGNU-MUSIC\node_modules\@distube\yt-dlp\dist\index.js:150:18)
+    at async DisTube.play (C:\Users\Dani\Downloads\Proyectos\JUGNU-MUSIC\node_modules\distube\dist\index.js:2332:24)
+    at async Object.run (C:\Users\Dani\Downloads\Proyectos\JUGNU-MUSIC\Commands\Slash\Music\reproducir.js:323:7)
+    at async JUGNU.<anonymous> (C:\Users\Dani\Downloads\Proyectos\JUGNU-MUSIC\events\interactionCreate.js:104:11) {
+  errorCode: 'YTDLP_ERROR'
+}
+[22/6/2026, 11:20:04 p.m.] [INFO] [Slash Play] User: dani_sas Guild: 311402172820619274 Query: https://www.youtube.com/watch?v=zokl1L4Zda8
+[22/6/2026, 11:20:26 p.m.] [INFO] [Slash Play Success] Guild: 311402172820619274 Query: https://www.youtube.com/watch?v=zokl1L4Zda8
+[22/6/2026, 11:23:50 p.m.] [INFO] [Slash Play] User: dani_sas Guild: 311402172820619274 Query: https://www.youtube.com/playlist?list=PLWjrvqpXVE9WeNLEDdEzVh--gtJCVWbvr
+[22/6/2026, 11:24:05 p.m.] [INFO] [Slash Play] Playlist cargada: 106 tracks
+[22/6/2026, 11:24:15 p.m.] [INFO] [Slash Play Success] First playable track index 1: https://www.youtube.com/watch?v=hyD2jlVlr90
+[22/6/2026, 11:27:33 p.m.] [WARN] [Slash Play] Track 19 saltado en Guild 311402172820619274: Error: ERROR: [youtube] NVgebSuZjwE: Video unavailable. This video is no longer available due to a copyright claim by Universal Music Group
+
+[22/6/2026, 11:30:07 p.m.] [WARN] [Slash Play] Track 32 saltado en Guild 311402172820619274: Error: ERROR: [youtube] wP6aCXsFaHE: Video unavailable. This video is not available
+
+[22/6/2026, 11:35:45 p.m.] [WARN] [Slash Play] Track 62 saltado en Guild 311402172820619274: Error: ERROR: [youtube] BWyOqO90Ue8: Video unavailable. This video is no longer available due to a copyright claim by Warner Music Group
+
+[22/6/2026, 11:36:14 p.m.] [WARN] [Slash Play] Track 65 saltado en Guild 311402172820619274: Error: ERROR: [youtube] FOJdADjAIi0: Video unavailable. This video is no longer available due to a copyright claim by Yeezy LLC
+
+[22/6/2026, 11:38:46 p.m.] [WARN] [Slash Play] Track 78 saltado en Guild 311402172820619274: Error: ERROR: [youtube] E2kGhgGSi78: Video unavailable. This video is not available
+
+[22/6/2026, 11:39:03 p.m.] [WARN] [Slash Play] Track 80 saltado en Guild 311402172820619274: Error: ERROR: [youtube] b-sX0EqZZZI: This video has been removed for violating YouTube's policy on hate speech. Learn more about combating hate speech in your country.
+
+[22/6/2026, 11:44:01 p.m.] [INFO] [Slash Play] Playlist session guardada: 96 canciones
+[22/6/2026, 11:44:01 p.m.] [INFO] [Slash Play] 106 tracks procesados en Guild: 311402172820619274
+[23/6/2026, 12:11:21 a.m.] [INFO] [Slash PlayTop] User: dani_sas Guild: 311402172820619274 Query: https://www.youtube.com/watch?v=qRAJowgHqxA
+[23/6/2026, 12:11:33 a.m.] [INFO] [Slash PlayTop Success] Guild: 311402172820619274 Query: https://www.youtube.com/watch?v=qRAJowgHqxA
+[23/6/2026, 9:22:21 a.m.] [INFO] [Slash Play] User: dani_sas Guild: 311402172820619274 Query: https://www.youtube.com/playlist?list=PLWjrvqpXVE9WeNLEDdEzVh--gtJCVWbvr
+[23/6/2026, 9:22:37 a.m.] [INFO] [Slash Play] Playlist cargada: 106 tracks
+[23/6/2026, 9:23:27 a.m.] [INFO] [Slash Play Success] First playable track index 1: https://www.youtube.com/watch?v=qRAJowgHqxA
+[23/6/2026, 9:27:57 a.m.] [WARN] [Slash Play] Track 20 saltado en Guild 311402172820619274: Error: ERROR: [youtube] NVgebSuZjwE: Video unavailable. This video is no longer available due to a copyright claim by Universal Music Group
+
+[23/6/2026, 9:34:16 a.m.] [WARN] [Slash Play] Track 33 saltado en Guild 311402172820619274: Error: ERROR: [youtube] wP6aCXsFaHE: Video unavailable. This video is not available
+
+[23/6/2026, 9:42:24 a.m.] [WARN] [Slash Play] Track 63 saltado en Guild 311402172820619274: Error: ERROR: [youtube] BWyOqO90Ue8: Video unavailable. This video is no longer available due to a copyright claim by Warner Music Group
+
+[23/6/2026, 9:42:56 a.m.] [WARN] [Slash Play] Track 66 saltado en Guild 311402172820619274: Error: ERROR: [youtube] FOJdADjAIi0: Video unavailable. This video is no longer available due to a copyright claim by Yeezy LLC
+
+[23/6/2026, 9:45:46 a.m.] [WARN] [Slash Play] Track 79 saltado en Guild 311402172820619274: Error: ERROR: [youtube] E2kGhgGSi78: Video unavailable. This video is not available
+
+[23/6/2026, 9:46:09 a.m.] [WARN] [Slash Play] Track 81 saltado en Guild 311402172820619274: Error: ERROR: [youtube] b-sX0EqZZZI: This video has been removed for violating YouTube's policy on hate speech. Learn more about combating hate speech in your country.
+
+[23/6/2026, 9:52:16 a.m.] [INFO] [Playlist Load] Queue loop is active (repeatMode: 2) in Guild 311402172820619274. New items included.
+[23/6/2026, 9:52:18 a.m.] [INFO] [Slash Play] Playlist session guardada: 97 canciones
+[23/6/2026, 9:52:18 a.m.] [INFO] [Slash Play] 106 tracks procesados en Guild: 311402172820619274
+[24/6/2026, 1:27:48 p.m.] [INFO] [Slash Play] User: dani_sas Guild: 311402172820619274 Query: https://www.youtube.com/playlist?list=PLWjrvqpXVE9WeNLEDdEzVh--gtJCVWbvr
+[24/6/2026, 1:28:13 p.m.] [INFO] [Slash Play] Playlist cargada: 106 tracks
+[24/6/2026, 1:28:54 p.m.] [INFO] [Slash Play Success] First playable track index 1: https://www.youtube.com/watch?v=w1eN8vyVFIM
+[24/6/2026, 1:39:38 p.m.] [WARN] [Slash Play] Track 21 saltado en Guild 311402172820619274: Error: ERROR: [youtube] NVgebSuZjwE: Video unavailable. It was removed following a copyright removal request by Universal Music Group
+
+[24/6/2026, 1:42:56 p.m.] [WARN] [Slash Play] Track 34 saltado en Guild 311402172820619274: Error: ERROR: [youtube] wP6aCXsFaHE: Video unavailable. This video is not available
+
+[24/6/2026, 1:49:54 p.m.] [WARN] [Slash Play] Track 64 saltado en Guild 311402172820619274: Error: ERROR: [youtube] BWyOqO90Ue8: Video unavailable. It was removed following a copyright removal request by Warner Music Group
+
+[24/6/2026, 1:50:35 p.m.] [WARN] [Slash Play] Track 67 saltado en Guild 311402172820619274: Error: ERROR: [youtube] FOJdADjAIi0: Video unavailable. It was removed following a copyright removal request by Yeezy LLC
+
+[24/6/2026, 1:54:30 p.m.] [WARN] [Slash Play] Track 80 saltado en Guild 311402172820619274: Error: ERROR: [youtube] E2kGhgGSi78: Video unavailable. This video is not available
+
+[24/6/2026, 1:54:55 p.m.] [WARN] [Slash Play] Track 82 saltado en Guild 311402172820619274: Error: ERROR: [youtube] b-sX0EqZZZI: This video has been removed for violating YouTube's policy on hate speech. Learn more about combating hate speech in your country.
+
+[24/6/2026, 2:01:51 p.m.] [INFO] [Slash Play] Playlist session guardada: 93 canciones
+[24/6/2026, 2:01:51 p.m.] [INFO] [Slash Play] 106 tracks procesados en Guild: 311402172820619274
+[24/6/2026, 2:02:13 p.m.] [INFO] [Slash Play] User: dani_sas Guild: 311402172820619274 Query: https://www.youtube.com/playlist?list=PLWjrvqpXVE9WeNLEDdEzVh--gtJCVWbvr
+[24/6/2026, 2:02:33 p.m.] [INFO] [Slash Play] Playlist cargada: 106 tracks
+[24/6/2026, 2:03:05 p.m.] [INFO] [Slash Play Success] First playable track index 1: https://www.youtube.com/watch?v=w1eN8vyVFIM
+[24/6/2026, 2:10:12 p.m.] [INFO] Clubot Music is Online
+[24/6/2026, 2:10:30 p.m.] [INFO] [Slash Play] User: dani_sas Guild: 311402172820619274 Query: https://www.youtube.com/playlist?list=PLWjrvqpXVE9WeNLEDdEzVh--gtJCVWbvr
+[24/6/2026, 2:10:52 p.m.] [INFO] [Slash Play] Playlist cargada: 106 tracks
+[24/6/2026, 2:11:30 p.m.] [INFO] [Slash Play Success] First playable track index 1: https://www.youtube.com/watch?v=w1eN8vyVFIM
+[24/6/2026, 2:17:31 p.m.] [WARN] [Slash Play] Track 21 saltado en Guild 311402172820619274: Error: ERROR: [youtube] NVgebSuZjwE: Video unavailable. It was removed following a copyright removal request by Universal Music Group
+
+[24/6/2026, 2:22:38 p.m.] [WARN] [Slash Play] Track 34 saltado en Guild 311402172820619274: Error: ERROR: [youtube] wP6aCXsFaHE: Video unavailable. This video is not available
+
+[24/6/2026, 2:27:41 p.m.] [WARN] [Slash Play] Track 64 saltado en Guild 311402172820619274: Error: ERROR: [youtube] BWyOqO90Ue8: Video unavailable. It was removed following a copyright removal request by Warner Music Group
+
+[24/6/2026, 2:28:21 p.m.] [WARN] [Slash Play] Track 67 saltado en Guild 311402172820619274: Error: ERROR: [youtube] FOJdADjAIi0: Video unavailable. It was removed following a copyright removal request by Yeezy LLC
+
+[24/6/2026, 2:30:53 p.m.] [WARN] [Slash Play] Track 80 saltado en Guild 311402172820619274: Error: ERROR: [youtube] E2kGhgGSi78: Video unavailable. This video is not available
+
+[24/6/2026, 2:31:12 p.m.] [WARN] [Slash Play] Track 82 saltado en Guild 311402172820619274: Error: ERROR: [youtube] b-sX0EqZZZI: This video has been removed for violating YouTube's policy on hate speech. Learn more about combating hate speech in your country.
+
+[24/6/2026, 2:35:36 p.m.] [INFO] [Slash Play] Playlist session guardada: 95 canciones
+[24/6/2026, 2:35:36 p.m.] [INFO] [Slash Play] 106 tracks procesados en Guild: 311402172820619274
+[25/6/2026, 12:58:48 a.m.] [INFO] [Slash Play] User: dani_sas Guild: 311402172820619274 Query: https://www.youtube.com/playlist?list=PLWjrvqpXVE9WeNLEDdEzVh--gtJCVWbvr
+[25/6/2026, 12:59:01 a.m.] [INFO] [Slash Play] Playlist cargada: 106 tracks
+[25/6/2026, 12:59:23 a.m.] [INFO] [Slash Play Success] First playable track index 1: https://www.youtube.com/watch?v=w1eN8vyVFIM
+[25/6/2026, 1:02:52 a.m.] [WARN] [Slash Play] Track 21 saltado en Guild 311402172820619274: Error: ERROR: [youtube] NVgebSuZjwE: Video unavailable. It was removed following a copyright removal request by Universal Music Group
+
+[25/6/2026, 1:05:14 a.m.] [WARN] [Slash Play] Track 34 saltado en Guild 311402172820619274: Error: ERROR: [youtube] wP6aCXsFaHE: Video unavailable. This video is not available
+
+[25/6/2026, 1:10:39 a.m.] [WARN] [Slash Play] Track 64 saltado en Guild 311402172820619274: Error: ERROR: [youtube] BWyOqO90Ue8: Video unavailable. It was removed following a copyright removal request by Warner Music Group
+
+[25/6/2026, 1:11:05 a.m.] [WARN] [Slash Play] Track 67 saltado en Guild 311402172820619274: Error: ERROR: [youtube] FOJdADjAIi0: Video unavailable. It was removed following a copyright removal request by Yeezy LLC
+
+[25/6/2026, 1:13:16 a.m.] [WARN] [Slash Play] Track 80 saltado en Guild 311402172820619274: Error: ERROR: [youtube] E2kGhgGSi78: Video unavailable. This video is not available
+
+[25/6/2026, 1:13:33 a.m.] [WARN] [Slash Play] Track 82 saltado en Guild 311402172820619274: Error: ERROR: [youtube] b-sX0EqZZZI: This video has been removed for violating YouTube's policy on hate speech. Learn more about combating hate speech in your country.
+
+[25/6/2026, 1:17:53 a.m.] [INFO] [Slash Play] Playlist session guardada: 96 canciones
+[25/6/2026, 1:17:53 a.m.] [INFO] [Slash Play] 106 tracks procesados en Guild: 311402172820619274
+[25/6/2026, 3:01:46 a.m.] [INFO] [Slash Play] User: dani_sas Guild: 311402172820619274 Query: https://www.youtube.com/playlist?list=PLWjrvqpXVE9WeNLEDdEzVh--gtJCVWbvr
+[25/6/2026, 3:02:00 a.m.] [INFO] [Slash Play] Playlist cargada: 106 tracks
+[25/6/2026, 3:03:14 a.m.] [INFO] Clubot Music is Online
+[25/6/2026, 7:10:09 a.m.] [INFO] [Slash Play] User: dani_sas Guild: 311402172820619274 Query: https://www.youtube.com/playlist?list=PLWjrvqpXVE9WeNLEDdEzVh--gtJCVWbvr
+[25/6/2026, 7:10:32 a.m.] [INFO] [Slash Play] Playlist cargada: 106 tracks
+[25/6/2026, 7:11:18 a.m.] [INFO] [Slash Play Success] First playable track index 1: https://www.youtube.com/watch?v=w1eN8vyVFIM
+[25/6/2026, 7:17:54 a.m.] [WARN] [Slash Play] Track 21 saltado en Guild 311402172820619274: Error: ERROR: [youtube] NVgebSuZjwE: Video unavailable. It was removed following a copyright removal request by Universal Music Group
+
+[25/6/2026, 7:21:37 a.m.] [WARN] [Slash Play] Track 34 saltado en Guild 311402172820619274: Error: ERROR: [youtube] wP6aCXsFaHE: Video unavailable. This video is not available
+
+[25/6/2026, 7:27:25 a.m.] [WARN] [Slash Play] Track 64 saltado en Guild 311402172820619274: Error: ERROR: [youtube] BWyOqO90Ue8: Video unavailable. It was removed following a copyright removal request by Warner Music Group
+
+[25/6/2026, 7:27:52 a.m.] [WARN] [Slash Play] Track 67 saltado en Guild 311402172820619274: Error: ERROR: [youtube] FOJdADjAIi0: Video unavailable. It was removed following a copyright removal request by Yeezy LLC
+
+[25/6/2026, 7:30:06 a.m.] [WARN] [Slash Play] Track 80 saltado en Guild 311402172820619274: Error: ERROR: [youtube] E2kGhgGSi78: Video unavailable. This video is not available
+
+[25/6/2026, 7:30:23 a.m.] [WARN] [Slash Play] Track 82 saltado en Guild 311402172820619274: Error: ERROR: [youtube] b-sX0EqZZZI: This video has been removed for violating YouTube's policy on hate speech. Learn more about combating hate speech in your country.
+
+[25/6/2026, 7:36:10 a.m.] [INFO] [Slash Play] Playlist session guardada: 94 canciones
+[25/6/2026, 7:36:10 a.m.] [INFO] [Slash Play] 106 tracks procesados en Guild: 311402172820619274
+[25/6/2026, 10:51:52 p.m.] [INFO] [Slash Play] User: dani_sas Guild: 311402172820619274 Query: https://www.youtube.com/playlist?list=PLWjrvqpXVE9WeNLEDdEzVh--gtJCVWbvr
+[25/6/2026, 10:52:06 p.m.] [INFO] [Slash Play] Playlist cargada: 106 tracks
+[25/6/2026, 10:52:26 p.m.] [INFO] [Slash Play Success] First playable track index 1: https://www.youtube.com/watch?v=ff3C-Kyv8wI
+[25/6/2026, 10:56:15 p.m.] [WARN] [Slash Play] Track 23 saltado en Guild 311402172820619274: Error: ERROR: [youtube] NVgebSuZjwE: Video unavailable. It was removed following a copyright removal request by Universal Music Group
+
+[25/6/2026, 10:58:24 p.m.] [WARN] [Slash Play] Track 36 saltado en Guild 311402172820619274: Error: ERROR: [youtube] wP6aCXsFaHE: Video unavailable. This video is not available
+
+[25/6/2026, 11:03:33 p.m.] [WARN] [Slash Play] Track 66 saltado en Guild 311402172820619274: Error: ERROR: [youtube] BWyOqO90Ue8: Video unavailable. It was removed following a copyright removal request by Warner Music Group
+
+[25/6/2026, 11:04:09 p.m.] [WARN] [Slash Play] Track 69 saltado en Guild 311402172820619274: Error: ERROR: [youtube] FOJdADjAIi0: Video unavailable. It was removed following a copyright removal request by Yeezy LLC
+
+[25/6/2026, 11:06:18 p.m.] [WARN] [Slash Play] Track 82 saltado en Guild 311402172820619274: Error: ERROR: [youtube] E2kGhgGSi78: Video unavailable. This video is not available
+
+[25/6/2026, 11:06:35 p.m.] [WARN] [Slash Play] Track 84 saltado en Guild 311402172820619274: Error: ERROR: [youtube] b-sX0EqZZZI: This video has been removed for violating YouTube's policy on hate speech. Learn more about combating hate speech in your country.
+
+[25/6/2026, 11:10:28 p.m.] [INFO] [Slash Play] Playlist session guardada: 96 canciones
+[25/6/2026, 11:10:28 p.m.] [INFO] [Slash Play] 106 tracks procesados en Guild: 311402172820619274
+[28/6/2026, 12:00:35 a.m.] [INFO] [Slash Play] User: dani_sas Guild: 311402172820619274 Query: https://www.youtube.com/playlist?list=PLWjrvqpXVE9WeNLEDdEzVh--gtJCVWbvr
+[28/6/2026, 12:01:24 a.m.] [INFO] [Slash Play] Playlist cargada: 106 tracks
+[28/6/2026, 12:02:49 a.m.] [INFO] [Slash Play Success] First playable track index 1: https://www.youtube.com/watch?v=objq5WJfzmk
+[28/6/2026, 12:08:17 a.m.] [WARN] [Slash Play] Track 24 saltado en Guild 311402172820619274: Error: ERROR: [youtube] NVgebSuZjwE: Video unavailable. It was removed following a copyright removal request by Universal Music Group
+
+[28/6/2026, 12:11:36 a.m.] [WARN] [Slash Play] Track 37 saltado en Guild 311402172820619274: Error: ERROR: [youtube] wP6aCXsFaHE: Video unavailable. This video is not available
+
+[28/6/2026, 12:17:05 a.m.] [WARN] [Slash Play] Track 67 saltado en Guild 311402172820619274: Error: ERROR: [youtube] BWyOqO90Ue8: Video unavailable. It was removed following a copyright removal request by Warner Music Group
+
+[28/6/2026, 12:17:45 a.m.] [WARN] [Slash Play] Track 70 saltado en Guild 311402172820619274: Error: ERROR: [youtube] FOJdADjAIi0: Video unavailable. It was removed following a copyright removal request by Yeezy LLC
+
+[28/6/2026, 12:20:14 a.m.] [WARN] [Slash Play] Track 83 saltado en Guild 311402172820619274: Error: ERROR: [youtube] E2kGhgGSi78: Video unavailable. This video is not available
+
+[28/6/2026, 12:21:21 a.m.] [WARN] [Slash Play] Track 85 saltado en Guild 311402172820619274: Error: ERROR: [youtube] b-sX0EqZZZI: This video has been removed for violating YouTube's policy on hate speech. Learn more about combating hate speech in your country.
+
+[28/6/2026, 12:30:24 a.m.] [INFO] [Slash Play] Playlist session guardada: 94 canciones
+[28/6/2026, 12:30:24 a.m.] [INFO] [Slash Play] 106 tracks procesados en Guild: 311402172820619274
+[28/6/2026, 1:41:18 p.m.] [INFO] [Slash Play] User: dani_sas Guild: 311402172820619274 Query: https://www.youtube.com/playlist?list=PLWjrvqpXVE9WeNLEDdEzVh--gtJCVWbvr
+[28/6/2026, 1:41:32 p.m.] [INFO] [Slash Play] Playlist cargada: 106 tracks
+[28/6/2026, 1:41:51 p.m.] [INFO] [Slash Play Success] First playable track index 1: https://www.youtube.com/watch?v=objq5WJfzmk
+[28/6/2026, 1:45:53 p.m.] [WARN] [Slash Play] Track 24 saltado en Guild 311402172820619274: Error: ERROR: [youtube] NVgebSuZjwE: Video unavailable. It was removed following a copyright removal request by Universal Music Group
+
+[28/6/2026, 1:48:05 p.m.] [WARN] [Slash Play] Track 37 saltado en Guild 311402172820619274: Error: ERROR: [youtube] wP6aCXsFaHE: Video unavailable. This video is not available
+
+[28/6/2026, 1:53:33 p.m.] [WARN] [Slash Play] Track 67 saltado en Guild 311402172820619274: Error: ERROR: [youtube] BWyOqO90Ue8: Video unavailable. It was removed following a copyright removal request by Warner Music Group
+
+[28/6/2026, 1:54:00 p.m.] [WARN] [Slash Play] Track 70 saltado en Guild 311402172820619274: Error: ERROR: [youtube] FOJdADjAIi0: Video unavailable. It was removed following a copyright removal request by Yeezy LLC
+
+[28/6/2026, 1:56:19 p.m.] [WARN] [Slash Play] Track 83 saltado en Guild 311402172820619274: Error: ERROR: [youtube] E2kGhgGSi78: Video unavailable. This video is not available
+
+[28/6/2026, 1:56:58 p.m.] [WARN] [Slash Play] Track 85 saltado en Guild 311402172820619274: Error: ERROR: [youtube] b-sX0EqZZZI: This video has been removed for violating YouTube's policy on hate speech. Learn more about combating hate speech in your country.
+
+[28/6/2026, 2:03:22 p.m.] [INFO] [Slash Play] Playlist session guardada: 94 canciones
+[28/6/2026, 2:03:22 p.m.] [INFO] [Slash Play] 106 tracks procesados en Guild: 311402172820619274
+[30/6/2026, 8:07:35 p.m.] [INFO] [Slash Play] User: dani_sas Guild: 311402172820619274 Query: https://www.youtube.com/playlist?list=PLWjrvqpXVE9WeNLEDdEzVh--gtJCVWbvr
+[30/6/2026, 8:07:50 p.m.] [INFO] [Slash Play] Playlist cargada: 106 tracks
+[30/6/2026, 8:08:14 p.m.] [INFO] [Slash Play Success] First playable track index 1: https://www.youtube.com/watch?v=objq5WJfzmk
+[30/6/2026, 8:12:33 p.m.] [WARN] [Slash Play] Track 24 saltado en Guild 311402172820619274: Error: ERROR: [youtube] NVgebSuZjwE: Video unavailable. It was removed following a copyright removal request by Universal Music Group
+
+[30/6/2026, 8:15:03 p.m.] [WARN] [Slash Play] Track 37 saltado en Guild 311402172820619274: Error: ERROR: [youtube] wP6aCXsFaHE: Video unavailable. This video is not available
+
+[30/6/2026, 8:20:38 p.m.] [WARN] [Slash Play] Track 67 saltado en Guild 311402172820619274: Error: ERROR: [youtube] BWyOqO90Ue8: Video unavailable. It was removed following a copyright removal request by Warner Music Group
+
+[30/6/2026, 8:21:08 p.m.] [WARN] [Slash Play] Track 70 saltado en Guild 311402172820619274: Error: ERROR: [youtube] FOJdADjAIi0: Video unavailable. It was removed following a copyright removal request by Yeezy LLC
+
+[30/6/2026, 8:23:37 p.m.] [WARN] [Slash Play] Track 83 saltado en Guild 311402172820619274: Error: ERROR: [youtube] E2kGhgGSi78: Video unavailable. This video is not available
+
+[30/6/2026, 8:23:53 p.m.] [WARN] [Slash Play] Track 85 saltado en Guild 311402172820619274: Error: ERROR: [youtube] b-sX0EqZZZI: This video has been removed for violating YouTube's policy on hate speech. Learn more about combating hate speech in your country.
+
+[30/6/2026, 8:27:58 p.m.] [INFO] [Playlist Load] Queue loop is active (repeatMode: 2) in Guild 311402172820619274. New items included.
+[30/6/2026, 8:27:58 p.m.] [INFO] [Slash Play] Playlist session guardada: 95 canciones
+[30/6/2026, 8:27:58 p.m.] [INFO] [Slash Play] 106 tracks procesados en Guild: 311402172820619274
+[2/7/2026, 11:31:18 p.m.] [INFO] [Slash Play] User: dani_sas Guild: 311402172820619274 Query: https://www.youtube.com/playlist?list=PLWjrvqpXVE9WeNLEDdEzVh--gtJCVWbvr
+[2/7/2026, 11:31:31 p.m.] [INFO] [Slash Play] Playlist cargada: 106 tracks
+[2/7/2026, 11:31:52 p.m.] [INFO] [Slash Play Success] First playable track index 1: https://www.youtube.com/watch?v=JmcA9LIIXWw
+[2/7/2026, 11:35:12 p.m.] [WARN] [Slash Play] Track 23 saltado en Guild 311402172820619274: Error: ERROR: [youtube] NVgebSuZjwE: Video unavailable. It was removed following a copyright removal request by Universal Music Group
+
+[2/7/2026, 11:37:16 p.m.] [WARN] [Slash Play] Track 36 saltado en Guild 311402172820619274: Error: ERROR: [youtube] wP6aCXsFaHE: Video unavailable. This video is not available
+
+[2/7/2026, 11:41:47 p.m.] [WARN] [Slash Play] Track 66 saltado en Guild 311402172820619274: Error: ERROR: [youtube] BWyOqO90Ue8: Video unavailable. It was removed following a copyright removal request by Warner Music Group
+
+[2/7/2026, 11:42:21 p.m.] [WARN] [Slash Play] Track 69 saltado en Guild 311402172820619274: Error: ERROR: [youtube] FOJdADjAIi0: Video unavailable. It was removed following a copyright removal request by Yeezy LLC
+
+[2/7/2026, 11:44:16 p.m.] [WARN] [Slash Play] Track 82 saltado en Guild 311402172820619274: Error: ERROR: [youtube] E2kGhgGSi78: Video unavailable. This video is not available
+
+[2/7/2026, 11:44:31 p.m.] [WARN] [Slash Play] Track 84 saltado en Guild 311402172820619274: Error: ERROR: [youtube] b-sX0EqZZZI: This video has been removed for violating YouTube's policy on hate speech. Learn more about combating hate speech in your country.
+
+[2/7/2026, 11:48:02 p.m.] [INFO] [Slash Play] Playlist session guardada: 97 canciones
+[2/7/2026, 11:48:02 p.m.] [INFO] [Slash Play] 106 tracks procesados en Guild: 311402172820619274
+[7/7/2026, 2:23:52 p.m.] [INFO] Clubot Music is Online
+[7/7/2026, 2:40:03 p.m.] [INFO] Clubot Music is Online
+[7/7/2026, 2:43:57 p.m.] [INFO] Clubot Music is Online
+[7/7/2026, 3:22:22 p.m.] [INFO] Clubot Music is Online
+[7/7/2026, 3:26:40 p.m.] [INFO] Clubot Music is Online
+[7/7/2026, 3:33:44 p.m.] [INFO] Clubot Music is Online
+[7/7/2026, 3:36:13 p.m.] [INFO] Clubot Music is Online
+[7/7/2026, 4:03:58 p.m.] [INFO] [ShardReady] Shard 0 ready, checking for queues to restore...
+[7/7/2026, 4:03:58 p.m.] [INFO] Clubot Music is Online

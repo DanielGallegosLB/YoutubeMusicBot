@@ -217,9 +217,6 @@ module.exports = async (client) => {
     try {
       const guildId = queue.textChannel.guildId;
 
-      // Remove auto-resume entry
-      await client.autoresume.delete(guildId);
-
       // Edit player message
       await client.editPlayerMessage(queue.textChannel);
 
@@ -245,12 +242,12 @@ module.exports = async (client) => {
         await client.joinVoiceChannel(queue.textChannel.guild);
       }
     } catch (error) {
-      console.error("An error occurred in disconnect event:", error);
+      client.logger.error(`[Disconnect Error]`, error);
     }
   });
 
   client.distube.on("error", async (error, queue, song) => {
-    console.error("[DisTube Error]", error);
+    client.logger.error(`[DisTube Error]`, error);
     queue.textChannel
       .send({
         embeds: [

@@ -8,6 +8,7 @@ const JUGNU = require("../../../handlers/Client");
 const { Queue } = require("distube");
 const { spawn } = require("child_process");
 const path = require("path");
+const fs = require("fs");
 
 const YTDLP_PATH = path.join(
   process.cwd(),
@@ -63,21 +64,56 @@ function sanitizeYouTubeUrl(url) {
 }
 
 function fetchPlaylistURLs(playlistUrl) {
-  return new Promise((resolve, reject) => {
-    const proc = spawn(YTDLP_PATH, [
-      "--flat-playlist", "--print", "webpage_url",
-      "--no-warnings", "--js-runtimes", "node",
-      playlistUrl,
-    ]);
-    let stdout = "", stderr = "";
-    proc.stdout.on("data", (d) => stdout += d);
-    proc.stderr.on("data", (d) => stderr += d);
-    proc.on("close", () => {
-      const urls = stdout.trim().split("\n").filter(Boolean);
-      if (urls.length) resolve(urls);
-      else reject(new Error(stderr || "No se encontraron videos"));
-    });
-    proc.on("error", reject);
+  return new Promise(async (resolve) => {
+    let allUrls = [];
+    let startItem = 1;
+    const batchSize = 100;
+    const maxItems = 1000;
+    const cookiePath = path.join(process.cwd(), "yt-cookies.txt");
+
+    while (startItem <= maxItems) {
+      const endItem = startItem + batchSize - 1;
+      const args = [
+        "--flat-playlist",
+        "--print", "webpage_url",
+        "--no-warnings",
+        "--ignore-errors",
+        "--no-check-certificates",
+        "--js-runtimes", "node",
+        "--playlist-items", `${startItem}-${endItem}`,
+        playlistUrl,
+      ];
+      if (fs.existsSync(cookiePath)) {
+        args.push("--cookies", cookiePath);
+      }
+
+      try {
+        const batchUrls = await new Promise((res, rej) => {
+          const proc = spawn(YTDLP_PATH, args);
+          let stdout = "", stderr = "";
+          proc.stdout.on("data", (d) => stdout += d);
+          proc.stderr.on("data", (d) => stderr += d);
+          proc.on("close", () => {
+            const urls = stdout.trim().split("\n").filter(Boolean);
+            res(urls);
+          });
+          proc.on("error", rej);
+        });
+
+        if (batchUrls.length === 0) break;
+        
+        for (const url of batchUrls) {
+          if (!allUrls.includes(url)) allUrls.push(url);
+        }
+
+        if (batchUrls.length < batchSize) break;
+        startItem += batchSize;
+      } catch (e) {
+        console.error(`[fetchPlaylistURLs] Error in batch ${startItem}:`, e);
+        break;
+      }
+    }
+    resolve(allUrls.length > 0 ? allUrls : []);
   });
 }
 
@@ -168,9 +204,12 @@ module.exports = {
 
       let queue;
       try {
-        queue = await client.distube.play(channel, reversedUrls[0], playOpts);
-        queue._sessionSaved = true;
-        queue._sessionSourcePlaylist = true;
+        await client.distube.play(channel, reversedUrls[0], playOpts);
+        queue = client.distube.getQueue(interaction.guildId);
+        if (queue) {
+          queue._sessionSaved = true;
+          queue._sessionSourcePlaylist = true;
+        }
       } catch (e) {
         client.logger.error("[Playlist Top Track 1 Error]", e);
         return interaction.followUp({
@@ -184,12 +223,14 @@ module.exports = {
       (async () => {
         const remaining = reversedUrls.slice(1);
         let processedCount = 1;
+        // El loop siempre inserta en posición 1 (al frente) porque ya hay al menos una canción en la queue
+        const loopOpts = { ...playOpts, position: 1 };
         try {
           for (let i = 0; i < remaining.length; i++) {
             if (!client.playlistLoading.get(interaction.guildId)) break;
             const url = remaining[i];
             try {
-              await client.distube.play(channel, url, playOpts);
+              await client.distube.play(channel, url, loopOpts);
               processedCount++;
             } catch (e) {
               client.logger.warn(`[Playlist Top] Track saltado en Guild ${interaction.guildId}:`, e.message);

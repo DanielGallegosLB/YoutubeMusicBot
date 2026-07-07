@@ -13,8 +13,10 @@ module.exports = async (client) => {
     client.on(Events.InteractionCreate, async (interaction) => {
       if (!interaction.guild || interaction.user.bot) return;
       if (interaction.isButton()) {
-        await interaction.deferUpdate().catch((e) => {});
         const { customId, member } = interaction;
+        const controlButtons = ["previous", "rewind10", "pauseresume", "forward10", "skip", "stop", "shuffle", "loop_song", "loop_queue", "autoplay", "savecurrent_btn"];
+        if (!controlButtons.includes(customId)) return;
+        await interaction.deferUpdate().catch((e) => {});
         let voiceMember = interaction.guild.members.cache.get(member.id);
         let channel = voiceMember.voice.channel;
         let queue = client.distube.getQueue(interaction.guildId);

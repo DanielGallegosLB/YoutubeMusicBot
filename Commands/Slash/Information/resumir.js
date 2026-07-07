@@ -9,25 +9,25 @@ const {
   ButtonBuilder,
   ButtonStyle,
 } = require("discord.js");
-const { Song, SearchResultVideo } = require("distube");
+const { Song } = require("distube");
 const JUGNU = require("../../../handlers/Client");
 
 const buildStoredSong = (track, guild) => {
   return new Song(
-    new SearchResultVideo({
+    {
       duration: track.duration,
       formattedDuration: track.formattedDuration,
       id: track.id,
       isLive: track.isLive,
       name: track.name,
       thumbnail: track.thumbnail,
-      type: "video",
       uploader: track.uploader,
       url: track.url,
       views: track.views,
-    }),
-    guild.members.cache.get(track.memberId) || guild.members.me,
-    track.source
+      source: track.source,
+      playFromSource: true,
+    },
+    { member: guild.members.cache.get(track.memberId) || guild.members.me }
   );
 };
 
@@ -98,6 +98,7 @@ module.exports = {
         : await interaction.reply({ ...replyData, fetchReply: true });
 
       const filter = (i) => i.user.id === interaction.user.id;
+      let sessionSelected = false;
       const collector = replyMsg.createMessageComponentCollector({
         filter,
         componentType: ComponentType.StringSelect,
@@ -105,6 +106,7 @@ module.exports = {
       });
 
       collector.on("collect", async (selectInteraction) => {
+        sessionSelected = true;
         const selectedId = selectInteraction.values[0];
         const selectedSession = sessions.find((s) => s.id === selectedId);
         if (!selectedSession) {
@@ -155,35 +157,35 @@ ${selectedSession.truncated ? "\n**Nota:** sesión truncada a los primeros 150 t
         buttonCollector.on("collect", async (buttonInteraction) => {
           if (buttonInteraction.customId !== `resumir_resume_${selectedSession.id}`) return;
 
+          await buttonInteraction.deferReply({ ephemeral: true }).catch(() => {});
+
           const member = interaction.member;
           const guild = interaction.guild;
           const voiceChannel = member.voice.channel;
           if (!voiceChannel) {
-            return buttonInteraction.reply({
+            return buttonInteraction.editReply({
               content: "❌ Debes estar en un canal de voz para recuperar la sesión.",
-              ephemeral: true,
             });
           }
 
           const botVoice = guild.members.me.voice.channel;
           if (botVoice && botVoice.id !== voiceChannel.id) {
-            return buttonInteraction.reply({
+            return buttonInteraction.editReply({
               content: "❌ El bot ya está en otro canal de voz.",
-              ephemeral: true,
             });
           }
 
           const storedSongs = selectedSession.songs.map((track) => buildStoredSong(track, guild));
           if (!storedSongs.length) {
-            return buttonInteraction.reply({
+            return buttonInteraction.editReply({
               content: "❌ Esta sesión no contiene canciones recuperables.",
-              ephemeral: true,
             });
           }
 
           let queue = client.distube.getQueue(guild.id);
           try {
             if (!queue || !queue.songs.length) {
+              await client.distube.voices.join(voiceChannel);
               await client.distube.play(voiceChannel, selectedSession.songs[0].url, {
                 member,
                 textChannel: interaction.channel,
@@ -196,16 +198,14 @@ ${selectedSession.truncated ? "\n**Nota:** sesión truncada a los primeros 150 t
               queue.addToQueue(storedSongs, 1);
             }
 
-            await buttonInteraction.reply({
+            await buttonInteraction.editReply({
               content: `✅ Sesión recuperada: ${storedSongs.length} canciones añadidas.`,
-              ephemeral: true,
             });
             buttonCollector.stop();
           } catch (error) {
-            console.error(error);
-            await buttonInteraction.reply({
+            client.logger.error(`[Resumir] Error al recuperar sesión:`, error);
+            await buttonInteraction.editReply({
               content: `❌ Error al recuperar la sesión: ${error.message}`,
-              ephemeral: true,
             });
           }
         });
@@ -214,11 +214,12 @@ ${selectedSession.truncated ? "\n**Nota:** sesión truncada a los primeros 150 t
           selectInteraction.message.edit({ components: [] }).catch(() => {});
         });
 
-        collector.stop();
       });
 
       collector.on("end", () => {
-        replyMsg.edit({ components: [] }).catch(() => {});
+        if (!sessionSelected) {
+          replyMsg.edit({ components: [] }).catch(() => {});
+        }
       });
     } catch (e) {
       client.logger.error(`[Resumir Error]`, e);

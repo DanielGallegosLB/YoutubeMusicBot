@@ -66,18 +66,16 @@ class JUGNU extends Client {
         new YtDlpPlugin({
           update: false,
           ytdlpOptions: {
-            // Cookies para autenticación con YouTube (evita NO_RESULT y FFMPEG_EXITED)
             cookies: require("path").join(__dirname, "../yt-cookies.txt"),
-            // Evitar throttling y bloqueos de YouTube
-            preferFreeFormats: true,
-            socketTimeout: 30,
-            fragmentRetries: 3,
-            skipUnavailableFragments: true,
-            allowUnplayableFormats: true,
+            socketTimeout: 60,
+            fragmentRetries: 10,
             addHeader: [
               "referer:https://www.youtube.com",
-              "user-agent:Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
             ],
+            // Solves 'Requested format is not available' by providing node as JS runtime
+            jsRuntimes: "node",
+            noCheckCertificates: true,
+            format: "bestaudio/best",
           },
         }),
       ],

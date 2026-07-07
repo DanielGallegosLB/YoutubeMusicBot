@@ -1,4 +1,4 @@
-const { Song, SearchResultVideo } = require("distube");
+const { Song } = require("distube");
 const JUGNU = require("./Client");
 
 /**
@@ -26,6 +26,9 @@ module.exports = async (client) => {
     // Retrieve autoresume data for the guild
     const data = await client.autoresume.get(guild.id);
     if (!data) continue;
+
+    // Skip if a queue already exists for this guild
+    if (client.distube.getQueue(guild.id)) continue;
 
     // Retrieve voice channel and check if it exists
     const voiceChannel = guild.channels.cache.get(data.voiceChannel);
@@ -62,20 +65,20 @@ module.exports = async (client) => {
     // Helper function to create a track object
     const makeTrack = async (track) => {
       return new Song(
-        new SearchResultVideo({
+        {
           duration: track.duration,
           formattedDuration: track.formattedDuration,
           id: track.id,
           isLive: track.isLive,
           name: track.name,
           thumbnail: track.thumbnail,
-          type: "video",
           uploader: track.uploader,
           url: track.url,
           views: track.views,
-        }),
-        guild.members.cache.get(track.memberId) || guild.members.me,
-        track.source
+          source: track.source,
+          playFromSource: true,
+        },
+        { member: guild.members.cache.get(track.memberId) || guild.members.me }
       );
     };
 
