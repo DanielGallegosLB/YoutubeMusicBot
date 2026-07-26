@@ -35,8 +35,8 @@ module.exports = async (client) => {
         );
       }
 
-      // Delete the message if it's not related to music commands
-      if (data.pmsg !== message.id && data.qmsg !== message.id) {
+      // Delete the message if it's not related to music commands or a protected preview message
+      if (data.pmsg !== message.id && data.qmsg !== message.id && !client.previewMessages?.has(message.id)) {
         await message.delete().catch(console.error);
       }
 

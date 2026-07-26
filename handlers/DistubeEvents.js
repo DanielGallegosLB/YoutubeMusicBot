@@ -2,6 +2,7 @@ const { EmbedBuilder, Events } = require("discord.js");
 const JUGNU = require("./Client");
 const AutoresumeHandler = require("./AutoresumeHandler");
 const InitAutoResume = require("./InitAutoResume");
+const UserHistory = require("./UserHistory");
 
 const MAX_SESSION_SONGS = 150;
 
@@ -116,6 +117,15 @@ module.exports = async (client) => {
     await client.updatequeue(queue);
     await client.updateplayer(queue);
 
+    // Auto-save individual songs to user's favorites (skip if part of a playlist load)
+    if (!queue._sessionSourcePlaylist && song.user?.id) {
+      try {
+        await UserHistory.recordSongPlay(client, queue.textChannel.guildId, song.user.id, song, song.user, queue.textChannel.id);
+      } catch (e) {
+        client.logger.error(`[UserHistory] Error saving song to favorites:`, e);
+      }
+    }
+
     let data = await client.music.get(`${queue.textChannel.guildId}.music`);
     if (data && data.channel === queue.textChannel.id) return;
 
@@ -132,6 +142,17 @@ module.exports = async (client) => {
       const session = createSession(queue, "playlist", playlist.name, playlist.url, playlist.user, playlist.songs);
       await saveSession(client, queue.textChannel.guildId, session);
       queue._sessionSaved = true;
+    }
+
+    // Record playlist in user's history
+    if (playlist.user?.id && playlist.url) {
+      try {
+        await UserHistory.recordPlaylistPlay(
+          client, queue.textChannel.guildId, playlist.user.id, playlist.url, playlist.name, queue.textChannel.id, playlist.thumbnail
+        );
+      } catch (e) {
+        client.logger.error(`[UserHistory] Error recording playlist:`, e);
+      }
     }
 
     let data = await client.music.get(`${queue.textChannel.guildId}.music`);

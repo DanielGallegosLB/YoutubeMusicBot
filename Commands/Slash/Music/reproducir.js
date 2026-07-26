@@ -9,6 +9,7 @@ const { Queue } = require("distube");
 const { spawn } = require("child_process");
 const path = require("path");
 const fs = require("fs");
+const UserHistory = require("../../../handlers/UserHistory");
 
 const YTDLP_PATH = path.join(
   process.cwd(),
@@ -304,6 +305,15 @@ module.exports = {
             } catch (e) {
               client.logger.error(`[Slash Play] Error guardando sesión de playlist:`, e);
             }
+          }
+
+          // Record playlist in user's history
+          try {
+            await UserHistory.recordPlaylistPlay(
+              client, interaction.guildId, interaction.user.id, song, song, interaction.channel.id
+            );
+          } catch (e) {
+            client.logger.error(`[Slash Play] Error recording playlist history:`, e);
           }
 
           client.logger.log(`[Slash Play] ${urls.length} tracks procesados en Guild: ${interaction.guildId}`);

@@ -4,6 +4,7 @@ const { Queue } = require("distube");
 const { spawn } = require("child_process");
 const path = require("path");
 const fs = require("fs");
+const UserHistory = require("../../../handlers/UserHistory");
 
 const YTDLP_PATH = path.join(
   process.cwd(),
@@ -166,6 +167,16 @@ module.exports = {
             ],
           }).catch(() => {});
         }
+
+        // Record playlist in user's history
+        try {
+          await UserHistory.recordPlaylistPlay(
+            client, message.guildId, message.author.id, song, song, message.channel.id
+          );
+        } catch (e) {
+          client.logger.error(`[Play Msg] Error recording playlist history:`, e);
+        }
+
         client.playlistLoading.delete(message.guildId);
       })();
       return;

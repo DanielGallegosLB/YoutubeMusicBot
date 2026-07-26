@@ -51,6 +51,7 @@ class JUGNU extends Client {
     this.mcategories = fs.readdirSync("./Commands/Message");
     this.scategories = fs.readdirSync("./Commands/Slash");
     this.temp = new Collection();
+    this.previewMessages = new Collection();
     this.config = require("../settings/config");
     this.logger = Logger;
 

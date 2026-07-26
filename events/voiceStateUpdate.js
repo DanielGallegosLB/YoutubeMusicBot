@@ -1,6 +1,7 @@
 const { ChannelType, Colors, Events } = require("discord.js");
 const client = require("../index");
 const { msToDuration } = require("../handlers/functions");
+const UserHistory = require("../handlers/UserHistory");
 
 const leaveTimeout = client.config.options.leaveTimeout;
 
@@ -20,6 +21,32 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
       await newState.guild.members.me.voice.setSuppressed(false);
     } catch (error) {
       console.error("Failed to unsuppress bot's voice:", error);
+    }
+  }
+
+  // Show playlist preview when a user joins (works with or without active queue)
+  if (!oldState.channel && newState.channel) {
+    try {
+      const isNoSuggest = await UserHistory.isNoSuggestions(client, guildId, newState.member.id);
+      if (!isNoSuggest) {
+        const embed = await UserHistory.buildPreviewEmbed(client, guildId, newState.member.id);
+        if (embed) {
+          const textChannel = await newState.guild.channels.fetch("432435342738456590").catch(() => null);
+          if (textChannel) {
+            const components = await UserHistory.buildPreviewComponents(client, guildId, newState.member.id);
+            const msg = await textChannel.send({
+              content: `<@${newState.member.id}>`,
+              embeds: [embed],
+              components,
+            }).catch(() => null);
+            if (msg) {
+              client.previewMessages.set(msg.id, true);
+            }
+          }
+        }
+      }
+    } catch (e) {
+      client.logger.error(`[UserHistory] Error showing preview:`, e);
     }
   }
 

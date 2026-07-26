@@ -1,7 +1,9 @@
 const { EmbedBuilder, Events, ChannelType } = require("discord.js");
 const JUGNU = require("./Client");
 const Store = require("./PlaylistStore");
+const UserHistory = require("./UserHistory");
 const { check_dj, skip } = require("./functions");
+const { fetchPlaylistURLs } = require("./PlaylistFetcher");
 
 /**
  *
@@ -14,6 +16,46 @@ module.exports = async (client) => {
       if (!interaction.guild || interaction.user.bot) return;
       if (interaction.isButton()) {
         const { customId, member } = interaction;
+
+        // Handle "No sugerir" button
+        if (customId.startsWith("no_suggest_")) {
+          const userId = customId.replace("no_suggest_", "");
+          if (member.id !== userId) {
+            return interaction.reply({ content: "Este botón no es para ti.", ephemeral: true }).catch(() => {});
+          }
+          await UserHistory.setNoSuggestions(client, interaction.guildId, userId, true);
+          return interaction.reply({ content: "✅ No recibirás más sugerencias al conectar.", ephemeral: true }).catch(() => {});
+        }
+
+        // Handle "Reproducir Favoritos" button
+        if (customId === "suggest_favorites") {
+          await interaction.deferUpdate().catch(() => {});
+          const playlists = await Store.getAll(client, interaction.guildId, interaction.user.id);
+          const favs = playlists["Canciones Favoritas"];
+          if (!favs || favs.length === 0) {
+            return interaction.followUp({ content: "❌ No tienes canciones guardadas aún.", ephemeral: true }).catch(() => {});
+          }
+          const channel = interaction.member.voice.channel;
+          if (!channel) {
+            return interaction.followUp({ content: "❌ Debes unirte a un canal de voz.", ephemeral: true }).catch(() => {});
+          }
+          try {
+            const playOpts = {
+              member: interaction.member,
+              textChannel: interaction.channel,
+              selfDeaf: true,
+            };
+            for (const track of favs) {
+              if (track.url) {
+                await client.distube.play(channel, track.url, playOpts).catch(() => {});
+              }
+            }
+            return interaction.followUp({ content: `✅ Reproduciendo ${favs.length} canciones de tus favoritos.`, ephemeral: true }).catch(() => {});
+          } catch (e) {
+            return interaction.followUp({ content: "❌ Error al reproducir favoritos.", ephemeral: true }).catch(() => {});
+          }
+        }
+
         const controlButtons = ["previous", "rewind10", "pauseresume", "forward10", "skip", "stop", "shuffle", "loop_song", "loop_queue", "autoplay", "savecurrent_btn"];
         if (!controlButtons.includes(customId)) return;
         await interaction.deferUpdate().catch((e) => {});
@@ -383,6 +425,59 @@ module.exports = async (client) => {
 
           default:
             break;
+        }
+      }
+
+      // Handle select menu for preview playlist selection
+      if (interaction.isStringSelectMenu() && interaction.customId === "preview_select_playlist") {
+        await interaction.deferUpdate().catch(() => {});
+        const value = interaction.values[0];
+        const channel = interaction.member.voice.channel;
+        if (!channel) {
+          return interaction.followUp({ content: "❌ Debes unirte a un canal de voz.", ephemeral: true }).catch(() => {});
+        }
+        try {
+          const playOpts = {
+            member: interaction.member,
+            textChannel: interaction.channel,
+            selfDeaf: true,
+          };
+          if (value.startsWith("url:")) {
+            const playlistUrl = value.slice(4);
+            const urls = await fetchPlaylistURLs(playlistUrl);
+            if (urls.length === 0) {
+              return interaction.followUp({ content: "❌ No se encontraron canciones en la lista.", ephemeral: true }).catch(() => {});
+            }
+            try { await client.distube.voices.join(channel); } catch {}
+            await client.distube.play(channel, urls[0], playOpts).catch(() => {});
+            client.playlistLoading.set(interaction.guildId, true);
+            (async () => {
+              for (let i = 1; i < urls.length; i++) {
+                if (!client.playlistLoading.get(interaction.guildId)) break;
+                try {
+                  await client.distube.play(channel, urls[i], { ...playOpts, skip: false });
+                } catch (e) {}
+                await new Promise((r) => setTimeout(r, 250));
+              }
+              client.playlistLoading.delete(interaction.guildId);
+            })();
+            return interaction.followUp({ content: `✅ Cargando lista: \`${urls.length}\` canciones.`, ephemeral: true }).catch(() => {});
+          } else if (value.startsWith("store:")) {
+            const playlistName = value.slice(6);
+            const playlist = await Store.get(client, interaction.guildId, interaction.user.id, playlistName);
+            if (!playlist || playlist.tracks.length === 0) {
+              return interaction.followUp({ content: "❌ Lista vacía.", ephemeral: true }).catch(() => {});
+            }
+            try { await client.distube.voices.join(channel); } catch {}
+            for (const track of playlist.tracks) {
+              if (track.url) {
+                await client.distube.play(channel, track.url, playOpts).catch(() => {});
+              }
+            }
+            return interaction.followUp({ content: `✅ Reproduciendo \`${playlist.name}\` (${playlist.tracks.length} canciones).`, ephemeral: true }).catch(() => {});
+          }
+        } catch (e) {
+          return interaction.followUp({ content: "❌ Error al reproducir.", ephemeral: true }).catch(() => {});
         }
       }
     });
