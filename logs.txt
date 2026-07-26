@@ -11142,3 +11142,11 @@ ERROR: [youtube] 8qmsG43X1gM: This video has been removed for violating YouTube'
 
 [26/7/2026, 2:00:01 p.m.] [WARN] [Slash Play] Track 41 saltado en Guild 311402172820619274: Error: ERROR: [youtube] wP6aCXsFaHE: Video unavailable. This video is not available
 
+[26/7/2026, 2:04:34 p.m.] [WARN] [Slash Play] Track 71 saltado en Guild 311402172820619274: Error: ERROR: [youtube] BWyOqO90Ue8: Video unavailable. It was removed following a copyright removal request by Warner Music Group
+
+[26/7/2026, 2:04:57 p.m.] [WARN] [Slash Play] Track 74 saltado en Guild 311402172820619274: Error: ERROR: [youtube] FOJdADjAIi0: Video unavailable. It was removed following a copyright removal request by Yeezy LLC
+
+[26/7/2026, 2:06:41 p.m.] [WARN] [Slash Play] Track 87 saltado en Guild 311402172820619274: Error: ERROR: [youtube] E2kGhgGSi78: Video unavailable. This video is not available
+
+[26/7/2026, 2:07:00 p.m.] [WARN] [Slash Play] Track 89 saltado en Guild 311402172820619274: Error: ERROR: [youtube] b-sX0EqZZZI: This video has been removed for violating YouTube's policy on hate speech. Learn more about combating hate speech in your country.
+

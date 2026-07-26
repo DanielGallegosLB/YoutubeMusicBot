@@ -119,43 +119,6 @@ module.exports = async (client) => {
     let data = await client.music.get(`${queue.textChannel.guildId}.music`);
     if (data && data.channel === queue.textChannel.id) return;
 
-    queue.textChannel
-      .send({
-        embeds: [
-          new EmbedBuilder()
-            .setColor(client.config.embed.color)
-            .setAuthor({
-              name: `Added to Queue`,
-              iconURL: song.user.displayAvatarURL({ dynamic: true }),
-              url: song.url,
-            })
-            .setThumbnail(song.thumbnail)
-            .setDescription(`[\`${client.getTitle(song)}\`](${song.url})`)
-            .addFields([
-              {
-                name: `Requested By`,
-                value: `\`${song.user.tag}\``,
-                inline: true,
-              },
-              {
-                name: `Author`,
-                value: `\`${song.uploader.name}\``,
-                inline: true,
-              },
-              {
-                name: `Duration`,
-                value: `\`${song.formattedDuration}\``,
-                inline: true,
-              },
-            ])
-            .setFooter(client.getFooter(song.user)),
-        ],
-      })
-      .then((msg) => {
-        setTimeout(() => {
-          msg.delete().catch((e) => null);
-        }, 5000);
-      });
   });
 
   client.distube.on("addList", async (queue, playlist) => {
@@ -174,43 +137,6 @@ module.exports = async (client) => {
     let data = await client.music.get(`${queue.textChannel.guildId}.music`);
     if (data && data.channel === queue.textChannel.id) return;
 
-    queue.textChannel
-      .send({
-        embeds: [
-          new EmbedBuilder()
-            .setColor(client.config.embed.color)
-            .setAuthor({
-              name: `Playlist Added to Queue`,
-              iconURL: playlist.user.displayAvatarURL({ dynamic: true }),
-              url: playlist.url,
-            })
-            .setThumbnail(playlist.thumbnail)
-            .setDescription(`** [\`${playlist.name}\`](${playlist.url}) **`)
-            .addFields([
-              {
-                name: `Requested By`,
-                value: `\`${playlist.user.tag}\``,
-                inline: true,
-              },
-              {
-                name: `Songs`,
-                value: `\`${playlist.songs.length}\``,
-                inline: true,
-              },
-              {
-                name: `Duration`,
-                value: `\`${playlist.formattedDuration}\``,
-                inline: true,
-              },
-            ])
-            .setFooter(client.getFooter(playlist.user)),
-        ],
-      })
-      .then((msg) => {
-        setTimeout(() => {
-          msg.delete().catch((e) => null);
-        }, 5000);
-      });
   });
 
   client.distube.on("disconnect", async (queue) => {
