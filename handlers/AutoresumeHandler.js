@@ -30,6 +30,9 @@ module.exports = async (client) => {
     // Skip if a queue already exists for this guild
     if (client.distube.getQueue(guild.id)) continue;
 
+    // Skip if the bot is already in a voice channel in this guild (user moved it manually)
+    if (guild.members.me.voice.channel) continue;
+
     // Retrieve voice channel and check if it exists
     const voiceChannel = guild.channels.cache.get(data.voiceChannel);
     if (!voiceChannel) {
