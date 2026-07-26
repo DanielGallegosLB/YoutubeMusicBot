@@ -1,10 +1,54 @@
-const { EmbedBuilder, Events } = require("discord.js");
+const { EmbedBuilder, Events, ActivityType } = require("discord.js");
 const JUGNU = require("./Client");
 const AutoresumeHandler = require("./AutoresumeHandler");
-const InitAutoResume = require("./InitAutoResume");
+const InitAutoResume = require("./InitAutoresume");
 const UserHistory = require("./UserHistory");
 
 const MAX_SESSION_SONGS = 150;
+
+const activityIntervals = new Map();
+
+function startMarqueeActivity(client, text, guild) {
+  stopMarqueeActivity(client);
+  const fullText = `♪ ${text}`;
+  let pos = 0;
+  const update = () => {
+    const slice = fullText.slice(pos) + fullText.slice(0, pos);
+    client.user.setActivity(slice, { type: ActivityType.Playing });
+    if (guild) {
+      const nickSlice = slice.substring(0, 32);
+      guild.members.me.setNickname(nickSlice).catch(() => {});
+    }
+    pos = (pos + 1) % fullText.length;
+  };
+  update();
+  const interval = setInterval(update, 1500);
+  activityIntervals.set(client.user.id, interval);
+}
+
+function stopMarqueeActivity(client, guild) {
+  const interval = activityIntervals.get(client.user.id);
+  if (interval) {
+    clearInterval(interval);
+    activityIntervals.delete(client.user.id);
+  }
+  client.user.setActivity(null);
+  if (guild) {
+    guild.members.me.setNickname(null).catch(() => {});
+  }
+}
+
+function stopMarqueeActivity(client, guild) {
+  const interval = activityIntervals.get(client.user.id);
+  if (interval) {
+    clearInterval(interval);
+    activityIntervals.delete(client.user.id);
+  }
+  client.user.setActivity(null);
+  if (guild) {
+    guild.members.me.setNickname(null).catch(() => {});
+  }
+}
 
 const buildSessionTrack = (song) => ({
   memberId: song.member?.id || song.user?.id || null,
@@ -64,6 +108,11 @@ module.exports = async (client) => {
   // events
   client.distube.on("playSong", async (queue, song) => {
     console.log(`[DisTube] Playing: ${song.name} in ${queue.textChannel.guild.name}`);
+
+    const activityText = song.uploader?.name
+      ? `${song.name} - ${song.uploader.name}`
+      : song.name;
+    startMarqueeActivity(client, activityText, queue.textChannel.guild);
     
     // Update persistent request channel if it exists
     await client.updatequeue(queue);
@@ -163,6 +212,7 @@ module.exports = async (client) => {
   client.distube.on("disconnect", async (queue) => {
     try {
       const guildId = queue.textChannel.guildId;
+      stopMarqueeActivity(client, queue.textChannel.guild);
 
       // Edit player message
       await client.editPlayerMessage(queue.textChannel);
@@ -234,6 +284,7 @@ module.exports = async (client) => {
   });
 
   client.distube.on("finish", async (queue) => {
+    stopMarqueeActivity(client, queue.textChannel.guild);
     await client.updateembed(client, queue.textChannel.guild);
     await client.editPlayerMessage(queue.textChannel);
     // Remove auto-resume entry

@@ -430,11 +430,13 @@ module.exports = async (client) => {
 
       // Handle select menu for preview playlist selection
       if (interaction.isStringSelectMenu() && interaction.customId === "preview_select_playlist") {
-        await interaction.deferUpdate().catch(() => {});
+        await interaction.deferReply({ ephemeral: true }).catch((e) => {
+          console.error("[Preview Select] deferReply failed:", e);
+        });
         const value = interaction.values[0];
         const channel = interaction.member.voice.channel;
         if (!channel) {
-          return interaction.followUp({ content: "❌ Debes unirte a un canal de voz.", ephemeral: true }).catch(() => {});
+          return interaction.editReply({ content: "❌ Debes unirte a un canal de voz." }).catch(() => {});
         }
         try {
           const playOpts = {
@@ -444,12 +446,18 @@ module.exports = async (client) => {
           };
           if (value.startsWith("url:")) {
             const playlistUrl = value.slice(4);
+            console.log(`[Preview Select] Fetching playlist URLs from: ${playlistUrl}`);
             const urls = await fetchPlaylistURLs(playlistUrl);
+            console.log(`[Preview Select] Got ${urls.length} URLs`);
             if (urls.length === 0) {
-              return interaction.followUp({ content: "❌ No se encontraron canciones en la lista.", ephemeral: true }).catch(() => {});
+              return interaction.editReply({ content: "❌ No se encontraron canciones en la lista." }).catch(() => {});
             }
-            try { await client.distube.voices.join(channel); } catch {}
-            await client.distube.play(channel, urls[0], playOpts).catch(() => {});
+            try {
+              await client.distube.voices.join(channel);
+            } catch (e) {
+              console.error("[Preview Select] Error joining voice:", e);
+            }
+            await client.distube.play(channel, urls[0], playOpts);
             client.playlistLoading.set(interaction.guildId, true);
             (async () => {
               for (let i = 1; i < urls.length; i++) {
@@ -461,23 +469,28 @@ module.exports = async (client) => {
               }
               client.playlistLoading.delete(interaction.guildId);
             })();
-            return interaction.followUp({ content: `✅ Cargando lista: \`${urls.length}\` canciones.`, ephemeral: true }).catch(() => {});
+            return interaction.editReply({ content: `✅ Cargando lista: \`${urls.length}\` canciones.` }).catch(() => {});
           } else if (value.startsWith("store:")) {
             const playlistName = value.slice(6);
             const playlist = await Store.get(client, interaction.guildId, interaction.user.id, playlistName);
             if (!playlist || playlist.tracks.length === 0) {
-              return interaction.followUp({ content: "❌ Lista vacía.", ephemeral: true }).catch(() => {});
+              return interaction.editReply({ content: "❌ Lista vacía." }).catch(() => {});
             }
-            try { await client.distube.voices.join(channel); } catch {}
+            try {
+              await client.distube.voices.join(channel);
+            } catch (e) {
+              console.error("[Preview Select] Error joining voice:", e);
+            }
             for (const track of playlist.tracks) {
               if (track.url) {
-                await client.distube.play(channel, track.url, playOpts).catch(() => {});
+                await client.distube.play(channel, track.url, playOpts);
               }
             }
-            return interaction.followUp({ content: `✅ Reproduciendo \`${playlist.name}\` (${playlist.tracks.length} canciones).`, ephemeral: true }).catch(() => {});
+            return interaction.editReply({ content: `✅ Reproduciendo \`${playlist.name}\` (${playlist.tracks.length} canciones).` }).catch(() => {});
           }
         } catch (e) {
-          return interaction.followUp({ content: "❌ Error al reproducir.", ephemeral: true }).catch(() => {});
+          console.error("[Preview Select] Error:", e);
+          return interaction.editReply({ content: `❌ Error al reproducir: ${e.message || e}` }).catch(() => {});
         }
       }
     });

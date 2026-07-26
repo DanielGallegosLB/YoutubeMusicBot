@@ -11188,3 +11188,29 @@ ERROR: [youtube] 8qmsG43X1gM: This video has been removed for violating YouTube'
 [26/7/2026, 3:30:07 p.m.] [INFO] Clubot Music is Online
 [26/7/2026, 3:35:19 p.m.] [INFO] [ShardReady] Shard 0 ready, checking for queues to restore...
 [26/7/2026, 3:35:19 p.m.] [INFO] Clubot Music is Online
+[26/7/2026, 3:55:55 p.m.] [INFO] [ShardReady] Shard 0 ready, checking for queues to restore...
+[26/7/2026, 3:55:56 p.m.] [INFO] Clubot Music is Online
+[26/7/2026, 4:01:51 p.m.] [INFO] [ShardReady] Shard 0 ready, checking for queues to restore...
+[26/7/2026, 4:01:51 p.m.] [INFO] Clubot Music is Online
+[26/7/2026, 4:25:52 p.m.] [ERROR] [DisTube Error] DisTubeError [YTDLP_ERROR]: Error: ERROR: [youtube] ZkPbrL-K5jg: This content isn't available, try again later. The current session has been rate-limited by YouTube for up to an hour. It is recommended to use `-t sleep` to add a delay between video requests to avoid exceeding the rate limit. For more information, refer to  https://github.com/yt-dlp/yt-dlp/wiki/Extractors#this-content-isnt-available-try-again-later
+
+    at C:\Users\Dani\Downloads\Proyectos\JUGNU-MUSIC\node_modules\@distube\yt-dlp\dist\index.js:189:13
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async YtDlpPlugin.getStreamURL (C:\Users\Dani\Downloads\Proyectos\JUGNU-MUSIC\node_modules\@distube\yt-dlp\dist\index.js:180:18)
+    at async DisTubeHandler.attachStreamInfo (C:\Users\Dani\Downloads\Proyectos\JUGNU-MUSIC\node_modules\distube\dist\index.js:1632:25)
+    at async QueueManager.playSong (C:\Users\Dani\Downloads\Proyectos\JUGNU-MUSIC\node_modules\distube\dist\index.js:2123:7)
+    at async QueueManager.handleSongFinish (C:\Users\Dani\Downloads\Proyectos\JUGNU-MUSIC\node_modules\distube\dist\index.js:2083:7) {
+  errorCode: 'YTDLP_ERROR'
+}
+[26/7/2026, 4:26:01 p.m.] [ERROR] [DisTube Error] DisTubeError [YTDLP_ERROR]: Error: ERROR: [youtube] qD9AheDpjoo: This content isn't available, try again later. The current session has been rate-limited by YouTube for up to an hour. It is recommended to use `-t sleep` to add a delay between video requests to avoid exceeding the rate limit. For more information, refer to  https://github.com/yt-dlp/yt-dlp/wiki/Extractors#this-content-isnt-available-try-again-later
+
+    at C:\Users\Dani\Downloads\Proyectos\JUGNU-MUSIC\node_modules\@distube\yt-dlp\dist\index.js:189:13
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async YtDlpPlugin.getStreamURL (C:\Users\Dani\Downloads\Proyectos\JUGNU-MUSIC\node_modules\@distube\yt-dlp\dist\index.js:180:18)
+    at async DisTubeHandler.attachStreamInfo (C:\Users\Dani\Downloads\Proyectos\JUGNU-MUSIC\node_modules\distube\dist\index.js:1632:25)
+    at async QueueManager.playSong (C:\Users\Dani\Downloads\Proyectos\JUGNU-MUSIC\node_modules\distube\dist\index.js:2123:7)
+    at async #handlePlayingError (C:\Users\Dani\Downloads\Proyectos\JUGNU-MUSIC\node_modules\distube\dist\index.js:2103:7) {
+  errorCode: 'YTDLP_ERROR'
+}
+[26/7/2026, 5:02:13 p.m.] [INFO] [ShardReady] Shard 0 ready, checking for queues to restore...
+[26/7/2026, 5:02:13 p.m.] [INFO] Clubot Music is Online
