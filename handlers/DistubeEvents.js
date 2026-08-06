@@ -9,32 +9,23 @@ const MAX_SESSION_SONGS = 150;
 const activityIntervals = new Map();
 
 function startMarqueeActivity(client, text, guild) {
-  stopMarqueeActivity(client);
-  const fullText = `♪ ${text}`;
-  let pos = 0;
-  const update = () => {
-    const slice = fullText.slice(pos) + fullText.slice(0, pos);
-    client.user.setActivity(slice, { type: ActivityType.Playing });
-    if (guild) {
-      const nickSlice = slice.substring(0, 32);
-      guild.members.me.setNickname(nickSlice).catch(() => {});
-    }
-    pos = (pos + 1) % fullText.length;
-  };
-  update();
-  const interval = setInterval(update, 1500);
-  activityIntervals.set(client.user.id, interval);
-}
+  stopMarqueeActivity(client, guild);
 
-function stopMarqueeActivity(client, guild) {
-  const interval = activityIntervals.get(client.user.id);
-  if (interval) {
-    clearInterval(interval);
-    activityIntervals.delete(client.user.id);
-  }
-  client.user.setActivity(null);
+  const paddedText = `          ♪ ${text} ♪          `;
+  let pos = 0;
+
+  const update = () => {
+    const rotated = paddedText.slice(pos) + paddedText.slice(0, pos);
+    client.user.setActivity(rotated, { type: ActivityType.Playing });
+    pos = (pos + 1) % paddedText.length;
+  };
+
+  update();
+  const interval = setInterval(update, 4000);
+  activityIntervals.set(client.user.id, interval);
+
   if (guild) {
-    guild.members.me.setNickname(null).catch(() => {});
+    guild.members.me.setNickname(`♪ ${text}`.substring(0, 32)).catch(() => {});
   }
 }
 
@@ -113,7 +104,7 @@ module.exports = async (client) => {
       ? `${song.name} - ${song.uploader.name}`
       : song.name;
     startMarqueeActivity(client, activityText, queue.textChannel.guild);
-    
+
     // Update persistent request channel if it exists
     await client.updatequeue(queue);
     await client.updateplayer(queue);
