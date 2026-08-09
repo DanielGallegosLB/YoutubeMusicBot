@@ -5,12 +5,52 @@ const {
   ButtonStyle,
   StringSelectMenuBuilder,
 } = require("discord.js");
+const { spawn } = require("child_process");
+const path = require("path");
+const fs = require("fs");
 const PlaylistStore = require("./PlaylistStore");
 
 const MAX_HISTORY = 20;
 const MAX_SELECT_OPTIONS = 25;
 
 const FAVORITES_PLAYLIST = "Canciones Favoritas";
+
+const YTDLP_PATH = path.join(
+  process.cwd(),
+  "node_modules/@distube/yt-dlp/bin",
+  process.platform === "win32" ? "yt-dlp.exe" : "yt-dlp"
+);
+
+function fetchPlaylistInfo(playlistUrl) {
+  return new Promise((resolve) => {
+    const cookiePath = path.join(process.cwd(), "yt-cookies.txt");
+    const args = [
+      "--flat-playlist",
+      "--playlist-items", "1-1",
+      "--print", "%(playlist_title)s\t%(id)s",
+      "--no-warnings",
+      "--ignore-errors",
+      "--no-check-certificates",
+      "--js-runtimes", "node",
+      playlistUrl,
+    ];
+    if (fs.existsSync(cookiePath)) {
+      args.push("--cookies", cookiePath);
+    }
+    const proc = spawn(YTDLP_PATH, args);
+    let stdout = "";
+    proc.stdout.on("data", (d) => (stdout += d));
+    proc.on("error", () => resolve(null));
+    proc.on("close", () => {
+      const line = stdout.trim().split("\n")[0];
+      if (!line) return resolve(null);
+      const [title, id] = line.split("\t");
+      const thumbnail =
+        id && id !== "NA" ? `https://i.ytimg.com/vi/${id}/mqdefault.jpg` : null;
+      resolve({ title: title || null, thumbnail });
+    });
+  });
+}
 
 module.exports = {
   async recordPlaylistPlay(client, guildId, userId, playlistUrl, playlistName, channelId, thumbnail) {
@@ -73,7 +113,61 @@ module.exports = {
     return Array.from(seen.values());
   },
 
+  async backfillPlaylistNames(client, guildId, userId) {
+    const key = `${guildId}.userHistory.${userId}`;
+    const data = await client.music.get(key);
+    const history = data?.playlistHistory || [];
+    if (!history.length) return;
+
+    const urlEntries = history.filter(
+      (e) => e.url && /^https?:\/\//i.test(e.name || "")
+    );
+    if (!urlEntries.length) return;
+
+    const uniqueUrls = [...new Set(urlEntries.map((e) => e.url))];
+    const info = new Map();
+    for (const url of uniqueUrls) {
+      try {
+        const res = await fetchPlaylistInfo(url);
+        if (res?.title) info.set(url, res);
+      } catch {}
+    }
+    if (!info.size) return;
+
+    const seen = new Map();
+    for (const entry of history) {
+      if (entry.url && seen.has(entry.url)) continue;
+      if (!entry.url) {
+        seen.set(entry, entry);
+        continue;
+      }
+      seen.set(entry.url, entry);
+    }
+
+    const newHistory = [...seen.values()];
+    let changed = newHistory.length !== history.length;
+    for (const entry of newHistory) {
+      if (!entry.url || !info.has(entry.url)) continue;
+      const res = info.get(entry.url);
+      if (entry.name !== res.title) {
+        entry.name = res.title;
+        changed = true;
+      }
+      if (!entry.thumbnail && res.thumbnail) {
+        entry.thumbnail = res.thumbnail;
+        changed = true;
+      }
+    }
+    if (changed) await client.music.set(`${key}.playlistHistory`, newHistory);
+  },
+
   async buildPreviewEmbed(client, guildId, userId) {
+    this.backfillPlaylistNames(client, guildId, userId).catch((e) => {
+      const msg = e?.message || e;
+      if (client.logger?.warn) client.logger.warn(`[UserHistory] Backfill error:`, msg);
+      else console.warn("[UserHistory] Backfill error:", msg);
+    });
+
     const playedPlaylists = await this.getUniquePlayedPlaylists(client, guildId, userId);
     const playlists = await PlaylistStore.getAll(client, guildId, userId);
     const favs = playlists[FAVORITES_PLAYLIST] || [];

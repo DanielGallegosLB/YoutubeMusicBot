@@ -18,8 +18,7 @@ const YTDLP_PATH = path.join(
 );
 
 function isPlaylistURL(url) {
-  return /youtube\.com\/playlist\?list=/.test(url) ||
-    (/[?&]list=/.test(url) && !/watch\?v=/.test(url));
+  return /youtube\.com\/playlist\?list=/.test(url) || /[?&]list=/.test(url);
 }
 
 function sanitizeYouTubeUrl(url) {
@@ -33,17 +32,21 @@ function sanitizeYouTubeUrl(url) {
       if (pathname === "/watch") {
         const v = search.get("v");
         if (!v) return url;
-        // Si tiene watch?v=X&list=Y, ignora el list (es una canción, no una playlist)
+        // Conserva el list si viene de una playlist (watch?v=X&list=Y&index=N)
+        const list = search.get("list");
         const t = search.get("t") || search.get("start");
         let out = `https://www.youtube.com/watch?v=${v}`;
+        if (list) out += `&list=${list}`;
         if (t) out += `&t=${t}`;
         return out;
       }
       if (pathname.startsWith("/shorts/")) {
         const id = pathname.split("/")[2];
         if (!id) return url;
+        const list = search.get("list");
         const t = search.get("t") || search.get("start");
         let out = `https://www.youtube.com/watch?v=${id}`;
+        if (list) out += `&list=${list}`;
         if (t) out += `&t=${t}`;
         return out;
       }
@@ -52,8 +55,10 @@ function sanitizeYouTubeUrl(url) {
     if (hostname === "youtu.be") {
       const id = pathname.slice(1);
       if (!id) return url;
+      const list = search.get("list");
       const t = search.get("t") || search.get("start");
       let out = `https://www.youtube.com/watch?v=${id}`;
+      if (list) out += `&list=${list}`;
       if (t) out += `&t=${t}`;
       return out;
     }
@@ -64,13 +69,41 @@ function sanitizeYouTubeUrl(url) {
   }
 }
 
+function fetchPlaylistTitle(playlistUrl) {
+  return new Promise((resolve) => {
+    const cookiePath = path.join(process.cwd(), "yt-cookies.txt");
+    const args = [
+      "--flat-playlist",
+      "--playlist-items", "1-1",
+      "--print", "%(playlist_title)s",
+      "--no-warnings",
+      "--ignore-errors",
+      "--no-check-certificates",
+      "--js-runtimes", "node",
+      playlistUrl,
+    ];
+    if (fs.existsSync(cookiePath)) {
+      args.push("--cookies", cookiePath);
+    }
+    const proc = spawn(YTDLP_PATH, args);
+    let stdout = "";
+    proc.stdout.on("data", (d) => (stdout += d));
+    proc.on("error", () => resolve(""));
+    proc.on("close", () => {
+      const title = stdout.trim().split("\n")[0];
+      resolve(title || "");
+    });
+  });
+}
+
 function fetchPlaylistURLs(playlistUrl) {
-  return new Promise(async (resolve) => {
+  return new Promise(async (resolve, reject) => {
     let allUrls = [];
     let startItem = 1;
     const batchSize = 100;
     const maxItems = 1000;
     const cookiePath = path.join(process.cwd(), "yt-cookies.txt");
+    let lastStderr = "";
 
     while (startItem <= maxItems) {
       const endItem = startItem + batchSize - 1;
@@ -88,38 +121,54 @@ function fetchPlaylistURLs(playlistUrl) {
         args.push("--cookies", cookiePath);
       }
 
+      let batchUrls;
       try {
-        const batchUrls = await new Promise((res, rej) => {
+        const result = await new Promise((res, rej) => {
           const proc = spawn(YTDLP_PATH, args);
           let stdout = "", stderr = "";
           proc.stdout.on("data", (d) => stdout += d);
           proc.stderr.on("data", (d) => stderr += d);
-          proc.on("close", () => {
+          proc.on("close", (code) => {
             const urls = stdout.trim().split("\n").filter(Boolean);
-            res(urls);
+            res({ urls, stderr: stderr.trim(), code });
           });
           proc.on("error", rej);
         });
-
-        if (batchUrls.length === 0) break;
-        
-        // Add only unique URLs to avoid duplicates if YouTube overlaps
-        for (const url of batchUrls) {
-          if (!allUrls.includes(url)) allUrls.push(url);
-        }
-
-        // If we got fewer items than requested, we reached the end
-        if (batchUrls.length < batchSize) break;
-        
-        startItem += batchSize;
+        batchUrls = result.urls;
+        if (result.stderr) lastStderr = result.stderr;
       } catch (e) {
-        console.error(`[fetchPlaylistURLs] Error in batch ${startItem}:`, e);
+        const errMsg = `[fetchPlaylistURLs] Error en batch ${startItem}: ${e.message}`;
+        console.error(errMsg);
+        reject(new Error(errMsg));
+        return;
+      }
+
+      if (batchUrls.length === 0) {
+        // Lista vacía o yt-dlp falló; si hay stderr se reporta al final
         break;
       }
+
+      // Add only unique URLs to avoid duplicates if YouTube overlaps
+      for (const url of batchUrls) {
+        if (!allUrls.includes(url)) allUrls.push(url);
+      }
+
+      // If we got fewer items than requested, we reached the end
+      if (batchUrls.length < batchSize) break;
+
+      startItem += batchSize;
     }
 
-    if (allUrls.length > 0) resolve(allUrls);
-    else resolve([]);
+    if (allUrls.length > 0) {
+      if (lastStderr) {
+        console.error(`[fetchPlaylistURLs] Parcial: se extrajeron ${allUrls.length} tracks pero yt-dlp reportó errores. Primer error:\n${lastStderr.split("\n")[0]}`);
+      }
+      resolve(allUrls);
+    } else if (lastStderr) {
+      reject(new Error("yt-dlp no pudo extraer la lista: " + lastStderr.split("\n")[0]));
+    } else {
+      resolve([]);
+    }
   });
 }
 
@@ -229,6 +278,14 @@ module.exports = {
         return;
       }
 
+      let playlistName = song;
+      try {
+        const title = await fetchPlaylistTitle(song);
+        if (title) playlistName = title;
+      } catch (e) {
+        client.logger.warn(`[Slash Play] No se pudo obtener el título de la playlist:`, e.message);
+      }
+
       try { await client.distube.voices.join(channel); } catch {}
 
       // Toca el primer track reproducible y salta los inválidos
@@ -310,7 +367,7 @@ module.exports = {
           // Record playlist in user's history
           try {
             await UserHistory.recordPlaylistPlay(
-              client, interaction.guildId, interaction.user.id, song, song, interaction.channel.id
+              client, interaction.guildId, interaction.user.id, song, playlistName, interaction.channel.id
             );
           } catch (e) {
             client.logger.error(`[Slash Play] Error recording playlist history:`, e);

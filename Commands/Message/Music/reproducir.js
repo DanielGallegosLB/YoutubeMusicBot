@@ -17,6 +17,33 @@ function isPlaylistURL(url) {
     (/[?&]list=/.test(url) && !/watch\?v=/.test(url));
 }
 
+function fetchPlaylistTitle(playlistUrl) {
+  return new Promise((resolve) => {
+    const cookiePath = path.join(process.cwd(), "yt-cookies.txt");
+    const args = [
+      "--flat-playlist",
+      "--playlist-items", "1-1",
+      "--print", "%(playlist_title)s",
+      "--no-warnings",
+      "--ignore-errors",
+      "--no-check-certificates",
+      "--js-runtimes", "node",
+      playlistUrl,
+    ];
+    if (fs.existsSync(cookiePath)) {
+      args.push("--cookies", cookiePath);
+    }
+    const proc = spawn(YTDLP_PATH, args);
+    let stdout = "";
+    proc.stdout.on("data", (d) => (stdout += d));
+    proc.on("error", () => resolve(""));
+    proc.on("close", () => {
+      const title = stdout.trim().split("\n")[0];
+      resolve(title || "");
+    });
+  });
+}
+
 function fetchPlaylistURLs(playlistUrl) {
   return new Promise(async (resolve) => {
     let allUrls = [];
@@ -122,6 +149,14 @@ module.exports = {
         return client.embed(message, `${client.config.emoji.ERROR} No se pudo cargar: ${e.message}`);
       }
 
+      let playlistName = song;
+      try {
+        const title = await fetchPlaylistTitle(song);
+        if (title) playlistName = title;
+      } catch (e) {
+        client.logger.warn(`[Play Msg] No se pudo obtener el título de la playlist:`, e.message);
+      }
+
       try { await client.distube.voices.join(channel); } catch {}
 
       let addedCount = 0;
@@ -171,7 +206,7 @@ module.exports = {
         // Record playlist in user's history
         try {
           await UserHistory.recordPlaylistPlay(
-            client, message.guildId, message.author.id, song, song, message.channel.id
+            client, message.guildId, message.author.id, song, playlistName, message.channel.id
           );
         } catch (e) {
           client.logger.error(`[Play Msg] Error recording playlist history:`, e);
