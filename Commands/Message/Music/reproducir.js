@@ -107,7 +107,7 @@ module.exports = {
   category: "Music",
   cooldown: 5,
   inVoiceChannel: true,
-  inSameVoiceChannel: true,
+  inSameVoiceChannel: false,
   Player: false,
   djOnly: false,
 
@@ -127,6 +127,21 @@ module.exports = {
     }
 
     let { channel } = message.member.voice;
+
+    const botVoiceChannel = message.guild.members.me.voice.channel;
+    const ownerId = process.env.OWNER_ID;
+    if (
+      botVoiceChannel &&
+      channel &&
+      !botVoiceChannel.equals(channel) &&
+      (!ownerId || message.author.id !== ownerId)
+    ) {
+      return client.embed(
+        message,
+        `${client.config.emoji.ERROR} El bot está reproduciendo en ${botVoiceChannel}. Solo el dueño puede moverlo a su canal.`
+      );
+    }
+
     const hqStored = await client.music.get(`${message.guildId}.hqmode`);
     const hqMode = (hqStored === undefined ? process.env.HQ_MODE === "true" : hqStored) || false;
     

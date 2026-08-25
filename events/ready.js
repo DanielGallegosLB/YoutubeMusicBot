@@ -8,11 +8,19 @@ client.once(Events.ClientReady, async () => {
   try {
     client.logger.log(`${client.user.username} is Online`);
 
-    // Set bot activity
+    // Reset bot activity
     client.user.setActivity({
       name: `By @Dani | ${client.guilds.cache.size} Servers`,
       type: ActivityType.Watching,
     });
+
+    // Reset nickname in all guilds
+    for (const guild of client.guilds.cache.values()) {
+      const me = guild.members.me;
+      if (me && me.nickname) {
+        await me.setNickname(null).catch(() => {});
+      }
+    }
 
     // Load database
     await Database(client);

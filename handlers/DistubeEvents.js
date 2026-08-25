@@ -3,6 +3,7 @@ const JUGNU = require("./Client");
 const AutoresumeHandler = require("./AutoresumeHandler");
 const InitAutoResume = require("./InitAutoresume");
 const UserHistory = require("./UserHistory");
+const MusicTracker = require("./MusicTracker");
 
 const MAX_SESSION_SONGS = 150;
 
@@ -39,6 +40,20 @@ function stopMarqueeActivity(client, guild) {
   if (guild) {
     guild.members.me.setNickname(null).catch(() => {});
   }
+}
+
+const isOtherRequester = (user, ownerId) => !!(ownerId && user?.id && user.id !== ownerId);
+
+// Índice donde insertar las canciones de otros usuarios: justo después de la
+// canción actual y después de las peticiones ya en cola (orden de llegada).
+function getRequestsInsertIndex(queue, ownerId) {
+  let idx = 1;
+  while (idx < queue.songs.length) {
+    const s = queue.songs[idx];
+    if (!isOtherRequester(s.user, ownerId)) break;
+    idx++;
+  }
+  return idx;
 }
 
 const buildSessionTrack = (song) => ({
@@ -90,6 +105,7 @@ module.exports = async (client) => {
   client.createMusicSession = createSession;
 
   client.on(Events.ClientReady, async () => {
+    MusicTracker.connect();
     setTimeout(
       async () => await AutoresumeHandler(client),
       Math.max(client.ws.ping * 2, 1000)
@@ -99,6 +115,8 @@ module.exports = async (client) => {
   // events
   client.distube.on("playSong", async (queue, song) => {
     console.log(`[DisTube] Playing: ${song.name} in ${queue.textChannel.guild.name}`);
+
+    MusicTracker.logPlay(queue.textChannel.guildId, song.user.id, song);
 
     const activityText = song.uploader?.name
       ? `${song.name} - ${song.uploader.name}`
@@ -152,7 +170,23 @@ module.exports = async (client) => {
 
   client.distube.on("addSong", async (queue, song) => {
     console.log(`[DisTube] Song Added: ${song.name}`);
-    
+
+    // Peticiones de otras personas al inicio de la cola (orden de llegada)
+    const ownerId = process.env.OWNER_ID;
+    if (isOtherRequester(song.user, ownerId) && queue.songs.length > 1) {
+      try {
+        const currentIndex = queue.songs.findIndex((s) => s === song);
+        const insertIndex = getRequestsInsertIndex(queue, ownerId);
+        if (currentIndex > insertIndex) {
+          queue.songs.splice(currentIndex, 1);
+          queue.songs.splice(insertIndex, 0, song);
+          client.logger.log(`[Queue Priority] "${song.name}" movida al puesto ${insertIndex + 1}`);
+        }
+      } catch (e) {
+        client.logger.error(`[Queue Priority] Error reordenando:`, e);
+      }
+    }
+
     // Update persistent request channel if it exists
     await client.updatequeue(queue);
     await client.updateplayer(queue);
@@ -173,7 +207,25 @@ module.exports = async (client) => {
 
   client.distube.on("addList", async (queue, playlist) => {
     console.log(`[DisTube] Playlist Added: ${playlist.name} (${playlist.songs.length} songs)`);
-    
+
+    // Playlists de otras personas al inicio de la cola (orden de llegada)
+    const ownerId = process.env.OWNER_ID;
+    if (
+      isOtherRequester(playlist.user, ownerId) &&
+      playlist.songs.length > 0 &&
+      queue.songs.length > playlist.songs.length
+    ) {
+      try {
+        const n = playlist.songs.length;
+        const block = queue.songs.splice(queue.songs.length - n, n);
+        const insertIndex = getRequestsInsertIndex(queue, ownerId);
+        queue.songs.splice(insertIndex, 0, ...block);
+        client.logger.log(`[Queue Priority] Playlist "${playlist.name}" movida al puesto ${insertIndex + 1}`);
+      } catch (e) {
+        client.logger.error(`[Queue Priority] Error reordenando playlist:`, e);
+      }
+    }
+
     // Update persistent request channel if it exists
     await client.updatequeue(queue);
     await client.updateplayer(queue);

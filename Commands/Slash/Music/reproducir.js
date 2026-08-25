@@ -207,7 +207,7 @@ module.exports = {
   cooldown: 5,
   type: ApplicationCommandType.ChatInput,
   inVoiceChannel: true,
-  inSameVoiceChannel: true,
+  inSameVoiceChannel: false,
   Player: false,
   djOnly: false,
   options: [
@@ -231,6 +231,20 @@ module.exports = {
     let song = interaction.options.getString("cancion");
     let { channel } = interaction.member.voice;
     if (/^https?:\/\//i.test(song)) song = sanitizeYouTubeUrl(song);
+
+    const botVoiceChannel = interaction.guild.members.me.voice.channel;
+    const ownerId = process.env.OWNER_ID;
+    if (
+      botVoiceChannel &&
+      channel &&
+      !botVoiceChannel.equals(channel) &&
+      (!ownerId || interaction.user.id !== ownerId)
+    ) {
+      return client.embed(
+        interaction,
+        `${client.config.emoji.ERROR} El bot está reproduciendo en ${botVoiceChannel}. Solo el dueño puede moverlo a su canal.`
+      );
+    }
     const hqStored = await client.music.get(`${interaction.guildId}.hqmode`);
     const hqMode =
       (hqStored === undefined ? process.env.HQ_MODE === "true" : hqStored) || false;

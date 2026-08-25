@@ -67,16 +67,15 @@ class JUGNU extends Client {
         new YtDlpPlugin({
           update: false,
           ytdlpOptions: {
-            cookies: require("path").join(__dirname, "../yt-cookies.txt"),
             socketTimeout: 60,
             fragmentRetries: 10,
             addHeader: [
               "referer:https://www.youtube.com",
             ],
-            // Solves 'Requested format is not available' by providing node as JS runtime
             jsRuntimes: "node",
             noCheckCertificates: true,
             format: "bestaudio/best",
+            extractorArgs: "youtube:player_client=web_embedded",
           },
         }),
       ],
