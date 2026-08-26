@@ -30,16 +30,23 @@ module.exports = async (client) => {
         // Handle "Reproducir Favoritos" button
         if (customId === "suggest_favorites") {
           await interaction.deferUpdate().catch(() => {});
-          const playlists = await Store.getAll(client, interaction.guildId, interaction.user.id);
-          const favs = playlists["Canciones Favoritas"];
-          if (!favs || favs.length === 0) {
-            return interaction.followUp({ content: "❌ No tienes canciones guardadas aún.", ephemeral: true }).catch(() => {});
-          }
           const channel = interaction.member.voice.channel;
           if (!channel) {
             return interaction.followUp({ content: "❌ Debes unirte a un canal de voz.", ephemeral: true }).catch(() => {});
           }
           try {
+            // Get all users in the voice channel
+            const members = channel.members.filter((m) => !m.user.bot).map((m) => m.id);
+            let favs;
+            if (members.length > 1) {
+              favs = await Store.getInterleavedFavorites(client, interaction.guildId, members);
+            } else {
+              const playlists = await Store.getAll(client, interaction.guildId, interaction.user.id);
+              favs = playlists["Canciones Favoritas"] || [];
+            }
+            if (!favs || favs.length === 0) {
+              return interaction.followUp({ content: "❌ No hay canciones favoritas.", ephemeral: true }).catch(() => {});
+            }
             const playOpts = {
               member: interaction.member,
               textChannel: interaction.channel,
@@ -50,16 +57,29 @@ module.exports = async (client) => {
                 await client.distube.play(channel, track.url, playOpts).catch(() => {});
               }
             }
-            return interaction.followUp({ content: `✅ Reproduciendo ${favs.length} canciones de tus favoritos.`, ephemeral: true }).catch(() => {});
+            const label = members.length > 1
+              ? `✅ Reproduciendo ${favs.length} favoritos intercalados (${members.length} usuarios).`
+              : `✅ Reproduciendo ${favs.length} canciones de tus favoritos.`;
+            return interaction.followUp({ content: label, ephemeral: true }).catch(() => {});
           } catch (e) {
             return interaction.followUp({ content: "❌ Error al reproducir favoritos.", ephemeral: true }).catch(() => {});
           }
         }
 
         // Handle favorites management buttons
-        if (customId.startsWith("fav_page_")) {
-          const page = parseInt(customId.replace("fav_page_", ""), 10);
-          if (isNaN(page)) return interaction.deferUpdate().catch(() => {});
+        if (customId.startsWith("fav_nav_")) {
+          if (!client.favPages) client.favPages = new Map();
+          const current = client.favPages.get(interaction.message.id) || 0;
+          let page = current;
+          if (customId === "fav_nav_first") page = 0;
+          else if (customId === "fav_nav_prev") page = Math.max(0, current - 1);
+          else if (customId === "fav_nav_next") page = current + 1;
+          else if (customId === "fav_nav_last") {
+            const favs = await Store.sortFavorites(client, interaction.guildId, interaction.user.id);
+            page = Math.max(0, Math.ceil(favs.length / UserHistory.FAVORITES_PER_PAGE) - 1);
+          }
+          else return interaction.deferUpdate().catch(() => {});
+          client.favPages.set(interaction.message.id, page);
           await interaction.deferUpdate().catch(() => {});
           const embed = await UserHistory.buildFavoritesEmbed(client, interaction.guildId, interaction.user.id, page);
           const components = await UserHistory.buildFavoritesComponents(client, interaction.guildId, interaction.user.id, page);
@@ -67,11 +87,11 @@ module.exports = async (client) => {
           return;
         }
 
-        if (customId === "fav_pageinfo") {
-          return interaction.deferUpdate().catch(() => {});
-        }
+        if (customId === "fav_nav_info") return interaction.deferUpdate().catch(() => {});
 
         if (customId === "fav_remove") {
+          if (!client.favRemoveMsg) client.favRemoveMsg = new Map();
+          client.favRemoveMsg.set(interaction.user.id, interaction.message.id);
           const modal = new ModalBuilder()
             .setCustomId("fav_remove_modal")
             .setTitle("Eliminar canciones favoritas");
@@ -111,6 +131,7 @@ module.exports = async (client) => {
         if (customId === "fav_clear_all_confirm") {
           await interaction.deferUpdate().catch(() => {});
           const removed = await Store.clearAll(client, interaction.guildId, interaction.user.id, "Canciones Favoritas");
+          client.favPages?.delete(interaction.message.id);
           if (removed === 0) return interaction.editReply({ embeds: [new EmbedBuilder().setColor(client.config.embed.color).setDescription("No había canciones para eliminar.")], components: [] }).catch(() => {});
           return interaction.editReply({
             embeds: [new EmbedBuilder().setColor("#00FF00").setDescription(`✅ Se eliminaron todas las ${removed} canciones favoritas.`)],
@@ -120,10 +141,50 @@ module.exports = async (client) => {
 
         if (customId === "fav_cancel") {
           await interaction.deferUpdate().catch(() => {});
-          const embed = await UserHistory.buildFavoritesEmbed(client, interaction.guildId, interaction.user.id, 0);
-          const components = await UserHistory.buildFavoritesComponents(client, interaction.guildId, interaction.user.id, 0);
+          const currentPage = client.favPages?.get(interaction.message.id) || 0;
+          const embed = await UserHistory.buildFavoritesEmbed(client, interaction.guildId, interaction.user.id, currentPage);
+          const components = await UserHistory.buildFavoritesComponents(client, interaction.guildId, interaction.user.id, currentPage);
           if (embed) return interaction.editReply({ embeds: [embed], components }).catch(() => {});
           return interaction.editReply({ embeds: [], components: [] }).catch(() => {});
+        }
+
+        if (customId === "player_like") {
+          const _queue = client.distube.getQueue(interaction.guildId);
+          const _track = _queue?.songs?.[0];
+          if (!_track || !_queue) return interaction.deferUpdate().catch(() => {});
+          await interaction.deferReply({ ephemeral: true }).catch(() => {});
+          await Store.create(client, interaction.guildId, interaction.user.id, "Canciones Favoritas");
+          const existing = await Store.get(client, interaction.guildId, interaction.user.id, "Canciones Favoritas");
+          const trackExists = existing?.tracks?.some((t) => t.url === _track.url);
+          if (!trackExists) {
+            const serialized = Store.serializeSong(_track, interaction.user);
+            await Store.addTracks(client, interaction.guildId, interaction.user.id, "Canciones Favoritas", [serialized]);
+          }
+          const result = await Store.toggleLikeByUrl(client, interaction.guildId, interaction.user.id, "Canciones Favoritas", _track.url);
+          if (!result) return interaction.editReply({ content: "❌ Error al procesar." }).catch(() => {});
+          await Store.sortFavorites(client, interaction.guildId, interaction.user.id);
+          const msg = result.liked
+            ? `❤️ Like! (${result.score >= 0 ? "+" : ""}${result.score} pts · ${result.likeCount}❤️ ${result.dislikeCount}👎)`
+            : `💔 Like removido (${result.score >= 0 ? "+" : ""}${result.score} pts)`;
+          return interaction.editReply({ content: msg }).catch(() => {});
+        }
+
+        if (customId === "player_dislike") {
+          const _queue = client.distube.getQueue(interaction.guildId);
+          const _track = _queue?.songs?.[0];
+          if (!_track || !_queue) return interaction.deferUpdate().catch(() => {});
+          await interaction.deferReply({ ephemeral: true }).catch(() => {});
+          await Store.create(client, interaction.guildId, interaction.user.id, "Canciones Favoritas");
+          const existing = await Store.get(client, interaction.guildId, interaction.user.id, "Canciones Favoritas");
+          const trackExists = existing?.tracks?.some((t) => t.url === _track.url);
+          if (!trackExists) {
+            const serialized = Store.serializeSong(_track, interaction.user);
+            await Store.addTracks(client, interaction.guildId, interaction.user.id, "Canciones Favoritas", [serialized]);
+          }
+          const result = await Store.toggleDislikeByUrl(client, interaction.guildId, interaction.user.id, "Canciones Favoritas", _track.url);
+          if (!result) return interaction.editReply({ content: "❌ Error al procesar." }).catch(() => {});
+          await Store.sortFavorites(client, interaction.guildId, interaction.user.id);
+          return interaction.editReply({ content: `👎 Dislike! (${result.score >= 0 ? "+" : ""}${result.score} pts · ${result.likeCount}❤️ ${result.dislikeCount}👎)` }).catch(() => {});
         }
 
         const controlButtons = ["previous", "rewind10", "pauseresume", "forward10", "skip", "stop", "shuffle", "loop_song", "loop_queue", "autoplay", "savecurrent_btn"];
@@ -568,50 +629,72 @@ module.exports = async (client) => {
           return interaction.editReply({ content: `❌ Error al reproducir: ${e.message || e}` }).catch(() => {});
         }
       }
+
+      if (interaction.isStringSelectMenu() && interaction.customId === "delete_select_playlist") {
+        await interaction.deferReply({ ephemeral: true }).catch(() => {});
+        const value = interaction.values[0];
+        if (!value.startsWith("delete:")) return interaction.editReply({ content: "❌ Valor inválido." }).catch(() => {});
+        const playlistName = value.slice(7);
+        const deleted = await Store.delete(client, interaction.guildId, interaction.user.id, playlistName);
+        if (!deleted) {
+          return interaction.editReply({ content: `❌ No se encontró la lista "${playlistName}".` }).catch(() => {});
+        }
+        return interaction.editReply({ content: `✅ Lista "${playlistName}" eliminada.` }).catch(() => {});
+      }
     });
 
-    // Handle modal submissions (favorites remove)
+    // Handle modal submissions (favorites remove + like)
     client.on(Events.InteractionCreate, async (interaction) => {
       if (!interaction.guild || interaction.user.bot) return;
       if (!interaction.isModalSubmit()) return;
-      if (interaction.customId !== "fav_remove_modal") return;
 
-      try {
-        const raw = interaction.fields.getTextInputValue("fav_remove_indices");
-        const indices = new Set();
-        const parts = raw.split(/[,;\s]+/).filter(Boolean);
-        for (const part of parts) {
-          const rangeMatch = part.match(/^(\d+)\s*[-–]\s*(\d+)$/);
-          if (rangeMatch) {
-            const from = parseInt(rangeMatch[1], 10);
-            const to = parseInt(rangeMatch[2], 10);
-            if (!isNaN(from) && !isNaN(to) && from > 0 && to >= from) {
-              for (let i = from; i <= to; i++) indices.add(i);
+      if (interaction.customId === "fav_remove_modal") {
+        try {
+          const raw = interaction.fields.getTextInputValue("fav_remove_indices");
+          const indices = new Set();
+          const parts = raw.split(/[,;\s]+/).filter(Boolean);
+          for (const part of parts) {
+            const rangeMatch = part.match(/^(\d+)\s*[-–]\s*(\d+)$/);
+            if (rangeMatch) {
+              const from = parseInt(rangeMatch[1], 10);
+              const to = parseInt(rangeMatch[2], 10);
+              if (!isNaN(from) && !isNaN(to) && from > 0 && to >= from) {
+                for (let i = from; i <= to; i++) indices.add(i);
+              }
+            } else {
+              const num = parseInt(part.trim(), 10);
+              if (!isNaN(num) && num > 0) indices.add(num);
             }
-          } else {
-            const num = parseInt(part.trim(), 10);
-            if (!isNaN(num) && num > 0) indices.add(num);
           }
-        }
-        if (!indices.size) {
-          return interaction.reply({ content: "❌ No se encontraron números válidos.", ephemeral: true }).catch(() => {});
-        }
+          if (!indices.size) {
+            return interaction.reply({ content: "❌ No se encontraron números válidos.", ephemeral: true }).catch(() => {});
+          }
 
-        const removed = await Store.removeTracks(client, interaction.guildId, interaction.user.id, "Canciones Favoritas", [...indices]);
-        if (removed === 0) {
-          return interaction.reply({ content: "❌ No se pudo eliminar ninguna canción. Verifica los números.", ephemeral: true }).catch(() => {});
-        }
+          const removed = await Store.removeTracks(client, interaction.guildId, interaction.user.id, "Canciones Favoritas", [...indices]);
+          if (removed === 0) {
+            return interaction.reply({ content: "❌ No se pudo eliminar ninguna canción. Verifica los números.", ephemeral: true }).catch(() => {});
+          }
 
-        const embed = await UserHistory.buildFavoritesEmbed(client, interaction.guildId, interaction.user.id, 0);
-        const components = await UserHistory.buildFavoritesComponents(client, interaction.guildId, interaction.user.id, 0);
-        await interaction.reply({
-          content: `✅ Se eliminaron ${removed} canción(es) de tus favoritos.`,
-          embeds: embed ? [embed] : [],
-          components: embed ? components : [],
-        }).catch(() => {});
-      } catch (e) {
-        client.logger.error(`[Fav Remove Modal Error]`, e);
-        interaction.reply({ content: "❌ Error al procesar.", ephemeral: true }).catch(() => {});
+          const favMsgId = client.favRemoveMsg?.get(interaction.user.id);
+          client.favRemoveMsg?.delete(interaction.user.id);
+          if (favMsgId) {
+            const channel = interaction.channel;
+            const favMsg = await channel.messages.fetch(favMsgId).catch(() => null);
+            if (favMsg) {
+              if (!client.favPages) client.favPages = new Map();
+              const currentPage = client.favPages.get(favMsgId) || 0;
+              const embed = await UserHistory.buildFavoritesEmbed(client, interaction.guildId, interaction.user.id, currentPage);
+              const components = await UserHistory.buildFavoritesComponents(client, interaction.guildId, interaction.user.id, currentPage);
+              if (embed) await favMsg.edit({ embeds: [embed], components }).catch(() => {});
+            }
+          }
+
+          await interaction.reply({ content: `✅ Se eliminaron ${removed} canción(es).`, ephemeral: true }).catch(() => {});
+        } catch (e) {
+          client.logger.error(`[Fav Remove Modal Error]`, e);
+          interaction.reply({ content: "❌ Error al procesar.", ephemeral: true }).catch(() => {});
+        }
+        return;
       }
     });
 

@@ -1,11 +1,10 @@
-const { Message, PermissionFlagsBits, EmbedBuilder } = require("discord.js");
-const JUGNU = require("../../../handlers/Client");
-const Store = require("../../../handlers/PlaylistStore");
+const { PermissionFlagsBits } = require("discord.js");
+const UserHistory = require("../../../handlers/UserHistory");
 
 module.exports = {
   name: "mislistas",
-  aliases: ["pllist", "plshow", "myplaylists"],
-  description: `Muestra todas tus listas de reproducción`,
+  aliases: ["mylists", "plpreview", "mislistaspreview"],
+  description: `Muestra tus listas guardadas y favoritos`,
   userPermissions: PermissionFlagsBits.SendMessages,
   botPermissions: PermissionFlagsBits.SendMessages,
   category: "Playlist",
@@ -15,14 +14,9 @@ module.exports = {
   Player: false,
   djOnly: false,
   run: async (client, message) => {
-    const all = await Store.getAll(client, message.guild.id, message.author.id);
-    const names = Object.keys(all);
-    if (!names.length) return client.embed(message, `${client.config.emoji.ERROR} You have no playlists yet.`);
-    const embed = new EmbedBuilder()
-      .setColor(client.config.embed.color)
-      .setTitle(`${message.author.username}'s Playlists`)
-      .setDescription(names.map((n) => `• ${n} (${all[n].length} tracks)`).join("\n"))
-      .setFooter(client.getFooter(message.author));
-    return message.reply({ embeds: [embed] }).catch(() => {});
+    const embed = await UserHistory.buildPreviewEmbed(client, message.guildId, message.author.id);
+    if (!embed) return client.embed(message, `${client.config.emoji.ERROR} No tienes listas guardadas aún.`);
+    const components = await UserHistory.buildPreviewComponents(client, message.guildId, message.author.id);
+    return message.reply({ embeds: [embed], components }).catch(() => {});
   },
 };

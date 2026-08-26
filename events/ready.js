@@ -1,7 +1,6 @@
 const { ActivityType, Events } = require("discord.js");
 const client = require("../index");
 const { registerSlashCommands } = require("../handlers/functions");
-const server = require("../server.js");
 const Database = require("../handlers/Database");
 
 client.once(Events.ClientReady, async () => {
@@ -32,9 +31,6 @@ client.once(Events.ClientReady, async () => {
 
     // Register slash commands
     await registerSlashCommands(client);
-
-    // Load dashboard
-    await server(client);
   } catch (error) {
     console.error("An error occurred during initialization:", error);
   }

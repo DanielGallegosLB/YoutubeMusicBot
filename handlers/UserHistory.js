@@ -271,6 +271,23 @@ module.exports = {
             .addOptions(options)
         )
       );
+
+      const deleteOptions = otherPlaylists.map(([name, tracks]) => ({
+        label: `🗑️ ${name}`.substring(0, 100),
+        description: `Eliminar (${tracks.length} canciones)`,
+        value: `delete:${name}`,
+      })).slice(0, MAX_SELECT_OPTIONS);
+
+      if (deleteOptions.length > 0) {
+        components.push(
+          new ActionRowBuilder().addComponents(
+            new StringSelectMenuBuilder()
+              .setCustomId("delete_select_playlist")
+              .setPlaceholder("Eliminar una lista guardada...")
+              .addOptions(deleteOptions)
+          )
+        );
+      }
     }
 
     components.push(
@@ -294,8 +311,7 @@ module.exports = {
   FAVORITES_PER_PAGE,
 
   async buildFavoritesEmbed(client, guildId, userId, page = 0) {
-    const playlists = await PlaylistStore.getAll(client, guildId, userId);
-    const favs = playlists[FAVORITES_PLAYLIST] || [];
+    const favs = await PlaylistStore.sortFavorites(client, guildId, userId);
     if (!favs.length) return null;
 
     const totalPages = Math.ceil(favs.length / FAVORITES_PER_PAGE);
@@ -310,47 +326,54 @@ module.exports = {
 
     const songList = slice.map((t, i) => {
       const num = start + i + 1;
-      return `**${num}.** ${t.name || "Desconocido"} - \`${t.formattedDuration || "?"}\``;
+      const likes = (t.likedBy || []).length;
+      const dislikes = (t.dislikedBy || []).length;
+      const plays = t.playCount || 1;
+      const score = likes - dislikes;
+      const scoreStr = score !== 0 ? (score > 0 ? ` +${score}` : ` ${score}`) : "";
+      const fire = plays > 1 ? ` 🔥${plays}` : "";
+      const heart = likes > 0 ? ` ❤️${likes}` : "";
+      const thumbsDown = dislikes > 0 ? ` 👎${dislikes}` : "";
+      return `**${num}.** ${t.name || "Desconocido"} - \`${t.formattedDuration || "?"}\`${fire}${heart}${thumbsDown}${scoreStr ? ` \`[${scoreStr}]\`` : ""}`;
     }).join("\n");
 
     const embed = new EmbedBuilder()
       .setColor(client.config.embed.color)
       .setTitle(`🎵 Tus Canciones Favoritas (${favs.length} - ${durationStr})`)
       .setDescription(songList)
-      .setFooter({ text: `Página ${safePage + 1}/${totalPages} • Usa /misfavoritos y el botón 🗑️ para eliminar` });
+      .setFooter({ text: `Página ${safePage + 1}/${totalPages} • 🔥reproducciones • ❤️likes • 👎dislikes • [score]` });
 
     return embed;
   },
 
   async buildFavoritesComponents(client, guildId, userId, page = 0) {
-    const playlists = await PlaylistStore.getAll(client, guildId, userId);
-    const favs = playlists[FAVORITES_PLAYLIST] || [];
+    const favs = await PlaylistStore.getSortedFavorites(client, guildId, userId);
     const totalPages = Math.max(1, Math.ceil(favs.length / FAVORITES_PER_PAGE));
     const safePage = Math.max(0, Math.min(page, totalPages - 1));
 
     const navRow = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
-        .setCustomId(`fav_page_0`)
+        .setCustomId("fav_nav_first")
         .setEmoji("⏮️")
         .setStyle(ButtonStyle.Secondary)
         .setDisabled(safePage === 0),
       new ButtonBuilder()
-        .setCustomId(`fav_page_${safePage - 1}`)
+        .setCustomId("fav_nav_prev")
         .setEmoji("◀️")
         .setStyle(ButtonStyle.Secondary)
         .setDisabled(safePage === 0),
       new ButtonBuilder()
-        .setCustomId(`fav_pageinfo`)
+        .setCustomId("fav_nav_info")
         .setLabel(`${safePage + 1}/${totalPages}`)
         .setStyle(ButtonStyle.Secondary)
         .setDisabled(true),
       new ButtonBuilder()
-        .setCustomId(`fav_page_${safePage + 1}`)
+        .setCustomId("fav_nav_next")
         .setEmoji("▶️")
         .setStyle(ButtonStyle.Secondary)
         .setDisabled(safePage >= totalPages - 1),
       new ButtonBuilder()
-        .setCustomId(`fav_page_${totalPages - 1}`)
+        .setCustomId("fav_nav_last")
         .setEmoji("⏭️")
         .setStyle(ButtonStyle.Secondary)
         .setDisabled(safePage >= totalPages - 1)
@@ -359,7 +382,7 @@ module.exports = {
     const actionRow = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setCustomId("fav_remove")
-        .setLabel("Eliminar por número/rango")
+        .setLabel("Eliminar")
         .setEmoji("🗑️")
         .setStyle(ButtonStyle.Danger),
       new ButtonBuilder()

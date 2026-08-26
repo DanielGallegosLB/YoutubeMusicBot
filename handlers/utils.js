@@ -121,8 +121,20 @@ module.exports = async (client) => {
         .setDisabled(state),
     ]);
 
-    // Row 3: SaveCurrent ⭐
+    // Row 3: Like ❤️ • Dislike 👎 • SaveCurrent ⭐
     const row3 = new ActionRowBuilder().addComponents([
+      new ButtonBuilder()
+        .setStyle(ButtonStyle.Secondary)
+        .setCustomId("player_like")
+        .setEmoji("❤️")
+        .setLabel("Like")
+        .setDisabled(dis(!track)),
+      new ButtonBuilder()
+        .setStyle(ButtonStyle.Secondary)
+        .setCustomId("player_dislike")
+        .setEmoji("👎")
+        .setLabel("Dislike")
+        .setDisabled(dis(!track)),
       new ButtonBuilder()
         .setStyle(ButtonStyle.Secondary)
         .setCustomId("savecurrent_btn")
@@ -144,23 +156,19 @@ module.exports = async (client) => {
         (await channel.messages.fetch(ID).catch(() => null));
       if (!playembed) return;
 
-      if (client.config.options.nowplayingMsg) {
-        playembed.delete().catch(() => {});
-      } else {
-        const embeds = playembed?.embeds?.[0];
-        if (embeds) {
-          playembed
-            .edit({
-              embeds: [
-                new EmbedBuilder(embeds.data).setFooter({
-                  text: `⛔️ SONG & QUEUE ENDED!`,
-                  iconURL: channel.guild.iconURL({ dynamic: true }),
-                }),
-              ],
-              components: client.buttons(true, null),
-            })
-            .catch(() => {});
-        }
+      const embeds = playembed?.embeds?.[0];
+      if (embeds) {
+        playembed
+          .edit({
+            embeds: [
+              new EmbedBuilder(embeds.data).setFooter({
+                text: `⛔️ SONG & QUEUE ENDED!`,
+                iconURL: channel.guild.iconURL({ dynamic: true }),
+              }),
+            ],
+            components: client.buttons(true, null),
+          })
+          .catch(() => {});
       }
     } catch (e) {}
   };

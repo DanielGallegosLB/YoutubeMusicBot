@@ -17,6 +17,10 @@ module.exports = {
     const embed = await UserHistory.buildFavoritesEmbed(client, message.guildId, message.author.id, 0);
     if (!embed) return client.embed(message, `${client.config.emoji.ERROR} No tienes canciones favoritas aún.`);
     const components = await UserHistory.buildFavoritesComponents(client, message.guildId, message.author.id, 0);
-    return message.reply({ embeds: [embed], components }).catch(() => {});
+    const msg = await message.reply({ embeds: [embed], components }).catch(() => null);
+    if (msg) {
+      if (!client.favPages) client.favPages = new Map();
+      client.favPages.set(msg.id, 0);
+    }
   },
 };

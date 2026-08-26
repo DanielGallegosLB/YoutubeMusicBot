@@ -1,16 +1,16 @@
-const { ApplicationCommandType, PermissionFlagsBits, EmbedBuilder } = require("discord.js");
-const Store = require("../../../handlers/PlaylistStore");
+const { ApplicationCommandType, PermissionFlagsBits } = require("discord.js");
+const UserHistory = require("../../../handlers/UserHistory");
 
 module.exports = {
   name: "mislistas",
   name_localizations: {
-    "en-US": "myplaylists",
-    "en-GB": "myplaylists",
+    "en-US": "mylists",
+    "en-GB": "mylists",
   },
-  description: `Muestra todas tus listas de reproducción`,
+  description: `Muestra tus listas guardadas y favoritos`,
   description_localizations: {
-    "en-US": "View your playlists",
-    "en-GB": "View your playlists",
+    "en-US": "Show your saved playlists and favorites",
+    "en-GB": "Show your saved playlists and favorites",
   },
   userPermissions: PermissionFlagsBits.SendMessages,
   botPermissions: PermissionFlagsBits.SendMessages,
@@ -18,14 +18,10 @@ module.exports = {
   cooldown: 3,
   type: ApplicationCommandType.ChatInput,
   run: async (client, interaction) => {
-    const all = await Store.getAll(client, interaction.guild.id, interaction.user.id);
-    const names = Object.keys(all);
-    if (!names.length) return client.embed(interaction, `${client.config.emoji.ERROR} You have no playlists yet.`);
-    const embed = new EmbedBuilder()
-      .setColor(client.config.embed.color)
-      .setTitle(`${interaction.user.username}'s Playlists`)
-      .setDescription(names.map((n) => `• ${n} (${all[n].length} tracks)`).join("\n"))
-      .setFooter(client.getFooter(interaction.user));
-    return interaction.followUp({ embeds: [embed] });
+    await interaction.deferReply().catch(() => {});
+    const embed = await UserHistory.buildPreviewEmbed(client, interaction.guildId, interaction.user.id);
+    if (!embed) return interaction.editReply(`${client.config.emoji.ERROR} No tienes listas guardadas aún.`);
+    const components = await UserHistory.buildPreviewComponents(client, interaction.guildId, interaction.user.id);
+    return interaction.editReply({ embeds: [embed], components });
   },
 };

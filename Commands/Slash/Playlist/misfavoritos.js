@@ -18,9 +18,12 @@ module.exports = {
   cooldown: 3,
   type: ApplicationCommandType.ChatInput,
   run: async (client, interaction) => {
+    await interaction.deferReply().catch(() => {});
     const embed = await UserHistory.buildFavoritesEmbed(client, interaction.guildId, interaction.user.id, 0);
-    if (!embed) return client.embed(interaction, `${client.config.emoji.ERROR} No tienes canciones favoritas aún.`);
+    if (!embed) return interaction.editReply(`${client.config.emoji.ERROR} No tienes canciones favoritas aún.`);
     const components = await UserHistory.buildFavoritesComponents(client, interaction.guildId, interaction.user.id, 0);
-    return interaction.followUp({ embeds: [embed], components });
+    const msg = await interaction.editReply({ embeds: [embed], components });
+    if (!client.favPages) client.favPages = new Map();
+    client.favPages.set(msg.id, 0);
   },
 };
