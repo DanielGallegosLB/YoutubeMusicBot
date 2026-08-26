@@ -12,6 +12,7 @@ const PlaylistStore = require("./PlaylistStore");
 
 const MAX_HISTORY = 20;
 const MAX_SELECT_OPTIONS = 25;
+const FAVORITES_PER_PAGE = 10;
 
 const FAVORITES_PLAYLIST = "Canciones Favoritas";
 
@@ -288,5 +289,91 @@ module.exports = {
     );
 
     return components;
+  },
+
+  FAVORITES_PER_PAGE,
+
+  async buildFavoritesEmbed(client, guildId, userId, page = 0) {
+    const playlists = await PlaylistStore.getAll(client, guildId, userId);
+    const favs = playlists[FAVORITES_PLAYLIST] || [];
+    if (!favs.length) return null;
+
+    const totalPages = Math.ceil(favs.length / FAVORITES_PER_PAGE);
+    const safePage = Math.max(0, Math.min(page, totalPages - 1));
+    const start = safePage * FAVORITES_PER_PAGE;
+    const slice = favs.slice(start, start + FAVORITES_PER_PAGE);
+
+    const totalDuration = favs.reduce((sum, t) => sum + (t.duration || 0), 0);
+    const hrs = Math.floor(totalDuration / 3600);
+    const mins = Math.floor((totalDuration % 3600) / 60);
+    const durationStr = hrs > 0 ? `${hrs}h ${mins}m` : `${mins}m`;
+
+    const songList = slice.map((t, i) => {
+      const num = start + i + 1;
+      return `**${num}.** ${t.name || "Desconocido"} - \`${t.formattedDuration || "?"}\``;
+    }).join("\n");
+
+    const embed = new EmbedBuilder()
+      .setColor(client.config.embed.color)
+      .setTitle(`🎵 Tus Canciones Favoritas (${favs.length} - ${durationStr})`)
+      .setDescription(songList)
+      .setFooter({ text: `Página ${safePage + 1}/${totalPages} • Usa /misfavoritos y el botón 🗑️ para eliminar` });
+
+    return embed;
+  },
+
+  async buildFavoritesComponents(client, guildId, userId, page = 0) {
+    const playlists = await PlaylistStore.getAll(client, guildId, userId);
+    const favs = playlists[FAVORITES_PLAYLIST] || [];
+    const totalPages = Math.max(1, Math.ceil(favs.length / FAVORITES_PER_PAGE));
+    const safePage = Math.max(0, Math.min(page, totalPages - 1));
+
+    const navRow = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`fav_page_0`)
+        .setEmoji("⏮️")
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(safePage === 0),
+      new ButtonBuilder()
+        .setCustomId(`fav_page_${safePage - 1}`)
+        .setEmoji("◀️")
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(safePage === 0),
+      new ButtonBuilder()
+        .setCustomId(`fav_pageinfo`)
+        .setLabel(`${safePage + 1}/${totalPages}`)
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(true),
+      new ButtonBuilder()
+        .setCustomId(`fav_page_${safePage + 1}`)
+        .setEmoji("▶️")
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(safePage >= totalPages - 1),
+      new ButtonBuilder()
+        .setCustomId(`fav_page_${totalPages - 1}`)
+        .setEmoji("⏭️")
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(safePage >= totalPages - 1)
+    );
+
+    const actionRow = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId("fav_remove")
+        .setLabel("Eliminar por número/rango")
+        .setEmoji("🗑️")
+        .setStyle(ButtonStyle.Danger),
+      new ButtonBuilder()
+        .setCustomId("fav_clear_all")
+        .setLabel("Borrar todas")
+        .setEmoji("🧹")
+        .setStyle(ButtonStyle.Danger),
+      new ButtonBuilder()
+        .setCustomId("suggest_favorites")
+        .setLabel("Reproducir")
+        .setEmoji("▶️")
+        .setStyle(ButtonStyle.Success)
+    );
+
+    return [navRow, actionRow];
   },
 };

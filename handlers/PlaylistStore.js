@@ -71,6 +71,43 @@ module.exports = {
     return removed || null;
   },
 
+  /** Remove multiple tracks by 1-based indices; returns count of removed tracks */
+  async removeTracks(client, guildId, userId, name, indices1) {
+    const key = `${guildId}.playlists.${userId}`;
+    const all = await this.getAll(client, guildId, userId);
+    const list = all[name] || [];
+    const idxSet = new Set(indices1.map((i) => Number(i) - 1).filter((i) => i >= 0 && i < list.length));
+    if (!idxSet.size) return 0;
+    const newList = list.filter((_, i) => !idxSet.has(i));
+    const removedCount = list.length - newList.length;
+    all[name] = newList;
+    await client.music.set(key, all);
+    return removedCount;
+  },
+
+  /** Remove all tracks except the first N; returns count of removed tracks */
+  async clearExcept(client, guildId, userId, name, keepFirst) {
+    const key = `${guildId}.playlists.${userId}`;
+    const all = await this.getAll(client, guildId, userId);
+    const list = all[name] || [];
+    if (list.length <= keepFirst) return 0;
+    const removedCount = list.length - keepFirst;
+    all[name] = list.slice(0, keepFirst);
+    await client.music.set(key, all);
+    return removedCount;
+  },
+
+  /** Remove ALL tracks from a playlist; returns count of removed tracks */
+  async clearAll(client, guildId, userId, name) {
+    const key = `${guildId}.playlists.${userId}`;
+    const all = await this.getAll(client, guildId, userId);
+    const list = all[name] || [];
+    const removedCount = list.length;
+    all[name] = [];
+    await client.music.set(key, all);
+    return removedCount;
+  },
+
   /** Delete a playlist; returns true if deleted */
   async delete(client, guildId, userId, name) {
     const key = `${guildId}.playlists.${userId}`;

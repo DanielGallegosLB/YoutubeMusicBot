@@ -1,4 +1,4 @@
-const { EmbedBuilder, Events, ChannelType } = require("discord.js");
+const { EmbedBuilder, Events, ChannelType, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle } = require("discord.js");
 const JUGNU = require("./Client");
 const Store = require("./PlaylistStore");
 const UserHistory = require("./UserHistory");
@@ -54,6 +54,76 @@ module.exports = async (client) => {
           } catch (e) {
             return interaction.followUp({ content: "❌ Error al reproducir favoritos.", ephemeral: true }).catch(() => {});
           }
+        }
+
+        // Handle favorites management buttons
+        if (customId.startsWith("fav_page_")) {
+          const page = parseInt(customId.replace("fav_page_", ""), 10);
+          if (isNaN(page)) return interaction.deferUpdate().catch(() => {});
+          await interaction.deferUpdate().catch(() => {});
+          const embed = await UserHistory.buildFavoritesEmbed(client, interaction.guildId, interaction.user.id, page);
+          const components = await UserHistory.buildFavoritesComponents(client, interaction.guildId, interaction.user.id, page);
+          if (embed) return interaction.editReply({ embeds: [embed], components }).catch(() => {});
+          return;
+        }
+
+        if (customId === "fav_pageinfo") {
+          return interaction.deferUpdate().catch(() => {});
+        }
+
+        if (customId === "fav_remove") {
+          const modal = new ModalBuilder()
+            .setCustomId("fav_remove_modal")
+            .setTitle("Eliminar canciones favoritas");
+          const input = new TextInputBuilder()
+            .setCustomId("fav_remove_indices")
+            .setLabel("Número(s) o rango(s) a eliminar")
+            .setPlaceholder("Ej: 5-20, 30, 40-50")
+            .setStyle(TextInputStyle.Short)
+            .setRequired(true)
+            .setMaxLength(500);
+          modal.addComponents(new ActionRowBuilder().addComponents(input));
+          return interaction.showModal(modal).catch(() => {});
+        }
+
+        if (customId === "fav_clear_all") {
+          await interaction.deferUpdate().catch(() => {});
+          const confirmRow = new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId("fav_clear_all_confirm")
+              .setLabel("Sí, borrar todas")
+              .setEmoji("✅")
+              .setStyle(ButtonStyle.Danger),
+            new ButtonBuilder()
+              .setCustomId("fav_cancel")
+              .setLabel("Cancelar")
+              .setEmoji("❌")
+              .setStyle(ButtonStyle.Secondary)
+          );
+          return interaction.editReply({
+            embeds: [new EmbedBuilder()
+              .setColor("#FF0000")
+              .setDescription("⚠️ Esto eliminará **TODAS** las canciones favoritas.\n¿Estás seguro?")],
+            components: [confirmRow]
+          }).catch(() => {});
+        }
+
+        if (customId === "fav_clear_all_confirm") {
+          await interaction.deferUpdate().catch(() => {});
+          const removed = await Store.clearAll(client, interaction.guildId, interaction.user.id, "Canciones Favoritas");
+          if (removed === 0) return interaction.editReply({ embeds: [new EmbedBuilder().setColor(client.config.embed.color).setDescription("No había canciones para eliminar.")], components: [] }).catch(() => {});
+          return interaction.editReply({
+            embeds: [new EmbedBuilder().setColor("#00FF00").setDescription(`✅ Se eliminaron todas las ${removed} canciones favoritas.`)],
+            components: []
+          }).catch(() => {});
+        }
+
+        if (customId === "fav_cancel") {
+          await interaction.deferUpdate().catch(() => {});
+          const embed = await UserHistory.buildFavoritesEmbed(client, interaction.guildId, interaction.user.id, 0);
+          const components = await UserHistory.buildFavoritesComponents(client, interaction.guildId, interaction.user.id, 0);
+          if (embed) return interaction.editReply({ embeds: [embed], components }).catch(() => {});
+          return interaction.editReply({ embeds: [], components: [] }).catch(() => {});
         }
 
         const controlButtons = ["previous", "rewind10", "pauseresume", "forward10", "skip", "stop", "shuffle", "loop_song", "loop_queue", "autoplay", "savecurrent_btn"];
@@ -497,6 +567,51 @@ module.exports = async (client) => {
           console.error("[Preview Select] Error:", e);
           return interaction.editReply({ content: `❌ Error al reproducir: ${e.message || e}` }).catch(() => {});
         }
+      }
+    });
+
+    // Handle modal submissions (favorites remove)
+    client.on(Events.InteractionCreate, async (interaction) => {
+      if (!interaction.guild || interaction.user.bot) return;
+      if (!interaction.isModalSubmit()) return;
+      if (interaction.customId !== "fav_remove_modal") return;
+
+      try {
+        const raw = interaction.fields.getTextInputValue("fav_remove_indices");
+        const indices = new Set();
+        const parts = raw.split(/[,;\s]+/).filter(Boolean);
+        for (const part of parts) {
+          const rangeMatch = part.match(/^(\d+)\s*[-–]\s*(\d+)$/);
+          if (rangeMatch) {
+            const from = parseInt(rangeMatch[1], 10);
+            const to = parseInt(rangeMatch[2], 10);
+            if (!isNaN(from) && !isNaN(to) && from > 0 && to >= from) {
+              for (let i = from; i <= to; i++) indices.add(i);
+            }
+          } else {
+            const num = parseInt(part.trim(), 10);
+            if (!isNaN(num) && num > 0) indices.add(num);
+          }
+        }
+        if (!indices.size) {
+          return interaction.reply({ content: "❌ No se encontraron números válidos.", ephemeral: true }).catch(() => {});
+        }
+
+        const removed = await Store.removeTracks(client, interaction.guildId, interaction.user.id, "Canciones Favoritas", [...indices]);
+        if (removed === 0) {
+          return interaction.reply({ content: "❌ No se pudo eliminar ninguna canción. Verifica los números.", ephemeral: true }).catch(() => {});
+        }
+
+        const embed = await UserHistory.buildFavoritesEmbed(client, interaction.guildId, interaction.user.id, 0);
+        const components = await UserHistory.buildFavoritesComponents(client, interaction.guildId, interaction.user.id, 0);
+        await interaction.reply({
+          content: `✅ Se eliminaron ${removed} canción(es) de tus favoritos.`,
+          embeds: embed ? [embed] : [],
+          components: embed ? components : [],
+        }).catch(() => {});
+      } catch (e) {
+        client.logger.error(`[Fav Remove Modal Error]`, e);
+        interaction.reply({ content: "❌ Error al procesar.", ephemeral: true }).catch(() => {});
       }
     });
 
