@@ -232,6 +232,8 @@ module.exports = {
     let { channel } = interaction.member.voice;
     if (/^https?:\/\//i.test(song)) song = sanitizeYouTubeUrl(song);
 
+    client.playlistStopped.delete(interaction.guildId);
+
     const botVoiceChannel = interaction.guild.members.me.voice.channel;
     const ownerId = process.env.OWNER_ID;
     if (
@@ -332,7 +334,7 @@ module.exports = {
         try {
           for (let i = 0; i < remaining.length; i++) {
             // Verificar si se detuvo la carga o si el bot salió
-            if (!client.playlistLoading.get(interaction.guildId)) break;
+            if (!client.playlistLoading.get(interaction.guildId) || client.playlistStopped.get(interaction.guildId)) break;
             
             const url = remaining[i];
             try {
@@ -340,6 +342,16 @@ module.exports = {
               addedCount++;
             } catch (e) {
               client.logger.warn(`[Slash Play] Track ${firstPlayedIndex + i + 2} saltado en Guild ${interaction.guildId}:`, e.message);
+            }
+
+            // Re-check after play — stop may have been pressed during await
+            if (!client.playlistLoading.get(interaction.guildId) || client.playlistStopped.get(interaction.guildId)) {
+              // Stop was pressed while play() was resolving — kill the new queue
+              try {
+                const q = client.distube.getQueue(interaction.guildId);
+                if (q) { q.songs = []; await q.stop().catch(() => {}); }
+              } catch {}
+              break;
             }
             
             // Actualizar progreso cada 5 canciones o al final

@@ -4,7 +4,7 @@
  */
 const mongoose = require('mongoose');
 
-const ECONOMY_MONGO_URI = process.env.ECONOMY_MONGO_URI || 'mongodb://Lagextremo:lagextremo1@ac-vmd86tb-shard-00-00.11ho8hk.mongodb.net:27017,ac-vmd86tb-shard-00-01.11ho8hk.mongodb.net:27017,ac-vmd86tb-shard-00-02.11ho8hk.mongodb.net:27017/test?ssl=true&replicaSet=atlas-se89cz-shard-0&authSource=admin&appName=Cluster0';
+const ECONOMY_MONGO_URI = process.env.ECONOMY_MONGO_URI || 'mongodb://Lagextremo:Lagextremo12@ac-vmd86tb-shard-00-00.11ho8hk.mongodb.net:27017,ac-vmd86tb-shard-00-01.11ho8hk.mongodb.net:27017,ac-vmd86tb-shard-00-02.11ho8hk.mongodb.net:27017/test?ssl=true&replicaSet=atlas-se89cz-shard-0&authSource=admin&appName=Cluster0';
 
 const musicPlaySchema = new mongoose.Schema({
     guildID:   { type: String, required: true },

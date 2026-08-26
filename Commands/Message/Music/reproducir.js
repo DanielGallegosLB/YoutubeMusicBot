@@ -126,6 +126,8 @@ module.exports = {
       return client.embed(message, `${client.config.emoji.ERROR} Proporciona una canción.`);
     }
 
+    client.playlistStopped.delete(message.guildId);
+
     let { channel } = message.member.voice;
 
     const botVoiceChannel = message.guild.members.me.voice.channel;
@@ -186,11 +188,21 @@ module.exports = {
       (async () => {
         const remaining = urls.slice(1);
         for (let i = 0; i < remaining.length; i++) {
-          if (!client.playlistLoading.get(message.guildId)) break;
+          if (!client.playlistLoading.get(message.guildId) || client.playlistStopped.get(message.guildId)) break;
           try {
             await client.distube.play(channel, remaining[i], { ...playOpts, skip: false });
             addedCount++;
           } catch (e) {}
+
+          // Re-check after play — stop may have been pressed during await
+          if (!client.playlistLoading.get(message.guildId) || client.playlistStopped.get(message.guildId)) {
+            // Stop was pressed while play() was resolving — kill the new queue
+            try {
+              const q = client.distube.getQueue(message.guildId);
+              if (q) { q.songs = []; await q.stop().catch(() => {}); }
+            } catch {}
+            break;
+          }
 
           if (addedCount % 5 === 0 || i === remaining.length - 1) {
             if (statusMsg && statusMsg.edit) {

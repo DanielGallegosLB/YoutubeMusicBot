@@ -263,6 +263,14 @@ module.exports = async (client) => {
       // Update embed
       await client.updateembed(client, queue.textChannel.guild);
 
+      // Check if this disconnect was caused by an explicit stop command
+      const stoppedAt = client.playlistStopped.get(guildId);
+      if (stoppedAt) {
+        client.playlistStopped.delete(guildId);
+        client.logger.log(`[Disconnect] Guild ${guildId}: disconnect after explicit stop, skipping auto-rejoin`);
+        return;
+      }
+
       // Check if auto-joining is enabled in the database
       const db = await client.music?.get(`${guildId}.vc`);
       const data = await client.music.get(`${guildId}.music`);
@@ -279,6 +287,7 @@ module.exports = async (client) => {
         setTimeout(() => msg.delete().catch(() => {}), 3000);
       } else if (db?.enable) {
         // If auto-joining is enabled, rejoin the voice channel
+        client.logger.log(`[Disconnect] Guild ${guildId}: 24/7 activo, reconectando...`);
         await client.joinVoiceChannel(queue.textChannel.guild);
       }
     } catch (error) {

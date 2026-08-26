@@ -48,6 +48,7 @@ class JUGNU extends Client {
     this.shuffleData = new Collection();
     this.leaveTimeoutHandles = new Collection();
     this.playlistLoading = new Collection();
+    this.playlistStopped = new Collection();
     this.mcategories = fs.readdirSync("./Commands/Message");
     this.scategories = fs.readdirSync("./Commands/Slash");
     this.temp = new Collection();

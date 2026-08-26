@@ -35,15 +35,17 @@ module.exports = {
    * @param {Queue} queue
    */
   run: async (client, interaction, args, queue) => {
-    // Code
-    client.playlistLoading.delete(interaction.guildId);
-    await client.autoresume.delete(interaction.guildId).catch(() => {});
+    const guildId = interaction.guildId;
+    client.playlistLoading.delete(guildId);
+    client.playlistStopped.set(guildId, Date.now());
+    await client.autoresume.delete(guildId).catch(() => {});
     queue.songs = [];
     await queue.stop().catch(() => {});
     try {
-      const db = await client.music?.get(`${interaction.guildId}.vc`);
+      const db = await client.music?.get(`${guildId}.vc`);
       if (!db?.enable) await client.distube.voices.leave(interaction.guild);
     } catch {}
+    client.logger.log(`[Stop Cmd] Música detenida en Guild ${guildId} por ${interaction.user.id}`);
     client.embed(
       interaction,
       `${client.config.emoji.SUCCESS} ¡Cola limpiada y música detenida!`

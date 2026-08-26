@@ -256,16 +256,21 @@ module.exports = async (client) => {
                   `${client.config.emoji.SUCCESS} No eres DJ ni has solicitado esta canción..`
                 );
               } else {
-                client.playlistLoading.delete(interaction.guildId);
+                const guildId = interaction.guildId;
+                client.playlistLoading.delete(guildId);
+                client.playlistStopped.set(guildId, Date.now());
+                await client.autoresume.delete(guildId).catch(() => {});
+                queue.songs = [];
                 await queue.stop().catch((e) => {});
                 try {
-                  await client.distube.voices.leave(interaction.guild);
-                  // Reset embeds to default immediately
+                  const db = await client.music?.get(`${guildId}.vc`);
+                  if (!db?.enable) await client.distube.voices.leave(interaction.guild);
                   try {
                     await client.updateembed(client, interaction.guild);
                     await client.editPlayerMessage(queue.textChannel);
                   } catch {}
                 } catch {}
+                client.logger.log(`[Stop Button] Música detenida en Guild ${guildId} por ${interaction.user.id}`);
                 return send(
                   interaction,
                   ` ${client.config.emoji.SUCCESS} ¡Música detenida y el bot ha salido del canal!`
