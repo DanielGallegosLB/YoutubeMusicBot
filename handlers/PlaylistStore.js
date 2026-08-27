@@ -261,6 +261,27 @@ module.exports = {
     return result;
   },
 
+  /** Get global stats (likes, dislikes, plays) for a track URL across all users in a guild */
+  async getGlobalTrackStats(client, guildId, trackUrl) {
+    const allPlaylists = await client.music.get(`${guildId}.playlists`) || {};
+    let likes = 0;
+    let dislikes = 0;
+    let plays = 0;
+    for (const userId of Object.keys(allPlaylists)) {
+      const userPlaylists = allPlaylists[userId];
+      const favs = userPlaylists?.["Canciones Favoritas"] || [];
+      for (const t of favs) {
+        if (t.url === trackUrl) {
+          likes += (t.likedBy || []).length;
+          dislikes += (t.dislikedBy || []).length;
+          plays += (t.playCount || 0);
+          break;
+        }
+      }
+    }
+    return { likes, dislikes, plays };
+  },
+
   /** Serialize a DisTube Song to a plain Track object */
   serializeSong(song, user) {
     if (!song) return null;

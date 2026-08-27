@@ -10,6 +10,7 @@ const {
   Guild,
 } = require("discord.js");
 const { Queue, Song } = require("distube");
+const PlaylistStore = require("./PlaylistStore");
 
 /**
  *
@@ -354,12 +355,25 @@ module.exports = async (client) => {
 
       const currentSong = freshQueue.songs[0];
 
+      const currentStats = currentSong?.url ? await PlaylistStore.getGlobalTrackStats(client, guildId, currentSong.url).catch(() => ({ likes: 0, dislikes: 0, plays: 0 })) : { likes: 0, dislikes: 0, plays: 0 };
+      const currentStatsParts = [];
+      if (currentStats.likes > 0) currentStatsParts.push(`❤️${currentStats.likes}`);
+      if (currentStats.dislikes > 0) currentStatsParts.push(`👎${currentStats.dislikes}`);
+      if (currentStats.plays > 0) currentStatsParts.push(`🔥${currentStats.plays}`);
+      const currentStatsText = currentStatsParts.length > 0 ? ` | ${currentStatsParts.join(" ")}` : "";
+
       let queueString = "";
       for (let index = 1; index < Math.min(freshQueue.songs.length, 11); index++) {
         const track = freshQueue.songs[index];
+        const tStats = track.url ? await PlaylistStore.getGlobalTrackStats(client, guildId, track.url).catch(() => ({ likes: 0, dislikes: 0, plays: 0 })) : { likes: 0, dislikes: 0, plays: 0 };
+        const tStatsParts = [];
+        if (tStats.likes > 0) tStatsParts.push(`❤️${tStats.likes}`);
+        if (tStats.dislikes > 0) tStatsParts.push(`👎${tStats.dislikes}`);
+        if (tStats.plays > 0) tStatsParts.push(`🔥${tStats.plays}`);
+        const tStatsStr = tStatsParts.length > 0 ? ` | ${tStatsParts.join(" ")}` : "";
         queueString += `\`${index}.\` **${client.getTitle(track)}** - ${
           track.isLive ? "LIVE STREAM" : track.formattedDuration.split(" | ")[0]
-        } - \`${track.user.tag}\`\n`;
+        } - \`${track.user.tag}\`${tStatsStr}\n`;
       }
 
       const newQueueEmbed = new EmbedBuilder()
@@ -375,7 +389,7 @@ module.exports = async (client) => {
               currentSong?.isLive
                 ? "LIVE STREAM"
                 : currentSong?.formattedDuration.split(" | ")[0]
-            } - \`${currentSong?.user.tag}\``,
+            } - \`${currentSong?.user.tag}\`${currentStatsText}`,
           },
         ]);
 
@@ -429,6 +443,13 @@ module.exports = async (client) => {
       const track = freshQueue.songs[0];
       if (!track || !track.name) return;
 
+      const stats = track.url ? await PlaylistStore.getGlobalTrackStats(client, guildId, track.url).catch(() => ({ likes: 0, dislikes: 0, plays: 0 })) : { likes: 0, dislikes: 0, plays: 0 };
+      const statsParts = [];
+      if (stats.likes > 0) statsParts.push(`❤️${stats.likes}`);
+      if (stats.dislikes > 0) statsParts.push(`👎${stats.dislikes}`);
+      if (stats.plays > 0) statsParts.push(`🔥${stats.plays}`);
+      const statsText = statsParts.length > 0 ? statsParts.join(" · ") : "Sin stats aún";
+
       const newEmbed = new EmbedBuilder()
         .setColor(client.config.embed.color)
         .setImage(track?.thumbnail || null)
@@ -448,6 +469,11 @@ module.exports = async (client) => {
           {
             name: "**Duration**",
             value: `\`${track.formattedDuration}\``,
+            inline: true,
+          },
+          {
+            name: "**Stats**",
+            value: `\`${statsText}\``,
             inline: true,
           }
         )
