@@ -6,7 +6,8 @@ const logFile = path.join(process.cwd(), "logs.txt");
 
 function getTimestamp() {
   const now = new Date();
-  return now.toLocaleString();
+  const pad = (n, d = 2) => String(n).padStart(d, "0");
+  return `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}.${pad(now.getMilliseconds(), 3)}`;
 }
 
 const Logger = {

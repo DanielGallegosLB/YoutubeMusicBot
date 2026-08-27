@@ -59,7 +59,7 @@ class JUGNU extends Client {
     this.distube = new Distube(this, {
       emitNewSongOnly: true,
       nsfw: false,
-      savePreviousSongs: true,
+      savePreviousSongs: false,
       joinNewVoiceChannel: false,
       customFilters: filters,
       plugins: [
