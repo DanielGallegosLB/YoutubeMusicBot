@@ -4,6 +4,7 @@ const AutoresumeHandler = require("./AutoresumeHandler");
 const InitAutoResume = require("./InitAutoresume");
 const UserHistory = require("./UserHistory");
 const MusicTracker = require("./MusicTracker");
+const PlaylistStore = require("./PlaylistStore");
 
 const MAX_SESSION_SONGS = 150;
 
@@ -117,6 +118,15 @@ module.exports = async (client) => {
     console.log(`[DisTube] Playing: ${song.name} in ${queue.textChannel.guild.name}`);
 
     MusicTracker.logPlay(queue.textChannel.guildId, song.user.id, song);
+
+    // Count the play only when the song actually starts playing (not when queued)
+    if (song.user?.id && song.url) {
+      try {
+        await PlaylistStore.countPlay(client, queue.textChannel.guildId, song.user.id, "Canciones Favoritas", song.url);
+      } catch (e) {
+        client.logger.error(`[CountPlay] Error:`, e);
+      }
+    }
 
     const activityText = song.uploader?.name
       ? `${song.name} - ${song.uploader.name}`

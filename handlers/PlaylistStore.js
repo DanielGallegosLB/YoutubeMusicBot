@@ -51,9 +51,9 @@ module.exports = {
       const keyStr = t?.url ? `u:${t.url}` : `n:${(t?.name || '').toLowerCase()}|${t?.duration || 0}`;
       const existingIdx = existingMap.get(keyStr);
       if (existingIdx !== undefined) {
-        existing[existingIdx].playCount = (existing[existingIdx].playCount || 1) + 1;
+        // Track already exists; do not auto-increment playCount here (counted on actual play)
       } else {
-        t.playCount = 1;
+        t.playCount = 0;
         t.likedBy = [];
         t.dislikedBy = [];
         existing.push(t);
@@ -280,6 +280,19 @@ module.exports = {
       }
     }
     return { likes, dislikes, plays };
+  },
+
+  /** Increment play count for a track by URL (called when it actually starts playing). Returns true if found */
+  async countPlay(client, guildId, userId, name, trackUrl) {
+    const key = `${guildId}.playlists.${userId}`;
+    const all = await this.getAll(client, guildId, userId);
+    const list = all[name] || [];
+    const track = list.find((t) => t.url === trackUrl);
+    if (!track) return false;
+    track.playCount = typeof track.playCount === "number" && track.playCount > 0 ? track.playCount + 1 : 1;
+    all[name] = list;
+    await client.music.set(key, all);
+    return true;
   },
 
   /** Serialize a DisTube Song to a plain Track object */
