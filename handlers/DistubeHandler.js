@@ -160,12 +160,23 @@ module.exports = async (client) => {
             const serialized = Store.serializeSong(_track, interaction.user);
             await Store.addTracks(client, interaction.guildId, interaction.user.id, "Canciones Favoritas", [serialized]);
           }
-          const result = await Store.toggleLikeByUrl(client, interaction.guildId, interaction.user.id, "Canciones Favoritas", _track.url);
+          // Enforce one like per user per play
+          const seq = _queue._playSeq || 0;
+          const claimKey = `${interaction.guildId}|${_track.url}|${seq}`;
+          if (!client.likeClaims) client.likeClaims = new Map();
+          if (client.likeClaims.size > 5000) client.likeClaims.clear();
+          let claims = client.likeClaims.get(claimKey);
+          if (!claims) { claims = new Set(); client.likeClaims.set(claimKey, claims); }
+          if (claims.has(interaction.user.id)) {
+            return interaction.editReply({ content: "❌ Ya diste like a esta canción en esta reproducción." }).catch(() => {});
+          }
+          claims.add(interaction.user.id);
+          const result = await Store.likeTrackByUrl(client, interaction.guildId, interaction.user.id, "Canciones Favoritas", _track.url);
           if (!result) return interaction.editReply({ content: "❌ Error al procesar." }).catch(() => {});
           await Store.sortFavorites(client, interaction.guildId, interaction.user.id);
-          const msg = result.liked
-            ? `❤️ Like! (${result.score >= 0 ? "+" : ""}${result.score} pts · ${result.likeCount}❤️ ${result.dislikeCount}👎)`
-            : `💔 Like removido (${result.score >= 0 ? "+" : ""}${result.score} pts)`;
+          await client.updatequeue(_queue).catch(() => {});
+          await client.updateplayer(_queue).catch(() => {});
+          const msg = `❤️ Like! (${result.score >= 0 ? "+" : ""}${result.score} pts · ${result.likeCount}❤️ ${result.dislikeCount}👎)`;
           return interaction.editReply({ content: msg }).catch(() => {});
         }
 
@@ -181,9 +192,21 @@ module.exports = async (client) => {
             const serialized = Store.serializeSong(_track, interaction.user);
             await Store.addTracks(client, interaction.guildId, interaction.user.id, "Canciones Favoritas", [serialized]);
           }
-          const result = await Store.toggleDislikeByUrl(client, interaction.guildId, interaction.user.id, "Canciones Favoritas", _track.url);
+          // Enforce one dislike per user per play
+          const seq = _queue._playSeq || 0;
+          const claimKey = `${interaction.guildId}|${_track.url}|${seq}`;
+          if (!client.likeClaims) client.likeClaims = new Map();
+          let claims = client.likeClaims.get(claimKey);
+          if (!claims) { claims = new Set(); client.likeClaims.set(claimKey, claims); }
+          if (claims.has(interaction.user.id)) {
+            return interaction.editReply({ content: "❌ Ya diste dislike a esta canción en esta reproducción." }).catch(() => {});
+          }
+          claims.add(interaction.user.id);
+          const result = await Store.dislikeTrackByUrl(client, interaction.guildId, interaction.user.id, "Canciones Favoritas", _track.url);
           if (!result) return interaction.editReply({ content: "❌ Error al procesar." }).catch(() => {});
           await Store.sortFavorites(client, interaction.guildId, interaction.user.id);
+          await client.updatequeue(_queue).catch(() => {});
+          await client.updateplayer(_queue).catch(() => {});
           return interaction.editReply({ content: `👎 Dislike! (${result.score >= 0 ? "+" : ""}${result.score} pts · ${result.likeCount}❤️ ${result.dislikeCount}👎)` }).catch(() => {});
         }
 

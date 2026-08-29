@@ -127,8 +127,8 @@ module.exports = {
     return true;
   },
 
-  /** Toggle like on a track by URL (player button) */
-  async toggleLikeByUrl(client, guildId, userId, name, trackUrl) {
+  /** Add a like on a track by URL (accumulates across plays; each user can like once per play) */
+  async likeTrackByUrl(client, guildId, userId, name, trackUrl) {
     const key = `${guildId}.playlists.${userId}`;
     const all = await this.getAll(client, guildId, userId);
     const list = all[name] || [];
@@ -136,28 +136,23 @@ module.exports = {
     if (!track) return null;
     if (!track.likedBy) track.likedBy = [];
     if (!track.dislikedBy) track.dislikedBy = [];
-    // Remove from disliked if present
+    // Remove a dislike for this user for this play if present
     const disIdx = track.dislikedBy.indexOf(userId);
     if (disIdx !== -1) track.dislikedBy.splice(disIdx, 1);
-    // Toggle like
-    const likedIdx = track.likedBy.indexOf(userId);
-    if (likedIdx === -1) {
-      track.likedBy.push(userId);
-    } else {
-      track.likedBy.splice(likedIdx, 1);
-    }
+    // Accumulate a like (allows multiple likes per user across different plays)
+    track.likedBy.push(userId);
     all[name] = list;
     await client.music.set(key, all);
     return {
-      liked: likedIdx === -1,
+      liked: true,
       likeCount: track.likedBy.length,
       dislikeCount: track.dislikedBy.length,
       score: track.likedBy.length - track.dislikedBy.length,
     };
   },
 
-  /** Toggle dislike on a track by URL (player button) */
-  async toggleDislikeByUrl(client, guildId, userId, name, trackUrl) {
+  /** Add a dislike on a track by URL (accumulates across plays; each user can dislike once per play) */
+  async dislikeTrackByUrl(client, guildId, userId, name, trackUrl) {
     const key = `${guildId}.playlists.${userId}`;
     const all = await this.getAll(client, guildId, userId);
     const list = all[name] || [];
@@ -165,16 +160,11 @@ module.exports = {
     if (!track) return null;
     if (!track.likedBy) track.likedBy = [];
     if (!track.dislikedBy) track.dislikedBy = [];
-    // Remove from liked if present
+    // Remove a like for this user for this play if present
     const likedIdx = track.likedBy.indexOf(userId);
     if (likedIdx !== -1) track.likedBy.splice(likedIdx, 1);
-    // Toggle dislike
-    const disIdx = track.dislikedBy.indexOf(userId);
-    if (disIdx === -1) {
-      track.dislikedBy.push(userId);
-    } else {
-      track.dislikedBy.splice(disIdx, 1);
-    }
+    // Accumulate a dislike
+    track.dislikedBy.push(userId);
     all[name] = list;
     await client.music.set(key, all);
     return {
@@ -267,6 +257,10 @@ module.exports = {
     let likes = 0;
     let dislikes = 0;
     let plays = 0;
+    const likedByIds = [];
+    const dislikedByIds = [];
+    const likedNames = [];
+    const dislikedNames = [];
     for (const userId of Object.keys(allPlaylists)) {
       const userPlaylists = allPlaylists[userId];
       const favs = userPlaylists?.["Canciones Favoritas"] || [];
@@ -275,11 +269,25 @@ module.exports = {
           likes += (t.likedBy || []).length;
           dislikes += (t.dislikedBy || []).length;
           plays += (t.playCount || 0);
+          for (const uid of (t.likedBy || [])) if (!likedByIds.includes(uid)) likedByIds.push(uid);
+          for (const uid of (t.dislikedBy || [])) if (!dislikedByIds.includes(uid)) dislikedByIds.push(uid);
           break;
         }
       }
     }
-    return { likes, dislikes, plays };
+    const resolveNames = (ids) => Promise.all(ids.map(async (id) => {
+      const member = await client.users.fetch(id).catch(() => null);
+      return member?.username || id;
+    }));
+    likedNames.push(...await resolveNames(likedByIds));
+    dislikedNames.push(...await resolveNames(dislikedByIds));
+    return {
+      likes,
+      dislikes,
+      plays,
+      likedBy: likedNames,
+      dislikedBy: dislikedNames,
+    };
   },
 
   /** Increment play count for a track by URL (called when it actually starts playing). Returns true if found */

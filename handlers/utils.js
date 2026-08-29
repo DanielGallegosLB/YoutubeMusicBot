@@ -443,12 +443,16 @@ module.exports = async (client) => {
       const track = freshQueue.songs[0];
       if (!track || !track.name) return;
 
-      const stats = track.url ? await PlaylistStore.getGlobalTrackStats(client, guildId, track.url).catch(() => ({ likes: 0, dislikes: 0, plays: 0 })) : { likes: 0, dislikes: 0, plays: 0 };
+      const stats = track.url ? await PlaylistStore.getGlobalTrackStats(client, guildId, track.url).catch(() => ({ likes: 0, dislikes: 0, plays: 0, likedBy: [], dislikedBy: [] })) : { likes: 0, dislikes: 0, plays: 0, likedBy: [], dislikedBy: [] };
       const statsParts = [];
       if (stats.likes > 0) statsParts.push(`❤️${stats.likes}`);
       if (stats.dislikes > 0) statsParts.push(`👎${stats.dislikes}`);
       if (stats.plays > 0) statsParts.push(`🔥${stats.plays}`);
-      const statsText = statsParts.length > 0 ? statsParts.join(" · ") : "Sin stats aún";
+      const likeNames = (stats.likedBy || []).length ? `\nLikes: ${stats.likedBy.join(", ")}` : "";
+      const dislikeNames = (stats.dislikedBy || []).length ? `\nDislikes: ${stats.dislikedBy.join(", ")}` : "";
+      const statsValue = stats.likes > 0 || stats.dislikes > 0 || stats.plays > 0
+        ? `${statsParts.join(" · ")}${likeNames}${dislikeNames}`
+        : "Sin stats aún";
 
       const newEmbed = new EmbedBuilder()
         .setColor(client.config.embed.color)
@@ -473,7 +477,7 @@ module.exports = async (client) => {
           },
           {
             name: "**Stats**",
-            value: `\`${statsText}\``,
+            value: `\`${statsValue}\``,
             inline: true,
           }
         )
@@ -683,16 +687,15 @@ module.exports = async (client) => {
    */
   client.getTitle = (song) => {
     try {
-      if (!song) return;
-      const TrackTitle = song.name || song.playlist.name;
-
+      if (!song) return "Unknown Track";
+      const TrackTitle = (song.name || song.playlist?.name || "").trim();
       if (!TrackTitle) return "Unknown Track";
 
       const title = TrackTitle.replace(/[\[\(][^\]\)]*[\]\)]/, "").trim();
 
       const parts = title.split("|");
 
-      const shortTitle = parts[0].trim();
+      const shortTitle = parts[0].trim() || "Unknown Track";
 
       return shortTitle.substring(0, 25);
     } catch (error) {

@@ -117,6 +117,8 @@ module.exports = async (client) => {
   client.distube.on("playSong", async (queue, song) => {
     console.log(`[DisTube] Playing: ${song.name} in ${queue.textChannel.guild.name}`);
 
+    queue._playSeq = (queue._playSeq || 0) + 1;
+
     MusicTracker.logPlay(queue.textChannel.guildId, song.user.id, song);
 
     // Count the play only when the song actually starts playing (not when queued)
@@ -315,7 +317,30 @@ module.exports = async (client) => {
   });
 
   client.distube.on("error", async (error, queue, song) => {
+    const code = error?.errorCode || error?.code;
+    if (code === "FFMPEG_EXITED") {
+      const trackName = song?.name ? `"${song.name}"` : `#${queue?.songs?.[0]?.name || "desconocida"}`;
+      client.logger.error(
+        `[FFMPEG_EXITED] La reproducción de la canción ${trackName} se interrumpió. ` +
+        `Causa probable: el stream de YouTube fue throttled/cortado (cookies faltantes o cliente web_embedded) o el proceso de ffmpeg falló. ` +
+        `Saltando a la siguiente canción si existe para continuar la reproducción.`
+      );
+      // Try to skip to the next song so playback continues instead of dying silently
+      if (queue && queue.songs && queue.songs.length > 1) {
+        try {
+          await queue.skip();
+          client.logger.error(`[FFMPEG_EXITED] Saltando "${trackName}" y reproduciendo la siguiente (${queue.songs[0]?.name || "..."})`);
+        } catch (e) {
+          client.logger.error(`[FFMPEG_EXITED] No se pudo saltar la canción:`, e);
+        }
+      } else {
+        client.logger.error(`[FFMPEG_EXITED] No hay más canciones en la cola, la reproducción se detuvo.`);
+      }
+      return;
+    }
+
     client.logger.error(`[DisTube Error]`, error);
+    if (!queue?.textChannel) return;
     queue.textChannel
       .send({
         embeds: [

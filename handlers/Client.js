@@ -49,6 +49,7 @@ class JUGNU extends Client {
     this.leaveTimeoutHandles = new Collection();
     this.playlistLoading = new Collection();
     this.playlistStopped = new Collection();
+    this.likeClaims = new Map();
     this.mcategories = fs.readdirSync("./Commands/Message");
     this.scategories = fs.readdirSync("./Commands/Slash");
     this.temp = new Collection();
@@ -59,7 +60,7 @@ class JUGNU extends Client {
     this.distube = new Distube(this, {
       emitNewSongOnly: true,
       nsfw: false,
-      savePreviousSongs: false,
+      savePreviousSongs: true,
       joinNewVoiceChannel: false,
       customFilters: filters,
       plugins: [

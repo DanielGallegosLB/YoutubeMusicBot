@@ -53,6 +53,20 @@ module.exports = async (client) => {
     },
   });
 
+  // Serialize writes per store to avoid JoshDB JSON rename collisions on Windows (EPERM)
+  const serializeWrites = (store) => {
+    let chain = Promise.resolve();
+    const originalSet = store.set.bind(store);
+    store.set = (...args) => {
+      const run = chain.then(() => originalSet(...args));
+      // Allow the chain to settle even if this write rejects, so the queue never deadlocks
+      chain = run.then(() => {}, () => {});
+      return run;
+    };
+  };
+  serializeWrites(client.music);
+  serializeWrites(client.autoresume);
+
   // Handle guild deletion event
   client.on(Events.GuildDelete, async (guild) => {
     try {
