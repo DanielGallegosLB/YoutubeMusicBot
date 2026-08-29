@@ -146,6 +146,15 @@ module.exports = async (client) => {
     let data = await client.music.get(`${queue.textChannel.guildId}.music`);
     if (data && data.channel === queue.textChannel.id) return;
 
+    // Delete the previous "now playing" message before sending a fresh one
+    const prevId = client.temp.get(queue.textChannel.guildId);
+    if (prevId) {
+      try {
+        const prevMsg = await queue.textChannel.messages.fetch(prevId).catch(() => null);
+        if (prevMsg && !prevMsg.deleted) await prevMsg.delete().catch(() => {});
+      } catch (e) {}
+    }
+
     queue.textChannel
       .send({
         embeds: [

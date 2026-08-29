@@ -67,17 +67,26 @@ class JUGNU extends Client {
         new SoundCloudPlugin(),
         new YtDlpPlugin({
           update: false,
-          ytdlpOptions: {
-            socketTimeout: 60,
-            fragmentRetries: 10,
-            addHeader: [
-              "referer:https://www.youtube.com",
-            ],
-            jsRuntimes: "node",
-            noCheckCertificates: true,
-            format: "bestaudio/best",
-            extractorArgs: "youtube:player_client=web_embedded",
-          },
+          ytdlpOptions: (() => {
+            const opts = {
+              socketTimeout: 60,
+              fragmentRetries: 10,
+              addHeader: [
+                "referer:https://www.youtube.com",
+              ],
+              jsRuntimes: "node",
+              noCheckCertificates: true,
+              format: "bestaudio/best",
+              extractorArgs: "youtube:player_client=web_embedded",
+            };
+            try {
+              const cookiePath = require("path").join(__dirname, "../yt-cookies.txt");
+              if (require("fs").existsSync(cookiePath) && require("fs").statSync(cookiePath).size > 10) {
+                opts.cookies = cookiePath;
+              }
+            } catch (_) {}
+            return opts;
+          })(),
         }),
       ],
       ffmpeg: {
