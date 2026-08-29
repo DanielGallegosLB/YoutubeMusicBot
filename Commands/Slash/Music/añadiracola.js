@@ -3,6 +3,7 @@ const {
   ApplicationCommandType,
 } = require("discord.js");
 const MusicBot = require("../../../handlers/Client");
+const { searchYoutube } = require("../../../handlers/PlaylistFetcher");
 
 module.exports = {
   name: "añadiracola",
@@ -42,10 +43,26 @@ module.exports = {
     } else {
       const isURL = /^(https?:\/\/)/i.test(song);
       const query = isURL ? song : `ytsearch1:${song}`;
-      await client.distube.play(voiceChannel, query, {
-        member: interaction.member,
-        textChannel: interaction.channel,
-      });
+      try {
+        await client.distube.play(voiceChannel, query, {
+          member: interaction.member,
+          textChannel: interaction.channel,
+        });
+      } catch (e) {
+        if (!isURL) {
+          const resolved = await searchYoutube(song);
+          if (resolved) {
+            await client.distube.play(voiceChannel, resolved, {
+              member: interaction.member,
+              textChannel: interaction.channel,
+            });
+          } else {
+            throw e;
+          }
+        } else {
+          throw e;
+        }
+      }
       return client.embed(
         interaction,
         `${client.config.emoji.SUCCESS} Searching \`${song}\` in Universe`

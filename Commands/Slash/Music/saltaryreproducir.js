@@ -9,6 +9,7 @@ const { Queue } = require("distube");
 const { spawn } = require("child_process");
 const path = require("path");
 const fs = require("fs");
+const { searchYoutube } = require("../../../handlers/PlaylistFetcher");
 
 const YTDLP_PATH = path.join(
   process.cwd(),
@@ -289,6 +290,18 @@ module.exports = {
       client.logger.log(`[Slash PlaySkip Success] Guild: ${interaction.guildId} Query: ${song}`);
     } catch (e) {
       client.logger.error(`[Slash PlaySkip Error] Guild: ${interaction.guildId} Query: ${song}`, e);
+      if (!isURL) {
+        try {
+          const resolved = await searchYoutube(song);
+          if (resolved) {
+            await client.distube.play(channel, resolved, playOpts);
+            interaction.followUp({ content: `✅ Saltando a \`${song}\`...`, ephemeral: true }).then((msg) => setTimeout(() => msg.delete().catch(() => {}), 3000));
+            return;
+          }
+        } catch (e2) {
+          client.logger.error(`[Slash PlaySkip] yt-dlp fallback error:`, e2);
+        }
+      }
       return interaction.followUp({
         content: `❌ Error: ${e.message}`,
         ephemeral: true,

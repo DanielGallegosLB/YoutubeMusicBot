@@ -66,4 +66,37 @@ function fetchPlaylistURLs(playlistUrl) {
   });
 }
 
-module.exports = { YTDLP_PATH, isPlaylistURL, fetchPlaylistURLs };
+/**
+ * Search YouTube via yt-dlp and return the first result as a watch URL.
+ * Falls back gracefully — returns null if nothing is found.
+ * @param {string} query
+ * @returns {Promise<string|null>}
+ */
+function searchYoutube(query) {
+  return new Promise((resolve) => {
+    const cookiePath = path.join(process.cwd(), "yt-cookies.txt");
+    const args = [
+      "--default-search", "ytsearch1",
+      "--playlist-items", "1-1",
+      "--print", "webpage_url",
+      "--no-warnings",
+      "--ignore-errors",
+      "--no-check-certificates",
+      "--js-runtimes", "node",
+      query,
+    ];
+    if (fs.existsSync(cookiePath)) {
+      args.push("--cookies", cookiePath);
+    }
+    const proc = spawn(YTDLP_PATH, args);
+    let stdout = "";
+    proc.stdout.on("data", (d) => (stdout += d));
+    proc.on("error", () => resolve(null));
+    proc.on("close", () => {
+      const url = stdout.trim().split("\n").find(Boolean);
+      resolve(url || null);
+    });
+  });
+}
+
+module.exports = { YTDLP_PATH, isPlaylistURL, fetchPlaylistURLs, searchYoutube };

@@ -10,6 +10,7 @@ const { spawn } = require("child_process");
 const path = require("path");
 const fs = require("fs");
 const UserHistory = require("../../../handlers/UserHistory");
+const { searchYoutube } = require("../../../handlers/PlaylistFetcher");
 
 const YTDLP_PATH = path.join(
   process.cwd(),
@@ -423,6 +424,24 @@ module.exports = {
       } catch (err) {}
     } catch (e) {
       client.logger.error(`[Slash Play Error] Guild: ${interaction.guildId} Query: ${song}`, e);
+      // Search failed (common when YouTube blocks the search API / missing cookies).
+      // Fall back to a yt-dlp based search so text queries still work.
+      if (!isURL) {
+        try {
+          const resolved = await searchYoutube(song);
+          if (resolved) {
+            await client.distube.voices.join(channel);
+            await client.distube.play(channel, resolved, playOpts);
+            client.logger.log(`[Slash Play] yt-dlp fallback OK: ${resolved}`);
+            try {
+              if (interaction.deferred || interaction.replied) await interaction.followUp({ content: `✅ Reproduciendo \`${song.slice(0, 70)}\``, ephemeral: true }).catch(() => {});
+            } catch (err) {}
+            return;
+          }
+        } catch (e2) {
+          client.logger.error(`[Slash Play] yt-dlp fallback error:`, e2);
+        }
+      }
       const errorMsg = { 
         content: `❌ No se pudo reproducir: ${e.message.slice(0, 100)}`,
         ephemeral: true 

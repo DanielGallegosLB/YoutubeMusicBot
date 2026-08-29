@@ -122,8 +122,14 @@ module.exports = async (client) => {
         .setDisabled(state),
     ]);
 
-    // Row 3: Like ❤️ • Dislike 👎 • SaveCurrent ⭐
+    // Row 3: Auto DJ 🛸 • Like ❤️ • Dislike 👎 • SaveCurrent ⭐
     const row3 = new ActionRowBuilder().addComponents([
+      new ButtonBuilder()
+        .setStyle(ButtonStyle.Primary)
+        .setCustomId("autodj")
+        .setEmoji("🛸")
+        .setLabel("Auto DJ")
+        .setDisabled(dis(!track)),
       new ButtonBuilder()
         .setStyle(ButtonStyle.Secondary)
         .setCustomId("player_like")

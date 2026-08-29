@@ -135,15 +135,16 @@ module.exports = async (client) => {
       : song.name;
     startMarqueeActivity(client, activityText, queue.textChannel.guild);
 
-    // Update persistent request channel if it exists
-    await client.updatequeue(queue);
-    await client.updateplayer(queue);
-
     if (!queue._sessionSaved && queue.songs.length === 1 && !queue._sessionSourcePlaylist) {
       const session = createSession(queue, "song", song.name, song.url, song.user, [song]);
       await saveSession(client, queue.textChannel.guildId, session);
       queue._sessionSaved = true;
     }
+
+    // Fire-and-forget the request-channel/player updates so they never delay
+    // the start of the next song.
+    client.updatequeue(queue).catch(() => {});
+    client.updateplayer(queue).catch(() => {});
 
     let data = await client.music.get(`${queue.textChannel.guildId}.music`);
     if (data && data.channel === queue.textChannel.id) return;
@@ -235,8 +236,8 @@ module.exports = async (client) => {
     }
 
     // Update persistent request channel if it exists
-    await client.updatequeue(queue);
-    await client.updateplayer(queue);
+    client.updatequeue(queue).catch(() => {});
+    client.updateplayer(queue).catch(() => {});
 
     // Auto-save individual songs to user's favorites (skip if part of a playlist load)
     if (!queue._sessionSourcePlaylist && song.user?.id) {
@@ -274,8 +275,8 @@ module.exports = async (client) => {
     }
 
     // Update persistent request channel if it exists
-    await client.updatequeue(queue);
-    await client.updateplayer(queue);
+    client.updatequeue(queue).catch(() => {});
+    client.updateplayer(queue).catch(() => {});
 
     if (!queue._sessionSaved) {
       const session = createSession(queue, "playlist", playlist.name, playlist.url, playlist.user, playlist.songs);
@@ -305,10 +306,10 @@ module.exports = async (client) => {
       stopMarqueeActivity(client, queue.textChannel.guild);
 
       // Edit player message
-      await client.editPlayerMessage(queue.textChannel);
+      client.editPlayerMessage(queue.textChannel).catch(() => {});
 
       // Update embed
-      await client.updateembed(client, queue.textChannel.guild);
+      client.updateembed(client, queue.textChannel.guild).catch(() => {});
 
       // Check if this disconnect was caused by an explicit stop command
       const stoppedAt = client.playlistStopped.get(guildId);
@@ -400,9 +401,10 @@ module.exports = async (client) => {
   });
 
   client.distube.on("finishSong", async (queue, song) => {
-    await client.editPlayerMessage(queue.textChannel);
-    await client.updatequeue(queue);
-    await client.updateplayer(queue);
+    // Fire-and-forget so the next song starts immediately (these do heavy DB/network work)
+    client.editPlayerMessage(queue.textChannel).catch(() => {});
+    client.updatequeue(queue).catch(() => {});
+    client.updateplayer(queue).catch(() => {});
   });
 
   client.distube.on("finish", async (queue) => {

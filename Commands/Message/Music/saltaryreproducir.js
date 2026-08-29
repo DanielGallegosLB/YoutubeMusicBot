@@ -4,6 +4,7 @@ const { Queue } = require("distube");
 const { spawn } = require("child_process");
 const path = require("path");
 const fs = require("fs");
+const { searchYoutube } = require("../../../handlers/PlaylistFetcher");
 
 const YTDLP_PATH = path.join(
   process.cwd(),
@@ -180,6 +181,19 @@ module.exports = {
       await client.distube.play(channel, query, playOpts);
       await message.delete().catch(() => {});
     } catch (e) {
+      if (!isURL) {
+        try {
+          const resolved = await searchYoutube(song);
+          if (resolved) {
+            await client.distube.voices.join(channel);
+            await client.distube.play(channel, resolved, playOpts);
+            await message.delete().catch(() => {});
+            return;
+          }
+        } catch (e2) {
+          client.logger.error(`[PlaySkip Msg] yt-dlp fallback error:`, e2);
+        }
+      }
       client.embed(message, `${client.config.emoji.ERROR} Error: ${e.message}`);
     }
   },
