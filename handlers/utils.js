@@ -1,4 +1,4 @@
-const JUGNU = require("./Client");
+const MusicBot = require("./Client");
 const {
   EmbedBuilder,
   ActionRowBuilder,
@@ -14,7 +14,7 @@ const PlaylistStore = require("./PlaylistStore");
 
 /**
  *
- * @param {JUGNU} client
+ * @param {MusicBot} client
  */
 module.exports = async (client) => {
   // code
@@ -232,7 +232,7 @@ module.exports = async (client) => {
   client.queueembed = (guild) => {
     let embed = new EmbedBuilder()
       .setColor(client.config.embed.color)
-      .setAuthor({ name: `Jugnu Music Queue` })
+      .setAuthor({ name: `Music Queue` })
       .setDescription("The music queue is empty.");
 
     return embed;
@@ -249,9 +249,6 @@ module.exports = async (client) => {
         name: "Join a Voice Channel and Type Song Link/Name to Play",
         iconURL: client.user.displayAvatarURL(),
       })
-      .setDescription(
-        `[Invite Now](${client.config.links.inviteURL}) • [Support Server](${client.config.links.DiscordServer}) • [Website](${client.config.links.Website})`
-      )
       .setImage(
         guild.banner
           ? guild.bannerURL({ size: 4096 })
@@ -379,7 +376,7 @@ module.exports = async (client) => {
       const newQueueEmbed = new EmbedBuilder()
         .setColor(client.config.embed.color)
         .setAuthor({
-          name: `Jugnu Queue - [${freshQueue.songs.length} Tracks]`,
+          name: `Music Queue - [${freshQueue.songs.length} Tracks]`,
           iconURL: guild.iconURL({ dynamic: true }),
         })
         .addFields([
@@ -568,7 +565,7 @@ module.exports = async (client) => {
       .addFields([
         {
           name: `Stats`,
-          value: `>>> **:gear: \`${allcommands}\` Commands\n:file_folder: \`${allguilds}\` Guilds\n⌚️ ${botuptime} Uptime\n🏓 \`${client.ws.ping}\` Ping\nMade by [\`Kabir Jaipal\`](https://kabirjaipal.vercel.app)**`,
+          value: `>>> **:gear: \`${allcommands}\` Commands\n:file_folder: \`${allguilds}\` Guilds\n⌚️ ${botuptime} Uptime\n🏓 \`${client.ws.ping}\` Ping**`,
         },
       ])
       .setFooter(client.getFooter(user));

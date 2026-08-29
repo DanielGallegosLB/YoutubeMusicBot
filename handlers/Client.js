@@ -14,7 +14,7 @@ const { filters, options } = require("../settings/config");
 const { YtDlpPlugin } = require("@distube/yt-dlp");
 const Logger = require("./Logger");
 
-class JUGNU extends Client {
+class MusicBot extends Client {
   constructor() {
     super({
       partials: [
@@ -163,4 +163,4 @@ class JUGNU extends Client {
   }
 }
 
-module.exports = JUGNU;
+module.exports = MusicBot;

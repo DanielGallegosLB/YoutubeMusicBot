@@ -1,10 +1,10 @@
 const { readdirSync } = require("fs");
 const { slash } = require("../settings/config");
-const JUGNU = require("./Client");
+const MusicBot = require("./Client");
 
 /**
  *
- * @param {JUGNU} client
+ * @param {MusicBot} client
  */
 module.exports = async (client) => {
   // LOADING SLASH COMMANDS

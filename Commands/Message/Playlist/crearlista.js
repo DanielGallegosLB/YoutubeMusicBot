@@ -1,5 +1,5 @@
 const { Message, PermissionFlagsBits } = require("discord.js");
-const JUGNU = require("../../../handlers/Client");
+const MusicBot = require("../../../handlers/Client");
 const Store = require("../../../handlers/PlaylistStore");
 
 module.exports = {
@@ -15,7 +15,7 @@ module.exports = {
   Player: false,
   djOnly: false,
   /**
-   * @param {JUGNU} client
+   * @param {MusicBot} client
    * @param {Message} message
    */
   run: async (client, message, args) => {

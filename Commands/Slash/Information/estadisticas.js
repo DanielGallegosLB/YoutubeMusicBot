@@ -5,7 +5,7 @@ const {
   PermissionFlagsBits,
   ApplicationCommandType,
 } = require("discord.js");
-const JUGNU = require("../../../handlers/Client");
+const MusicBot = require("../../../handlers/Client");
 const { Queue } = require("distube");
 const os = require("systeminformation");
 const { msToDuration, formatBytes } = require("../../../handlers/functions");
@@ -33,7 +33,7 @@ module.exports = {
 
   /**
    *
-   * @param {JUGNU} client
+   * @param {MusicBot} client
    * @param {CommandInteraction} interaction
    * @param {String[]} args
    * @param {Queue} queue
@@ -53,9 +53,6 @@ module.exports = {
           .setColor(client.config.embed.color)
           .setTitle("__**Estadísticas:**__")
           .setThumbnail(client.user.displayAvatarURL())
-          .setDescription(
-            `> ** Hecho por [\` Kabir Jaipal \`](https://bit.ly/kabirjaipal) **`
-          )
           .addFields([
             {
               name: `⏳ Uso de Memoria`,

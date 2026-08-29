@@ -18,17 +18,17 @@ try {
     err?.message || err
   );
 }
-const JUGNU = require("./Client");
+const MusicBot = require("./Client");
 const { Events } = require("discord.js");
 // const provider = require("@joshdb/mongo"); // Manual override example
 
 /**
  * Initialize Josh database for music and autoresume
- * @param {JUGNU} client - Discord client instance
+ * @param {MusicBot} client - Discord client instance
  */
 module.exports = async (client) => {
   // Initialize music and autoresume databases
-  const dbName = (client.user?.username || "JUGNU-MUSIC").replace(/\s+/g, "");
+  const dbName = (client.user?.username || "MusicBot").replace(/\s+/g, "");
 
   const dbOptions = {
     url: MONGO_URL,
@@ -80,7 +80,7 @@ module.exports = async (client) => {
       const requestChannel = guild.channels.cache.get(musicData.music.channel);
       if (requestChannel) {
         await requestChannel.delete(
-          `Deleting ${client.user?.username || "JUGNU-MUSIC"} Request Channel`
+          `Deleting ${client.user?.username || "MusicBot"} Request Channel`
         );
       }
 

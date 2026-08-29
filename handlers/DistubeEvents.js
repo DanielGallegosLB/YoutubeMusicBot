@@ -1,5 +1,5 @@
 const { EmbedBuilder, Events, ActivityType } = require("discord.js");
-const JUGNU = require("./Client");
+const MusicBot = require("./Client");
 const AutoresumeHandler = require("./AutoresumeHandler");
 const InitAutoResume = require("./InitAutoresume");
 const UserHistory = require("./UserHistory");
@@ -99,7 +99,7 @@ const createSession = (queue, source, title, url, requestedBy, songs) => {
 
 /**
  *
- * @param {JUGNU} client
+ * @param {MusicBot} client
  */
 module.exports = async (client) => {
   client.saveMusicSession = async (guildId, session) => saveSession(client, guildId, session);
@@ -157,29 +157,55 @@ module.exports = async (client) => {
       } catch (e) {}
     }
 
+    let statsValue = null;
+    if (song.url) {
+      try {
+        const stats = await PlaylistStore.getGlobalTrackStats(client, queue.textChannel.guildId, song.url)
+          .catch(() => ({ likes: 0, dislikes: 0, plays: 0, likedBy: [], dislikedBy: [] }));
+        const statsParts = [];
+        if (stats.likes > 0) statsParts.push(`❤️${stats.likes}`);
+        if (stats.dislikes > 0) statsParts.push(`👎${stats.dislikes}`);
+        if (stats.plays > 0) statsParts.push(`🔥${stats.plays}`);
+        const likeNames = (stats.likedBy || []).length ? `\nLikes: ${stats.likedBy.join(", ")}` : "";
+        const dislikeNames = (stats.dislikedBy || []).length ? `\nDislikes: ${stats.dislikedBy.join(", ")}` : "";
+        statsValue = stats.likes > 0 || stats.dislikes > 0 || stats.plays > 0
+          ? `${statsParts.join(" · ")}${likeNames}${dislikeNames}`
+          : "Sin stats aún";
+      } catch (e) {}
+    }
+
+    const playFields = [
+      {
+        name: `Requested By`,
+        value: `\`${song.user.tag}\``,
+        inline: true,
+      },
+      {
+        name: `Author`,
+        value: `\`${song.uploader.name}\``,
+        inline: true,
+      },
+      {
+        name: `Duration`,
+        value: `\`${song.formattedDuration}\``,
+        inline: true,
+      },
+    ];
+    if (statsValue !== null) {
+      playFields.push({
+        name: `Stats`,
+        value: `\`${statsValue}\``,
+        inline: true,
+      });
+    }
+
     queue.textChannel
       .send({
         embeds: [
           new EmbedBuilder()
             .setColor(client.config.embed.color)
             .setDescription(`** [\`${client.getTitle(song)}\`](${song.url}) **`)
-            .addFields([
-              {
-                name: `Requested By`,
-                value: `\`${song.user.tag}\``,
-                inline: true,
-              },
-              {
-                name: `Author`,
-                value: `\`${song.uploader.name}\``,
-                inline: true,
-              },
-              {
-                name: `Duration`,
-                value: `\`${song.formattedDuration}\``,
-                inline: true,
-              },
-            ])
+            .addFields(playFields)
             .setFooter(client.getFooter(song.user)),
         ],
         components: client.buttons(false, queue),

@@ -10,7 +10,7 @@ const {
   ButtonStyle,
 } = require("discord.js");
 const { Song } = require("distube");
-const JUGNU = require("../../../handlers/Client");
+const MusicBot = require("../../../handlers/Client");
 
 const buildStoredSong = (track, guild) => {
   return new Song(
@@ -54,7 +54,7 @@ module.exports = {
 
   /**
    *
-   * @param {JUGNU} client
+   * @param {MusicBot} client
    * @param {CommandInteraction} interaction
    * @param {String[]} args
    */

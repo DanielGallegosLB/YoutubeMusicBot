@@ -10,7 +10,7 @@ const {
 } = require("discord.js");
 const client = require("../index");
 const { Song, Queue } = require("distube");
-const JUGNU = require("./Client");
+const MusicBot = require("./Client");
 
 /**
  *
@@ -373,7 +373,7 @@ function arraysEqual(a, b) {
 
 /**
  *
- * @param {JUGNU} client
+ * @param {MusicBot} client
  */
 async function registerSlashCommands(client) {
   const { slash } = client.config;

@@ -4,7 +4,7 @@ const {
   ApplicationCommandType,
   ApplicationCommandOptionType,
 } = require("discord.js");
-const JUGNU = require("../../../handlers/Client");
+const MusicBot = require("../../../handlers/Client");
 const Store = require("../../../handlers/PlaylistStore");
 const { spawn } = require("child_process");
 const path = require("path");

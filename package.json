@@ -1,5 +1,5 @@
 {
-  "name": "jugnu-music",
+  "name": "discord-music-bot",
   "version": "1.0.0",
   "description": "High-quality Discord music bot powered by DisTube and discord.js v14 — YouTube, Spotify, SoundCloud, lyrics, filters, autoplay, 24/7, and more.",
   "type": "commonjs",
@@ -7,10 +7,6 @@
   "scripts": {
     "start": "node index.js",
     "postinstall": "node scripts/ffmpeg-postinstall.js"
-  },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/kabirjaipal/JUGNU-MUSIC.git"
   },
   "keywords": [
     "discord",
@@ -37,13 +33,7 @@
     "self-hosted",
     "open-source"
   ],
-  "author": "Kabir Jaipal",
   "license": "MIT",
-  "funding": "https://github.com/sponsors/kabirjaipal",
-  "bugs": {
-    "url": "https://github.com/kabirjaipal/JUGNU-MUSIC/issues"
-  },
-  "homepage": "https://github.com/kabirjaipal/JUGNU-MUSIC#readme",
   "engines": {
     "node": ">=18.17.0",
     "npm": ">=9"

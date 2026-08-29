@@ -9,7 +9,7 @@ const defaultSettings = {
 const embedSettings = {
   color: Colors.Blurple,
   wrongcolor: Colors.Red,
-  footertext: "By Kabir Jaipal | @kabirjaipal",
+  footertext: "",
 };
 
 const emojiSettings = {
@@ -83,10 +83,10 @@ const filters = {
 };
 
 const links = {
-  inviteURL: `https://discord.com/api/oauth2/authorize?client_id=BOTID&permissions=6508997968&scope=bot%20applications.commands`,
-  DiscordServer: `https://discord.gg/FuKfAREn9f`,
-  VoteURL: `https://discord.gg/FuKfAREn9f`,
-  Website: `https://jugnu.netlify.app/`,
+  inviteURL: ``,
+  DiscordServer: ``,
+  VoteURL: ``,
+  Website: ``,
 };
 
 const options = {

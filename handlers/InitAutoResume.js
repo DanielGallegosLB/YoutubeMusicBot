@@ -1,5 +1,5 @@
 const { Queue } = require("distube");
-const JUGNU = require("./Client");
+const MusicBot = require("./Client");
 const { arraysEqual } = require("./functions");
 
 /**
@@ -24,7 +24,7 @@ const buildTrack = (track) => ({
 
 /**
  * Automatically stores the state of the queue for auto-resume.
- * @param {JUGNU} client - The client instance.
+ * @param {MusicBot} client - The client instance.
  * @param {Queue} queue - The queue instance.
  */
 module.exports = async (client, queue) => {

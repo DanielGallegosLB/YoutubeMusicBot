@@ -3,9 +3,8 @@ const {
   ApplicationCommandType,
   PermissionFlagsBits,
 } = require("discord.js");
-const JUGNU = require("../../../handlers/Client");
+const MusicBot = require("../../../handlers/Client");
 const { Queue } = require("distube");
-const { links } = require("../../../settings/config");
 
 module.exports = {
   name: "invitar",
@@ -30,19 +29,14 @@ module.exports = {
 
   /**
    *
-   * @param {JUGNU} client
+   * @param {MusicBot} client
    * @param {CommandInteraction} interaction
    * @param {String[]} args
    * @param {Queue} queue
    */
   run: async (client, interaction, args, queue) => {
     // Code
-    client.embed(
-      interaction,
-      `[\`Haz clic para invitarme\`](${links.inviteURL.replace(
-        "BOTID",
-        client.user.id
-      )})`
-    );
+    const invite = `https://discord.com/api/oauth2/authorize?client_id=${client.user.id}&permissions=6508997968&scope=bot%20applications.commands`;
+    client.embed(interaction, `[\`Haz clic para invitarme\`](${invite})`);
   },
 };

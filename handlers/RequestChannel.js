@@ -1,9 +1,9 @@
 const { PermissionFlagsBits, Events } = require("discord.js");
-const JUGNU = require("./Client");
+const MusicBot = require("./Client");
 
 /**
  *
- * @param {JUGNU} client
+ * @param {MusicBot} client
  */
 module.exports = async (client) => {
   client.on(Events.MessageCreate, async (message) => {

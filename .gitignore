@@ -7,3 +7,9 @@ yarn.lock
 test.js
 logs.txt
 yt-cookies.txt
+*.rar
+*.zip
+*.7z
+
+*-player-script.js
+

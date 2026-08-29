@@ -1,10 +1,7 @@
 <div align="center">
 
-# JUGNU MUSIC — Discord Music Bot 🎵
+# DISCORD MUSIC — Discord Music Bot 🎵
 
-[![Stars](https://img.shields.io/github/stars/kabirjaipal/JUGNU-MUSIC?style=flat-square)](https://github.com/kabirjaipal/JUGNU-MUSIC/stargazers)
-[![Forks](https://img.shields.io/github/forks/kabirjaipal/JUGNU-MUSIC?style=flat-square)](https://github.com/kabirjaipal/JUGNU-MUSIC/fork)
-[![Issues](https://img.shields.io/github/issues/kabirjaipal/JUGNU-MUSIC?style=flat-square)](https://github.com/kabirjaipal/JUGNU-MUSIC/issues)
 [![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%E2%89%A518.17-43853D?logo=node.js&style=flat-square)](https://nodejs.org/)
 
@@ -98,26 +95,10 @@ Dev mode with auto-reload:
 npm run dev
 ```
 
-## Dashboard
-
-[Dashboard setup guide](https://github.com/kabirsingh2004/JUGNU-Dashboard/blob/main/README.md)
-
-## Feedback & Support
-
-If you have any feedback or need assistance, please join our [Discord Server](https://discord.gg/FuKfAREn9f).
-
-## Contributing
-
-Contributions are welcome! Please open an issue or PR. For larger changes, start a discussion first.
-
 ## Security
 
-Please report vulnerabilities privately via [GitHub Security Advisories](https://github.com/kabirjaipal/JUGNU-MUSIC/security/advisories) or email.
+Please report vulnerabilities privately.
 
 ## License
 
 This project is licensed under the [MIT License](LICENSE).
-
-### Thanks for using JUGNU MUSIC! If this helps you, please ⭐ the repo and consider a fork.
-
-Your support is appreciated! 🌟

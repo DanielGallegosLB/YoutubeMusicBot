@@ -1,9 +1,9 @@
 const { loadEnvFile } = require("process");
 loadEnvFile()
-const JUGNU = require("./handlers/Client");
+const MusicBot = require("./handlers/Client");
 const { TOKEN } = require("./settings/config");
 
-const client = new JUGNU();
+const client = new MusicBot();
 
 module.exports = client;
 

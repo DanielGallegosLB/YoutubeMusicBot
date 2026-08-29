@@ -1,5 +1,5 @@
 const { Message, PermissionFlagsBits, AttachmentBuilder } = require("discord.js");
-const JUGNU = require("../../../handlers/Client");
+const MusicBot = require("../../../handlers/Client");
 const Store = require("../../../handlers/PlaylistStore");
 
 module.exports = {

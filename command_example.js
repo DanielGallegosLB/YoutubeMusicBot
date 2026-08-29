@@ -1,6 +1,6 @@
 // chat input slash commands
 const { CommandInteraction, ApplicationCommandType } = require("discord.js");
-const JUGNU = require("../../../handlers/Client");
+const MusicBot = require("../../../handlers/Client");
 const { Queue } = require("distube");
 
 module.exports = {
@@ -18,7 +18,7 @@ module.exports = {
 
   /**
    *
-   * @param {JUGNU} client
+   * @param {MusicBot} client
    * @param {CommandInteraction} interaction
    * @param {String[]} args
    * @param {Queue} queue
@@ -33,7 +33,7 @@ const {
   ContextMenuCommandInteraction,
   ApplicationCommandType,
 } = require("discord.js");
-const JUGNU = require("../../../handlers/Client");
+const MusicBot = require("../../../handlers/Client");
 
 module.exports = {
   name: "",
@@ -41,7 +41,7 @@ module.exports = {
   type: ApplicationCommandType.Message,
   /**
    *
-   * @param {JUGNU} client
+   * @param {MusicBot} client
    * @param {ContextMenuCommandInteraction} interaction
    */
   run: async (client, interaction) => {
@@ -55,7 +55,7 @@ const {
   ContextMenuCommandInteraction,
   ApplicationCommandType,
 } = require("discord.js");
-const JUGNU = require("../../../handlers/Client");
+const MusicBot = require("../../../handlers/Client");
 
 module.exports = {
   name: "",
@@ -63,7 +63,7 @@ module.exports = {
   type: ApplicationCommandType.User,
   /**
    *
-   * @param {JUGNU} client
+   * @param {MusicBot} client
    * @param {ContextMenuCommandInteraction} interaction
    */
   run: async (client, interaction) => {
@@ -73,7 +73,7 @@ module.exports = {
 
 // message commands
 const { Message } = require("discord.js");
-const JUGNU = require("../../../handlers/Client");
+const MusicBot = require("../../../handlers/Client");
 const { Queue } = require("distube");
 
 module.exports = {
@@ -91,7 +91,7 @@ module.exports = {
 
   /**
    *
-   * @param {JUGNU} client
+   * @param {MusicBot} client
    * @param {Message} message
    * @param {String[]} args
    * @param {String} prefix

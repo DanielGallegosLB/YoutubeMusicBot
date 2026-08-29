@@ -1,5 +1,5 @@
 const { EmbedBuilder, Events, ChannelType, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle } = require("discord.js");
-const JUGNU = require("./Client");
+const MusicBot = require("./Client");
 const Store = require("./PlaylistStore");
 const UserHistory = require("./UserHistory");
 const { check_dj, skip } = require("./functions");
@@ -7,7 +7,7 @@ const { fetchPlaylistURLs } = require("./PlaylistFetcher");
 
 /**
  *
- * @param {JUGNU} client
+ * @param {MusicBot} client
  */
 module.exports = async (client) => {
   // interaction handling

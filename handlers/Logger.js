@@ -10,31 +10,34 @@ function getTimestamp() {
   return `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}.${pad(now.getMilliseconds(), 3)}`;
 }
 
-const Logger = {
-  log: (...args) => {
-    const message = format(...args);
-    const logEntry = `[${getTimestamp()}] [INFO] ${message}\n`;
-    console.log(`\x1b[32m[INFO]\x1b[0m ${logEntry.trim()}`);
-    fs.appendFileSync(logFile, logEntry);
-  },
-  error: (...args) => {
-    const message = format(...args);
-    const logEntry = `[${getTimestamp()}] [ERROR] ${message}\n`;
-    console.error(`\x1b[31m[ERROR]\x1b[0m ${logEntry.trim()}`);
-    fs.appendFileSync(logFile, logEntry);
-  },
-  warn: (...args) => {
-    const message = format(...args);
-    const logEntry = `[${getTimestamp()}] [WARN] ${message}\n`;
-    console.warn(`\x1b[33m[WARN]\x1b[0m ${logEntry.trim()}`);
-    fs.appendFileSync(logFile, logEntry);
-  },
-  debug: (...args) => {
-    const message = format(...args);
-    const logEntry = `[${getTimestamp()}] [DEBUG] ${message}\n`;
-    // console.debug(`\x1b[34m[DEBUG]\x1b[0m ${logEntry.trim()}`);
-    fs.appendFileSync(logFile, logEntry);
+// Intercept every console call so that ALL output goes to logs.txt
+// (including direct console.log/error/warn from the bot and libraries),
+// not just the client.logger calls. Guarded so it only installs once.
+if (!global.__consoleLoggingInstalled) {
+  global.__consoleLoggingInstalled = true;
+
+  const colors = { log: "32", info: "36", warn: "33", error: "31", debug: "34" };
+  const fileLevel = { log: "INFO", info: "INFO", warn: "WARN", error: "ERROR", debug: "DEBUG" };
+
+  for (const method of Object.keys(colors)) {
+    const original = console[method];
+    console[method] = function (...args) {
+      const message = format(...args);
+      const entry = `[${getTimestamp()}] [${fileLevel[method]}] ${message}`;
+      try {
+        fs.appendFileSync(logFile, entry + "\n");
+      } catch {}
+      original(`\x1b[${colors[method]}m[${fileLevel[method]}]\x1b[0m ${entry.trim()}`);
+    };
   }
+}
+
+const Logger = {
+  log: (...args) => console.log(...args),
+  info: (...args) => console.info(...args),
+  warn: (...args) => console.warn(...args),
+  error: (...args) => console.error(...args),
+  debug: (...args) => console.debug(...args),
 };
 
 module.exports = Logger;

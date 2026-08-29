@@ -1,6 +1,6 @@
 const { ApplicationCommandType, ApplicationCommandOptionType, PermissionFlagsBits } = require("discord.js");
 const Store = require("../../../handlers/PlaylistStore");
-const JUGNU = require("../../../handlers/Client");
+const MusicBot = require("../../../handlers/Client");
 
 module.exports = {
   name: "crearlista",

@@ -1,5 +1,5 @@
 const { Message, PermissionFlagsBits, EmbedBuilder } = require("discord.js");
-const JUGNU = require("../../../handlers/Client");
+const MusicBot = require("../../../handlers/Client");
 const { Queue } = require("distube");
 const { spawn } = require("child_process");
 const path = require("path");
@@ -85,7 +85,7 @@ module.exports = {
 
   /**
    *
-   * @param {JUGNU} client
+   * @param {MusicBot} client
    * @param {Message} message
    * @param {String[]} args
    * @param {String} prefix

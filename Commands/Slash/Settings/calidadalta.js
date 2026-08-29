@@ -3,7 +3,7 @@ const {
   PermissionFlagsBits,
   ApplicationCommandType,
 } = require("discord.js");
-const JUGNU = require("../../../handlers/Client");
+const MusicBot = require("../../../handlers/Client");
 
 module.exports = {
   name: "calidadalta",
@@ -27,7 +27,7 @@ module.exports = {
   djOnly: false,
 
   /**
-   * @param {JUGNU} client
+   * @param {MusicBot} client
    * @param {CommandInteraction} interaction
    */
   run: async (client, interaction) => {

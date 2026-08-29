@@ -2,7 +2,7 @@ const {
   ContextMenuInteraction,
   ApplicationCommandType,
 } = require("discord.js");
-const JUGNU = require("../../../handlers/Client");
+const MusicBot = require("../../../handlers/Client");
 
 module.exports = {
   name: "añadiracola",
@@ -14,7 +14,7 @@ module.exports = {
 
   /**
    *
-   * @param {JUGNU} client
+   * @param {MusicBot} client
    * @param {ContextMenuInteraction} interaction
    */
   run: async (client, interaction) => {
