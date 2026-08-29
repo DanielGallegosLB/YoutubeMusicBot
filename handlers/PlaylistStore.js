@@ -252,8 +252,8 @@ module.exports = {
   },
 
   /** Get global stats (likes, dislikes, plays) for a track URL across all users in a guild */
-  async getGlobalTrackStats(client, guildId, trackUrl) {
-    const allPlaylists = await client.music.get(`${guildId}.playlists`) || {};
+  async getGlobalTrackStats(client, guildId, trackUrl, allPlaylists) {
+    if (!allPlaylists) allPlaylists = await client.music.get(`${guildId}.playlists`) || {};
     let likes = 0;
     let dislikes = 0;
     let plays = 0;

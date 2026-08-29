@@ -50,6 +50,8 @@ class MusicBot extends Client {
     this.playlistLoading = new Collection();
     this.playlistStopped = new Collection();
     this.likeClaims = new Map();
+    this.skipLocks = new Map();
+    this.autoDj = new Map();
     this.mcategories = fs.readdirSync("./Commands/Message");
     this.scategories = fs.readdirSync("./Commands/Slash");
     this.temp = new Collection();

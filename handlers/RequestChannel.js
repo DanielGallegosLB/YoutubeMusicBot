@@ -1,5 +1,6 @@
-const { PermissionFlagsBits, Events } = require("discord.js");
+const { Events } = require("discord.js");
 const MusicBot = require("./Client");
+const { PREFIX: botPrefix } = require("../settings/config");
 
 /**
  *
@@ -8,7 +9,7 @@ const MusicBot = require("./Client");
 module.exports = async (client) => {
   client.on(Events.MessageCreate, async (message) => {
     try {
-      // Check if the message is in a guild and has an ID
+      // Only handle guild messages
       if (!message.guild || !message.id) return;
 
       const guildId = message.guild.id;
@@ -23,70 +24,31 @@ module.exports = async (client) => {
       // If music channel doesn't exist or message is not in the music channel, return
       if (!musicChannel || message.channelId !== musicChannelId) return;
 
-      // Check if the bot has permission to manage messages
-      if (
-        !message.guild.members.me.permissions.has(
-          PermissionFlagsBits.ManageMessages
-        )
-      ) {
-        return client.embed(
-          message,
-          `** ${client.config.emoji.ERROR} I don't Have Permission to \`ManageMessages\` in ${musicChannel} **`
-        );
-      }
-
-      // Delete the message if it's not related to music commands or a protected preview message
-      if (data.pmsg !== message.id && data.qmsg !== message.id && !client.previewMessages?.has(message.id)) {
-        await message.delete().catch(console.error);
-      }
-
-      // If message author is a bot, return
+      // Leave bot messages and the protected queue/player messages alone
       if (message.author.bot) return;
+      if (data.pmsg === message.id || data.qmsg === message.id || client.previewMessages?.has(message.id)) return;
 
-      const song = message.cleanContent;
-      const voiceChannel = message.member.voice.channel;
+      // Songs are only added through explicit play commands (!play, /reproducir, etc.).
+      // Detect command messages (bot prefix or mention) and leave them to the command handler.
+      const settings = message.guild.id ? await client.music.get(message.guild.id).catch(() => null) : null;
+      const prefix = settings?.prefix || botPrefix;
+      const commandPattern = new RegExp(`^(<@!?${client.user.id}>|${escapeRegex(prefix)})\\s*`);
+      if (commandPattern.test(message.content)) return;
 
-      // Check if the bot has permission to connect to voice channels
-      if (
-        !message.guild.members.me.permissions.has(PermissionFlagsBits.Connect)
-      ) {
-        return client.embed(
-          message,
-          `** ${client.config.emoji.ERROR} I don't Have Permission to Join Voice Channel **`
-        );
-      }
-
-      // Check if the user is in a voice channel
-      if (!voiceChannel) {
-        return client.embed(
-          message,
-          `** ${client.config.emoji.ERROR} You Need to Join Voice Channel **`
-        );
-      }
-
-      // Check if the bot is already in a different voice channel
-      if (
-        message.guild.members.me.voice.channel &&
-        !message.guild.members.me.voice.channel.equals(voiceChannel)
-      ) {
-        return client.embed(
-          message,
-          `** ${client.config.emoji.ERROR} You Need to Join __MY__ Voice Channel **`
-        );
-      }
-
-      const query = song;
-
-      client.logger.log(`[RequestChannel] Play request from ${message.author.tag} in ${message.guild.name}: ${song}`);
-
-      // Play the song in the user's voice channel
-      await client.distube.play(voiceChannel, query, {
-        member: message.member,
-        message: message,
-        textChannel: message.channel,
-      });
+      // Everything else is not a valid song request: delete it and discard it.
+      await message.delete().catch(() => {});
+      const hint = await message.channel
+        .send({
+          content: `ℹ️ Para añadir música usa \`${prefix}play <cancion o enlace>\` o \`/reproducir <cancion o enlace>\`.`,
+        })
+        .catch(() => null);
+      if (hint) setTimeout(() => hint.delete().catch(() => {}), 5000);
     } catch (error) {
       client.logger.error("Error handling message in RequestChannel:", error);
     }
   });
 };
+
+function escapeRegex(newprefix) {
+  return newprefix.replace(/[.*+?${}()|[\]\\]/g, `\\$&`);
+}

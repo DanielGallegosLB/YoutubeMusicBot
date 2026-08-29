@@ -18,6 +18,7 @@ const PlaylistStore = require("./PlaylistStore");
  */
 module.exports = async (client) => {
   // code
+  client.QUEUE_PER_PAGE = 10;
   /**
    *
    * @param {Queue} queue
@@ -123,12 +124,15 @@ module.exports = async (client) => {
     ]);
 
     // Row 3: Auto DJ 🛸 • Like ❤️ • Dislike 👎 • SaveCurrent ⭐
+    // Auto DJ visuals (toggle state)
+    const autoDjOn = !!client.autoDj?.get(queue?.textChannel?.guildId || queue?.guildId);
+    const autoDjStyle = autoDjOn ? ButtonStyle.Success : ButtonStyle.Primary;
     const row3 = new ActionRowBuilder().addComponents([
       new ButtonBuilder()
-        .setStyle(ButtonStyle.Primary)
+        .setStyle(autoDjStyle)
         .setCustomId("autodj")
         .setEmoji("🛸")
-        .setLabel("Auto DJ")
+        .setLabel(autoDjOn ? "Auto DJ: ON" : "Auto DJ")
         .setDisabled(dis(!track)),
       new ButtonBuilder()
         .setStyle(ButtonStyle.Secondary)
@@ -187,7 +191,12 @@ module.exports = async (client) => {
    */
   client.getQueueEmbeds = async (queue) => {
     const guild = client.guilds.cache.get(queue.textChannel.guildId);
-    const maxTracks = 10; // Tracks per Queue Page
+    let maxTracks = 10;
+    try {
+      const stored = await client.music.get(`${guild.id}.qlimit`);
+      const n = Number(stored);
+      if (Number.isInteger(n) && n > 0 && n <= 50) maxTracks = n;
+    } catch (_e) {}
     const tracks = queue.songs.slice(1); // Make a shallow copy and remove the first song
 
     const quelist = [];
@@ -353,22 +362,42 @@ module.exports = async (client) => {
       
       // If no queue, reset to empty
       if (!freshQueue || !freshQueue.songs.length) {
-        return await queueembed.edit({ embeds: [client.queueembed(guild)] }).catch(() => {});
+        client.queuePages?.delete(guild.id);
+        client.autoDj?.delete(guild.id);
+        return await queueembed.edit({ embeds: [client.queueembed(guild)], components: [] }).catch(() => {});
       }
 
       const currentSong = freshQueue.songs[0];
 
-      const currentStats = currentSong?.url ? await PlaylistStore.getGlobalTrackStats(client, guildId, currentSong.url).catch(() => ({ likes: 0, dislikes: 0, plays: 0 })) : { likes: 0, dislikes: 0, plays: 0 };
+      const allPlaylists = await client.music.get(`${guild.id}.playlists`).catch(() => null) || {};
+
+      const currentStats = currentSong?.url ? await PlaylistStore.getGlobalTrackStats(client, guildId, currentSong.url, allPlaylists).catch(() => ({ likes: 0, dislikes: 0, plays: 0 })) : { likes: 0, dislikes: 0, plays: 0 };
       const currentStatsParts = [];
       if (currentStats.likes > 0) currentStatsParts.push(`❤️${currentStats.likes}`);
       if (currentStats.dislikes > 0) currentStatsParts.push(`👎${currentStats.dislikes}`);
       if (currentStats.plays > 0) currentStatsParts.push(`🔥${currentStats.plays}`);
       const currentStatsText = currentStatsParts.length > 0 ? ` | ${currentStatsParts.join(" ")}` : "";
 
+      const storedLimit = await client.music.get(`${guild.id}.qlimit`).catch(() => undefined);
+      const maxTracks = Number.isInteger(storedLimit) && storedLimit >= 1 && storedLimit <= 50 ? storedLimit : 10;
+
+      const totalUpNext = Math.min(freshQueue.songs.length - 1, maxTracks);
+      const totalPages = Math.max(1, Math.ceil(totalUpNext / client.QUEUE_PER_PAGE));
+
+      if (!client.queuePages) client.queuePages = new Map();
+      let page = Number.isInteger(client.queuePages.get(guild.id)) ? client.queuePages.get(guild.id) : 0;
+      page = Math.min(Math.max(0, page), totalPages - 1);
+      client.queuePages.set(guild.id, page);
+
+      const from = 1 + page * client.QUEUE_PER_PAGE;
+      const upNextTracks = freshQueue.songs.slice(from, from + client.QUEUE_PER_PAGE);
+      const upNextStats = await Promise.all(upNextTracks.map((track) =>
+        track.url ? PlaylistStore.getGlobalTrackStats(client, guildId, track.url, allPlaylists).catch(() => ({ likes: 0, dislikes: 0, plays: 0 })) : Promise.resolve({ likes: 0, dislikes: 0, plays: 0 })
+      ));
       let queueString = "";
-      for (let index = 1; index < Math.min(freshQueue.songs.length, 11); index++) {
-        const track = freshQueue.songs[index];
-        const tStats = track.url ? await PlaylistStore.getGlobalTrackStats(client, guildId, track.url).catch(() => ({ likes: 0, dislikes: 0, plays: 0 })) : { likes: 0, dislikes: 0, plays: 0 };
+      upNextTracks.forEach((track, i) => {
+        const index = from + i;
+        const tStats = upNextStats[i] || { likes: 0, dislikes: 0, plays: 0 };
         const tStatsParts = [];
         if (tStats.likes > 0) tStatsParts.push(`❤️${tStats.likes}`);
         if (tStats.dislikes > 0) tStatsParts.push(`👎${tStats.dislikes}`);
@@ -377,13 +406,16 @@ module.exports = async (client) => {
         queueString += `\`${index}.\` **${client.getTitle(track)}** - ${
           track.isLive ? "LIVE STREAM" : track.formattedDuration.split(" | ")[0]
         } - \`${track.user.tag}\`${tStatsStr}\n`;
-      }
+      });
 
       const newQueueEmbed = new EmbedBuilder()
         .setColor(client.config.embed.color)
         .setAuthor({
           name: `Music Queue - [${freshQueue.songs.length} Tracks]`,
           iconURL: guild.iconURL({ dynamic: true }),
+        })
+        .setFooter({
+          text: totalUpNext > 0 ? `Página ${page + 1}/${totalPages} · ${totalUpNext} canciones próximas` : `Página ${page + 1}/${totalPages} · Sin cola`,
         })
         .addFields([
           {
@@ -402,7 +434,18 @@ module.exports = async (client) => {
         newQueueEmbed.setDescription("No more songs in queue.");
       }
 
-      await queueembed.edit({ embeds: [newQueueEmbed] }).catch(() => {});
+      let components = [];
+      if (totalPages > 1) {
+        const navRow = new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setCustomId("queue_page_first").setEmoji("⏮").setStyle(ButtonStyle.Secondary).setDisabled(page === 0),
+          new ButtonBuilder().setCustomId("queue_page_prev").setEmoji("◀️").setStyle(ButtonStyle.Secondary).setDisabled(page === 0),
+          new ButtonBuilder().setCustomId("queue_page_next").setEmoji("▶️").setStyle(ButtonStyle.Secondary).setDisabled(page === totalPages - 1),
+          new ButtonBuilder().setCustomId("queue_page_last").setEmoji("⏭").setStyle(ButtonStyle.Secondary).setDisabled(page === totalPages - 1)
+        );
+        components = [navRow];
+      }
+
+      await queueembed.edit({ embeds: [newQueueEmbed], components }).catch(() => {});
     } catch (error) {
       console.error("Error updating queue:", error);
     }

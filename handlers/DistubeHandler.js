@@ -173,9 +173,9 @@ module.exports = async (client) => {
           claims.add(interaction.user.id);
           const result = await Store.likeTrackByUrl(client, interaction.guildId, interaction.user.id, "Canciones Favoritas", _track.url);
           if (!result) return interaction.editReply({ content: "❌ Error al procesar." }).catch(() => {});
-          await Store.sortFavorites(client, interaction.guildId, interaction.user.id);
-          await client.updatequeue(_queue).catch(() => {});
-          await client.updateplayer(_queue).catch(() => {});
+          Store.sortFavorites(client, interaction.guildId, interaction.user.id).catch(() => {});
+          client.updatequeue(_queue).catch(() => {});
+          client.updateplayer(_queue).catch(() => {});
           const msg = `❤️ Like! (${result.score >= 0 ? "+" : ""}${result.score} pts · ${result.likeCount}❤️ ${result.dislikeCount}👎)`;
           return interaction.editReply({ content: msg }).catch(() => {});
         }
@@ -204,9 +204,9 @@ module.exports = async (client) => {
           claims.add(interaction.user.id);
           const result = await Store.dislikeTrackByUrl(client, interaction.guildId, interaction.user.id, "Canciones Favoritas", _track.url);
           if (!result) return interaction.editReply({ content: "❌ Error al procesar." }).catch(() => {});
-          await Store.sortFavorites(client, interaction.guildId, interaction.user.id);
-          await client.updatequeue(_queue).catch(() => {});
-          await client.updateplayer(_queue).catch(() => {});
+          Store.sortFavorites(client, interaction.guildId, interaction.user.id).catch(() => {});
+          client.updatequeue(_queue).catch(() => {});
+          client.updateplayer(_queue).catch(() => {});
           return interaction.editReply({ content: `👎 Dislike! (${result.score >= 0 ? "+" : ""}${result.score} pts · ${result.likeCount}❤️ ${result.dislikeCount}👎)` }).catch(() => {});
         }
 
@@ -214,8 +214,25 @@ module.exports = async (client) => {
           const _queue = client.distube.getQueue(interaction.guildId);
           if (!_queue || !_queue.songs?.length) return interaction.deferUpdate().catch(() => {});
           const _channel = interaction.member.voice.channel;
-          if (!_channel) return interaction.followUp({ content: "❌ Debes unirte a un canal de voz.", ephemeral: true }).catch(() => {});
+          if (!_channel) {
+            await interaction.deferReply({ ephemeral: true }).catch(() => {});
+            return interaction.editReply({ content: "❌ Debes unirte a un canal de voz.", ephemeral: true }).catch(() => {});
+          }
           await interaction.deferReply({ ephemeral: true }).catch(() => {});
+
+          // Toggle OFF: pressing the button again deactivates Auto DJ
+          if (client.autoDj?.get(interaction.guildId)) {
+            client.autoDj.delete(interaction.guildId);
+            client.updateplayer(_queue).catch(() => {});
+            const ID0 = client.temp.get(interaction.guildId);
+            if (ID0) {
+              const msg0 = interaction.channel.messages.cache.get(ID0) || await interaction.channel.messages.fetch(ID0).catch(() => null);
+              if (msg0) msg0.edit({ components: client.buttons(false, _queue) }).catch(() => {});
+            }
+            return interaction.editReply({ content: "🛸 Auto DJ desactivado." }).catch(() => {});
+          }
+          client.autoDj?.set(interaction.guildId, true);
+
           try {
             // 1) Current up-next songs already in queue (real DisTube Song objects)
             const upNext = _queue.songs.slice(1);
@@ -230,53 +247,96 @@ module.exports = async (client) => {
             const known = new Set(_queue.songs.map((s) => s.url));
             const toAdd = favs.filter((f) => f.url && !known.has(f.url)).slice(0, 20);
 
-            // 4) Resolve favorite URLs into real Song objects
-            const resolved = [];
-            for (const f of toAdd) {
-              try {
-                const res = await client.distube.search(f.url, { type: "video", limit: 1 });
-                const s = Array.isArray(res) ? res[0] : res;
-                if (s && s.url) { resolved.push(s); known.add(s.url); }
-              } catch (_e) {}
-            }
-
-            const addedCount = resolved.length;
-            if (!resolved.length && !upNext.length) {
-              return interaction.editReply({ content: "❌ No hay canciones favoritas nuevas para reproducir." }).catch(() => {});
-            }
-
-            // 5) Mix: best-score favorites up front, then shuffle-blend favorites with the existing up-next
-            const shuffle = (arr) => {
-              for (let i = arr.length - 1; i > 0; i--) {
-                const j = Math.floor(Math.random() * (i + 1));
-                [arr[i], arr[j]] = [arr[j], arr[i]];
+            // 4) No new favorites to mix: just shuffle the existing up-next
+            if (!toAdd.length) {
+              if (!upNext.length) {
+                return interaction.editReply({ content: "❌ No hay canciones favoritas nuevas para reproducir." }).catch(() => {});
               }
-              return arr;
-            };
-            const mixed = [];
-            const lead = resolved.splice(0, 3); // top favorites first (best score first)
-            const favPool = shuffle(resolved);
-            const upPool = shuffle(upNext);
-            while (lead.length) mixed.push(lead.shift());
-            while (upPool.length || favPool.length) {
-              if (upPool.length && Math.random() < 0.6) mixed.push(upPool.shift());
-              else if (favPool.length) mixed.push(favPool.shift());
-              else if (upPool.length) mixed.push(upPool.shift());
+              const shuffleOnly = (arr) => { for (let i = arr.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [arr[i], arr[j]] = [arr[j], arr[i]]; } return arr; };
+              _queue.songs = [_queue.songs[0]].concat(shuffleOnly(upNext));
+              client.updatequeue(_queue).catch(() => {});
+              client.updateplayer(_queue).catch(() => {});
+              const ID0 = client.temp.get(interaction.guildId);
+              if (ID0) {
+                const msg0 = interaction.channel.messages.cache.get(ID0) || await interaction.channel.messages.fetch(ID0).catch(() => null);
+                if (msg0) msg0.edit({ components: client.buttons(false, _queue) }).catch(() => {});
+              }
+              return interaction.editReply({ content: `🛸 Auto DJ activado: ${upNext.length} canciones en cola (0 favoritas mezcladas).` }).catch(() => {});
             }
 
-            // 6) Replace the up-next portion of the queue with the mixed list
-            _queue.songs = [_queue.songs[0]].concat(mixed);
+            // 5) Addition + reorder run in background so the button never blocks on heavy work
+            interaction.editReply({ content: `🛸 Activando Auto DJ, añadiendo ${toAdd.length} favoritas...` }).catch(() => {});
+            (async () => {
+              try {
+                const addedUrls = [];
+                const seen = new Set(known);
+                const playOpts = { member: interaction.member, textChannel: interaction.channel, selfDeaf: true, skip: false };
+                for (let i = 0; i < toAdd.length; i++) {
+                  const f = toAdd[i];
+                  if (seen.has(f.url)) continue;
+                  try {
+                    await client.distube.play(_channel, f.url, playOpts);
+                    addedUrls.push(f.url);
+                    seen.add(f.url);
+                  } catch (e) {
+                    client.logger.error(`[AutoDJ] No se pudo añadir favorita ${f.url}:`, e?.message || e);
+                  }
+                  if (i + 1 === toAdd.length || (i + 1) % 5 === 0) {
+                    interaction.editReply({ content: `🛸 Auto DJ: procesando favoritas ${i + 1}/${toAdd.length}...` }).catch(() => {});
+                  }
+                }
 
-            // 7) Persist / refresh embeds without blocking playback
-            client.updatequeue(_queue).catch(() => {});
-            client.updateplayer(_queue).catch(() => {});
-            const ID = client.temp.get(interaction.guildId);
-            if (ID) {
-              const msg = interaction.channel.messages.cache.get(ID) || await interaction.channel.messages.fetch(ID).catch(() => null);
-              if (msg) msg.edit({ components: client.buttons(false, _queue) }).catch(() => {});
-            }
+                const hadUpNext = upNext.length > 0;
+                const addedCount = addedUrls.length;
+                if (!addedCount && !hadUpNext) {
+                  return interaction.editReply({ content: "❌ No hay canciones favoritas nuevas para reproducir." }).catch(() => {});
+                }
 
-            return interaction.editReply({ content: `🛸 Auto DJ activado: ${mixed.length} canciones en cola (${addedCount} favoritas mezcladas).` }).catch(() => {});
+                // Grab the fresh queue and map real Song objects by URL
+                const q = client.distube.getQueue(interaction.guildId) || _queue;
+                const songByUrl = new Map();
+                for (const s of q.songs) if (s.url && !songByUrl.has(s.url)) songByUrl.set(s.url, s);
+
+                const favSongs = addedUrls.map((u) => songByUrl.get(u)).filter(Boolean);
+                const upSongs = [];
+                const seenUp = new Set();
+                for (const s of upNext) {
+                  if (!s.url || seenUp.has(s.url)) continue;
+                  seenUp.add(s.url);
+                  upSongs.push(songByUrl.get(s.url) || s);
+                }
+
+                // Mix: best-score favorites up front, then shuffle-blend favorites with the existing up-next
+                const shuffleBg = (arr) => { for (let i = arr.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [arr[i], arr[j]] = [arr[j], arr[i]]; } return arr; };
+                const lead = addedUrls.slice(0, 3).map((u) => songByUrl.get(u)).filter(Boolean);
+                const favPool = shuffleBg(favSongs.filter((s) => !lead.includes(s)));
+                const upPool = shuffleBg(upSongs);
+                const mixed = [];
+                while (lead.length) mixed.push(lead.shift());
+                while (upPool.length || favPool.length) {
+                  if (upPool.length && Math.random() < 0.6) mixed.push(upPool.shift());
+                  else if (favPool.length) mixed.push(favPool.shift());
+                  else if (upPool.length) mixed.push(upPool.shift());
+                }
+
+                // Replace the up-next portion of the queue with the mixed list
+                q.songs = [q.songs[0]].concat(mixed);
+
+                // Persist / refresh embeds without blocking playback
+                client.updatequeue(q).catch(() => {});
+                client.updateplayer(q).catch(() => {});
+                const ID = client.temp.get(interaction.guildId);
+                if (ID) {
+                  const msg = interaction.channel.messages.cache.get(ID) || await interaction.channel.messages.fetch(ID).catch(() => null);
+                  if (msg) msg.edit({ components: client.buttons(false, q) }).catch(() => {});
+                }
+
+                interaction.editReply({ content: `🛸 Auto DJ activado: ${mixed.length} canciones en cola (${addedCount} favoritas mezcladas).` }).catch(() => {});
+              } catch (err) {
+                client.logger.error(`[AutoDJ] Error:`, err);
+                interaction.editReply({ content: "❌ Ocurrió un error al activar el Auto DJ." }).catch(() => {});
+              }
+            })();
           } catch (err) {
             client.logger.error(`[AutoDJ] Error:`, err);
             return interaction.editReply({ content: "❌ Ocurrió un error al activar el Auto DJ." }).catch(() => {});
@@ -284,6 +344,33 @@ module.exports = async (client) => {
         }
 
         const controlButtons = ["previous", "rewind10", "pauseresume", "forward10", "skip", "stop", "shuffle", "loop_song", "loop_queue", "autoplay", "savecurrent_btn", "autodj"];
+
+        // Paginación del embed de cola
+        if (customId.startsWith("queue_page_")) {
+          await interaction.deferUpdate().catch(() => {});
+          if (!client.queuePages) client.queuePages = new Map();
+          const freshQueue = client.distube.getQueue(interaction.guildId);
+          if (!freshQueue || !freshQueue.songs.length) {
+            client.queuePages.delete(interaction.guildId);
+            return client.updatequeue(freshQueue).catch(() => {});
+          }
+          let maxTracks = 10;
+          try {
+            const stored = await client.music.get(`${interaction.guildId}.qlimit`);
+            const n = Number(stored);
+            if (Number.isInteger(n) && n > 0 && n <= 50) maxTracks = n;
+          } catch (_e) {}
+          const totalUpNext = Math.min(freshQueue.songs.length - 1, maxTracks);
+          const totalPages = Math.max(1, Math.ceil(totalUpNext / client.QUEUE_PER_PAGE));
+          let page = client.queuePages.get(interaction.guildId) || 0;
+          if (customId === "queue_page_first") page = 0;
+          else if (customId === "queue_page_prev") page = Math.max(0, page - 1);
+          else if (customId === "queue_page_next") page = Math.min(totalPages - 1, page + 1);
+          else if (customId === "queue_page_last") page = totalPages - 1;
+          else return;
+          client.queuePages.set(interaction.guildId, page);
+          return client.updatequeue(freshQueue).catch(() => {});
+        }
         if (!controlButtons.includes(customId)) return;
         await interaction.deferUpdate().catch((e) => {});
         let voiceMember = interaction.guild.members.cache.get(member.id);
@@ -448,7 +535,20 @@ module.exports = async (client) => {
                   `${client.config.emoji.SUCCESS} No eres DJ ni has solicitado esta canción..`
                 );
               } else {
-                await skip(queue);
+                const gid = interaction.guildId;
+                const now = Date.now();
+                const lastSkip = client.skipLocks.get(gid) || 0;
+                if (now - lastSkip < 1200) {
+                  return send(
+                    interaction,
+                    ` ${client.config.emoji.SUCCESS} Ya se está saltando, procesando...`
+                  );
+                }
+                client.skipLocks.set(gid, now);
+                setTimeout(() => {
+                  if (client.skipLocks.get(gid) === now) client.skipLocks.delete(gid);
+                }, 1200);
+                skip(queue).catch(() => {});
                 refresh(queue, 300);
                 return send(
                   interaction,
