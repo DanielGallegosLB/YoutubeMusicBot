@@ -220,18 +220,26 @@ module.exports = async (client) => {
           }
           await interaction.deferReply({ ephemeral: true }).catch(() => {});
 
-          // Toggle OFF: pressing the button again deactivates Auto DJ
+          // Toggle OFF: pressing the button again deactivates Auto DJ and restores the original order
           if (client.autoDj?.get(interaction.guildId)) {
             client.autoDj.delete(interaction.guildId);
+            const snapshot = client.autoDjPrev?.get(interaction.guildId) || null;
+            const kept = snapshot?.length ? snapshot.filter((s) => s !== _queue.songs[0]) : [];
+            if (snapshot?.length) _queue.songs = [_queue.songs[0]].concat(kept);
+            client.autoDjPrev?.delete(interaction.guildId);
             client.updateplayer(_queue).catch(() => {});
             const ID0 = client.temp.get(interaction.guildId);
             if (ID0) {
               const msg0 = interaction.channel.messages.cache.get(ID0) || await interaction.channel.messages.fetch(ID0).catch(() => null);
               if (msg0) msg0.edit({ components: client.buttons(false, _queue) }).catch(() => {});
             }
-            return interaction.editReply({ content: "🛸 Auto DJ desactivado." }).catch(() => {});
+            const undoTxt = kept.length
+              ? `▸ Restauré tu cola original (${kept.length} canciones pendientes) tal como estaba.\n▸ La canción actual sigue sonando.`
+              : `▸ No había orden previo que restaurar.`;
+            return interaction.editReply({ content: `🛸 Auto DJ desactivado\n${undoTxt}` }).catch(() => {});
           }
           client.autoDj?.set(interaction.guildId, true);
+          client.autoDjPrev?.set(interaction.guildId, _queue.songs.slice());
 
           try {
             // 1) Current up-next songs already in queue (real DisTube Song objects)
@@ -240,6 +248,8 @@ module.exports = async (client) => {
             // 2) User's favorites sorted best-first (score = (likes-dislikes)*10 + plays)
             const favs = await Store.getSortedFavorites(client, interaction.guildId, interaction.user.id);
             if (!favs.length) {
+              client.autoDj?.delete(interaction.guildId);
+              client.autoDjPrev?.delete(interaction.guildId);
               return interaction.editReply({ content: "❌ No tienes canciones favoritas para el Auto DJ. ¡Usa el botón ❤️ Like para añadirlas!" }).catch(() => {});
             }
 
@@ -250,6 +260,8 @@ module.exports = async (client) => {
             // 4) No new favorites to mix: just shuffle the existing up-next
             if (!toAdd.length) {
               if (!upNext.length) {
+                client.autoDj?.delete(interaction.guildId);
+                client.autoDjPrev?.delete(interaction.guildId);
                 return interaction.editReply({ content: "❌ No hay canciones favoritas nuevas para reproducir." }).catch(() => {});
               }
               const shuffleOnly = (arr) => { for (let i = arr.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [arr[i], arr[j]] = [arr[j], arr[i]]; } return arr; };
@@ -261,7 +273,7 @@ module.exports = async (client) => {
                 const msg0 = interaction.channel.messages.cache.get(ID0) || await interaction.channel.messages.fetch(ID0).catch(() => null);
                 if (msg0) msg0.edit({ components: client.buttons(false, _queue) }).catch(() => {});
               }
-              return interaction.editReply({ content: `🛸 Auto DJ activado: ${upNext.length} canciones en cola (0 favoritas mezcladas).` }).catch(() => {});
+              return interaction.editReply({ content: `🛸 **Auto DJ activado**\n▸ No había favoritas nuevas para añadir.\n▸ Barajé ${upNext.length} canciones de tu cola actual.\n🔄 Pulsa el botón otra vez para deshacerlo y recuperar tu cola original.` }).catch(() => {});
             }
 
             // 5) Addition + reorder run in background so the button never blocks on heavy work
@@ -289,6 +301,8 @@ module.exports = async (client) => {
                 const hadUpNext = upNext.length > 0;
                 const addedCount = addedUrls.length;
                 if (!addedCount && !hadUpNext) {
+                  client.autoDj?.delete(interaction.guildId);
+                  client.autoDjPrev?.delete(interaction.guildId);
                   return interaction.editReply({ content: "❌ No hay canciones favoritas nuevas para reproducir." }).catch(() => {});
                 }
 
@@ -331,14 +345,25 @@ module.exports = async (client) => {
                   if (msg) msg.edit({ components: client.buttons(false, q) }).catch(() => {});
                 }
 
-                interaction.editReply({ content: `🛸 Auto DJ activado: ${mixed.length} canciones en cola (${addedCount} favoritas mezcladas).` }).catch(() => {});
+                const leadTitles = addedUrls.slice(0, 3).map((u) => songByUrl.get(u)).filter(Boolean).map((s) => `\`${client.getTitle(s)}\``).join(", ");
+                const summary = [`🛸 **Auto DJ activado**`];
+                summary.push(`▸ Añadí ${addedCount} favorita${addedCount === 1 ? "" : "s"} al inicio${leadTitles ? `: ${leadTitles}.` : "."}`);
+                summary.push(`▸ Mezclé ${mixed.length} canciones en cola barajando lo que ya tenías con tus favoritas.`);
+                summary.push(`🔄 Pulsa el botón otra vez para deshacerlo y recuperar tu cola original.`);
+                interaction.editReply({ content: summary.join("\n") }).catch(() => {});
               } catch (err) {
                 client.logger.error(`[AutoDJ] Error:`, err);
+                client.autoDj?.delete(interaction.guildId);
+                client.autoDjPrev?.delete(interaction.guildId);
+                client.updateplayer(client.distube.getQueue(interaction.guildId) || _queue).catch(() => {});
                 interaction.editReply({ content: "❌ Ocurrió un error al activar el Auto DJ." }).catch(() => {});
               }
             })();
           } catch (err) {
             client.logger.error(`[AutoDJ] Error:`, err);
+            client.autoDj?.delete(interaction.guildId);
+            client.autoDjPrev?.delete(interaction.guildId);
+            client.updateplayer(client.distube.getQueue(interaction.guildId) || _queue).catch(() => {});
             return interaction.editReply({ content: "❌ Ocurrió un error al activar el Auto DJ." }).catch(() => {});
           }
         }

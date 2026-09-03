@@ -364,6 +364,7 @@ module.exports = async (client) => {
       if (!freshQueue || !freshQueue.songs.length) {
         client.queuePages?.delete(guild.id);
         client.autoDj?.delete(guild.id);
+        client.autoDjPrev?.delete(guild.id);
         return await queueembed.edit({ embeds: [client.queueembed(guild)], components: [] }).catch(() => {});
       }
 
