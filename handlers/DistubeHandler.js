@@ -584,20 +584,7 @@ module.exports = async (client) => {
             break;
           case "stop":
             {
-              if (!channel) {
-                return send(
-                  interaction,
-                  ` ${client.config.emoji.ERROR} Debes unirte a un canal de voz`
-                );
-              } else if (
-                interaction.guild.members.me.voice.channel &&
-                !interaction.guild.members.me.voice.channel.equals(channel)
-              ) {
-                return send(
-                  interaction,
-                  ` ${client.config.emoji.ERROR} Debes unirte a __mi__ canal de voz `
-                );
-              } else if (!queue) {
+              if (!queue) {
                 return send(
                   interaction,
                   ` ${client.config.emoji.ERROR} No hay nada sonando ahora `
@@ -609,6 +596,7 @@ module.exports = async (client) => {
                 );
               } else {
                 const guildId = interaction.guildId;
+                const stoppedBy = interaction.user;
                 client.playlistLoading.delete(guildId);
                 client.playlistStopped.set(guildId, Date.now());
                 await client.autoresume.delete(guildId).catch(() => {});
@@ -622,11 +610,15 @@ module.exports = async (client) => {
                     await client.editPlayerMessage(queue.textChannel);
                   } catch {}
                 } catch {}
-                client.logger.log(`[Stop Button] Música detenida en Guild ${guildId} por ${interaction.user.id}`);
-                return send(
-                  interaction,
-                  ` ${client.config.emoji.SUCCESS} ¡Música detenida y el bot ha salido del canal!`
-                );
+                client.logger.log(`[Stop Button] Música detenida en Guild ${guildId} por ${stoppedBy.id}`);
+                return interaction.followUp({
+                  embeds: [
+                    new EmbedBuilder()
+                      .setColor(client.config.embed.color)
+                      .setDescription(`> ${client.config.emoji.SUCCESS} La reproducción fue **detenida** por <@${stoppedBy.id}>`)
+                      .setFooter(client.getFooter(stoppedBy)),
+                  ],
+                }).catch(() => {});
               }
             }
             break;

@@ -10,8 +10,6 @@ module.exports = {
   botPermissions: PermissionFlagsBits.Connect,
   category: "Music",
   cooldown: 5,
-  inVoiceChannel: true,
-  inSameVoiceChannel: true,
   Player: true,
   djOnly: true,
 
@@ -35,6 +33,6 @@ module.exports = {
       if (!db?.enable) await client.distube.voices.leave(message.guild);
     } catch {}
     client.logger.log(`[Stop Msg] Música detenida en Guild ${guildId} por ${message.author.id}`);
-    client.embed(message, `${client.config.emoji.SUCCESS} ¡Cola limpiada y música detenida!`);
+    client.embed(message, `${client.config.emoji.SUCCESS} La reproducción fue **detenida** por <@${message.author.id}> y la cola fue limpiada!`);
   },
 };

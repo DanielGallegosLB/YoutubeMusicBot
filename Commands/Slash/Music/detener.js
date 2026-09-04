@@ -22,8 +22,6 @@ module.exports = {
   category: "Music",
   cooldown: 5,
   type: ApplicationCommandType.ChatInput,
-  inVoiceChannel: true,
-  inSameVoiceChannel: true,
   Player: true,
   djOnly: true,
 
@@ -48,7 +46,7 @@ module.exports = {
     client.logger.log(`[Stop Cmd] Música detenida en Guild ${guildId} por ${interaction.user.id}`);
     client.embed(
       interaction,
-      `${client.config.emoji.SUCCESS} ¡Cola limpiada y música detenida!`
+      `${client.config.emoji.SUCCESS} La reproducción fue **detenida** por <@${interaction.user.id}> y la cola fue limpiada!`
     );
   },
 };
