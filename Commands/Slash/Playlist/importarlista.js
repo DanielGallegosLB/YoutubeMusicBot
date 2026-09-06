@@ -60,9 +60,8 @@ module.exports = {
           source: t.source ? t.source.toString() : undefined,
         }));
       if (!tracks.length) return client.embed(interaction, `${client.config.emoji.ERROR} No valid tracks found in JSON.`);
-      const exists = await Store.get(client, interaction.guild.id, interaction.user.id, targetName);
-      if (!exists) await Store.create(client, interaction.guild.id, interaction.user.id, targetName, tracks);
-      else await Store.addTracks(client, interaction.guild.id, interaction.user.id, targetName, tracks);
+      await Store.create(client, interaction.guild.id, interaction.user.id, targetName);
+      await Store.addTracks(client, interaction.guild.id, interaction.user.id, targetName, tracks);
         return client.embed(interaction, `${client.config.emoji.SUCCESS} Imported ${tracks.length} track(s) into \`${targetName}\`.`);
     } catch (e) {
       return client.embed(interaction, `${client.config.emoji.ERROR} Failed to import: ${e.message}`);

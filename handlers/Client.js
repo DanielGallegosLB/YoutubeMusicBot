@@ -10,6 +10,7 @@ const fs = require("fs");
 const Distube = require("distube").default;
 const { SpotifyPlugin } = require("@distube/spotify");
 const { SoundCloudPlugin } = require("@distube/soundcloud");
+const { YouTubePlugin } = require("@distube/youtube");
 const { filters, options } = require("../settings/config");
 const { YtDlpPlugin } = require("@distube/yt-dlp");
 const Logger = require("./Logger");
@@ -59,6 +60,8 @@ class MusicBot extends Client {
     this.previewMessages = new Collection();
     this.config = require("../settings/config");
     this.logger = Logger;
+
+    this.searcher = new YouTubePlugin();
 
     this.distube = new Distube(this, {
       emitNewSongOnly: true,

@@ -39,29 +39,21 @@ module.exports = {
     let msg = await interaction.followUp(
       `** ${client.config.emoji.time} Removing Duplicate 🎧 Songs From Queue Wait **`
     );
-    let tracks = queue.songs;
-    const newtracks = [];
-    for (let i = 0; i < tracks.length; i++) {
-      let exists = false;
-      for (j = 0; j < newtracks.length; j++) {
-        if (tracks[i].url === newtracks[j].url) {
-          exists = true;
-          break;
-        }
-      }
-      if (!exists) {
-        newtracks.push(tracks[i]);
+    const seen = new Set();
+    const kept = [];
+    for (const track of queue.songs) {
+      const key = track?.url || `${track?.name || ""}|${track?.duration || 0}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        kept.push(track);
       }
     }
-    //clear the Queue
-    queue.remove();
-    //now add every not dupe song again
-    await newtracks.map((song, index) => {
-      queue.addToQueue(song, index);
-    });
-
+    const removed = queue.songs.length - kept.length;
+    queue.songs = kept;
+    client.updatequeue(queue).catch(() => {});
+    client.updateplayer(queue).catch(() => {});
     msg.edit(
-      `** ${client.config.emoji.SUCCESS} Removed 🎧 \`${newtracks.length}\` Duplicate Songs From Queue **`
+      `** ${client.config.emoji.SUCCESS} Removed 🎧 \`${removed}\` Duplicate Songs From Queue **`
     );
   },
 };

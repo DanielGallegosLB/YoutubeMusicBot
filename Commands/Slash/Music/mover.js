@@ -53,13 +53,18 @@ module.exports = {
     // Code
     let songIndex = interaction.options.getNumber("trackindex");
     let position = interaction.options.getNumber("targetindex");
-    if (position >= queue.songs.length || position < 0) position = -1;
-    if (songIndex > queue.songs.length - 1) {
+    if (!Number.isInteger(songIndex) || !Number.isInteger(position)) {
       return client.embed(
         interaction,
-        ` **The last Song in the Queue has the Index: \`${queue.songs.length}\`**`
+        `${client.config.emoji.ERROR} Los índices deben ser números enteros.`
       );
-    } else if (position === 0) {
+    }
+    if (songIndex < 1 || songIndex >= queue.songs.length) {
+      return client.embed(
+        interaction,
+        ` **The last Song in the Queue has the Index: \`${queue.songs.length - 1}\`**`
+      );
+    } else if (position < 1) {
       return client.embed(
         interaction,
         `**Cannot move Song before Playing Song!**`
@@ -67,15 +72,19 @@ module.exports = {
     } else {
       let song = queue.songs[songIndex];
       //remove the song
-      queue.songs.splice(songIndex);
+      queue.songs.splice(songIndex, 1);
       //Add it to a specific Position
-      queue.addToQueue(song, position);
+      let target = Math.floor(position);
+      if (target > queue.songs.length) target = queue.songs.length;
+      queue.songs.splice(target, 0, song);
+      client.updatequeue(queue).catch(() => {});
+      client.updateplayer(queue).catch(() => {});
       client.embed(
         interaction,
         `📑 Moved **${client.getTitle(
           song
-        )}** to the **\`${position}th\`** Place right after **_${
-          queue.songs[position - 1].name
+        )}** to the **\`${target}th\`** Place right after **_${
+          queue.songs[target - 1]?.name || "Unknown"
         }_!**`
       );
     }

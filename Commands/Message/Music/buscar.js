@@ -37,9 +37,8 @@ module.exports = {
       return client.embed(message, `Please Provide Song Name to Search`);
     }
 
-    let res = await client.distube.search(query, {
+    let res = await client.searcher.search(query, {
       limit: 10,
-      retried: true,
       safeSearch: true,
       type: "video",
     });

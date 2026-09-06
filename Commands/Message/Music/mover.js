@@ -27,32 +27,35 @@ module.exports = {
     // Code
     let songIndex = Number(args[0]);
     let position = Number(args[1]);
-    if (!songIndex || !position) {
+    if (!Number.isInteger(songIndex) || !Number.isInteger(position)) {
       return client.embed(
         message,
         `${client.config.emoji.ERROR} Wrong Usage :: ${prefix}move <songindex> <targetindex>`
       );
     }
-    if (position >= queue.songs.length || position < 0) position = -1;
-    if (songIndex > queue.songs.length - 1) {
+    if (songIndex < 1 || songIndex >= queue.songs.length) {
       return client.embed(
         message,
-        ` **The last Song in the Queue has the Index: \`${queue.songs.length}\`**`
+        ` **The last Song in the Queue has the Index: \`${queue.songs.length - 1}\`**`
       );
-    } else if (position === 0) {
+    } else if (position < 1) {
       return client.embed(message, `**Cannot move Song before Playing Song!**`);
     } else {
       let song = queue.songs[songIndex];
       //remove the song
-      queue.songs.splice(songIndex);
+      queue.songs.splice(songIndex, 1);
       //Add it to a specific Position
-      queue.addToQueue(song, position);
+      let target = Math.floor(position);
+      if (target > queue.songs.length) target = queue.songs.length;
+      queue.songs.splice(target, 0, song);
+      client.updatequeue(queue).catch(() => {});
+      client.updateplayer(queue).catch(() => {});
       client.embed(
         message,
         `📑 Moved **${client.getTitle(
           song
-        )}** to the **\`${position}th\`** Place right after **_${
-          queue.songs[position - 1].name
+        )}** to the **\`${target}th\`** Place right after **_${
+          queue.songs[target - 1]?.name || "Unknown"
         }_!**`
       );
     }

@@ -50,9 +50,8 @@ module.exports = {
   run: async (client, interaction, args, queue) => {
     // Code
     let query = interaction.options.getString("song");
-    let res = await client.distube.search(query, {
+    let res = await client.searcher.search(query, {
       limit: 10,
-      retried: true,
       safeSearch: true,
       type: "video",
     });

@@ -39,13 +39,9 @@ module.exports = {
           source: t.source ? t.source.toString() : undefined,
         }));
       if (!tracks.length) return client.embed(message, `${client.config.emoji.ERROR} No valid tracks found in JSON.`);
-      // create or add
-      const exists = await Store.get(client, message.guild.id, message.author.id, targetName);
-      if (!exists) {
-        await Store.create(client, message.guild.id, message.author.id, targetName, tracks);
-      } else {
-        await Store.addTracks(client, message.guild.id, message.author.id, targetName, tracks);
-      }
+      // create the playlist (idempotent) then add the tracks
+      await Store.create(client, message.guild.id, message.author.id, targetName);
+      await Store.addTracks(client, message.guild.id, message.author.id, targetName, tracks);
       return client.embed(message, `${client.config.emoji.SUCCESS} Imported ${tracks.length} track(s) into '${targetName}'.`);
     } catch (e) {
       return client.embed(message, `${client.config.emoji.ERROR} Failed to import: ${e.message}`);
