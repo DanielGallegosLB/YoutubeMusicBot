@@ -442,6 +442,11 @@ module.exports = async (client) => {
   client.distube.on("initQueue", async (queue) => {
     queue.volume = client.config.options.defaultVolume;
 
+    // Reset Auto DJ to off by default on every new play session
+    const guildId = queue.textChannel?.guildId || queue.guildId;
+    client.autoDj?.delete(guildId);
+    client.autoDjPrev?.delete(guildId);
+
     // init auto resume for the queue
     await InitAutoResume(client, queue);
   });
