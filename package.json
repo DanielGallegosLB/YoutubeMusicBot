@@ -6,6 +6,7 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
+    "export-cookies": "node tools/export-cookies.js",
     "postinstall": "node scripts/ffmpeg-postinstall.js"
   },
   "keywords": [

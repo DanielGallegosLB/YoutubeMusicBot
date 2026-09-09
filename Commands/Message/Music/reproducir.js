@@ -6,6 +6,7 @@ const path = require("path");
 const fs = require("fs");
 const UserHistory = require("../../../handlers/UserHistory");
 const { searchYoutube } = require("../../../handlers/PlaylistFetcher");
+const { isAgeGateError, friendlyPlaybackError } = require("../../../handlers/PlaybackError");
 
 const YTDLP_PATH = path.join(
   process.cwd(),
@@ -267,7 +268,7 @@ module.exports = {
           client.logger.error(`[Play Msg] yt-dlp fallback error:`, e2);
         }
       }
-      client.embed(message, `${client.config.emoji.ERROR} Error: ${e.message}`);
+      client.embed(message, `${client.config.emoji.ERROR} ${isAgeGateError(e) ? friendlyPlaybackError(e) : `Error: ${e.message}`}`);
     }
   },
 };

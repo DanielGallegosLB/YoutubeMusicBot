@@ -2,6 +2,7 @@ const { ActivityType, Events } = require("discord.js");
 const client = require("../index");
 const { registerSlashCommands } = require("../handlers/functions");
 const Database = require("../handlers/Database");
+const { stopMarqueeActivity } = require("../handlers/ActivityManager");
 
 client.once(Events.ClientReady, async () => {
   try {
@@ -13,7 +14,8 @@ client.once(Events.ClientReady, async () => {
       type: ActivityType.Watching,
     });
 
-    // Reset nickname in all guilds
+    // Reset nickname in all guilds (also clears any leftover marquee interval/activity)
+    stopMarqueeActivity(client, null);
     for (const guild of client.guilds.cache.values()) {
       const me = guild.members.me;
       if (me && me.nickname) {

@@ -1,6 +1,7 @@
 const { Message, PermissionFlagsBits } = require("discord.js");
 const MusicBot = require("../../../handlers/Client");
 const { Queue } = require("distube");
+const { stopMarqueeActivity } = require("../../../handlers/ActivityManager");
 
 module.exports = {
   name: "detener",
@@ -28,9 +29,9 @@ module.exports = {
     await client.autoresume.delete(guildId).catch(() => {});
     queue.songs = [];
     await queue.stop().catch(() => {});
+    stopMarqueeActivity(client, message.guild);
     try {
-      const db = await client.music?.get(`${guildId}.vc`);
-      if (!db?.enable) await client.distube.voices.leave(message.guild);
+      await client.distube.voices.leave(message.guild);
     } catch {}
     client.logger.log(`[Stop Msg] Música detenida en Guild ${guildId} por ${message.author.id}`);
     client.embed(message, `${client.config.emoji.SUCCESS} La reproducción fue **detenida** por <@${message.author.id}> y la cola fue limpiada!`);

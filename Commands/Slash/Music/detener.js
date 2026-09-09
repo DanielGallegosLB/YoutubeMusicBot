@@ -5,6 +5,7 @@ const {
 } = require("discord.js");
 const MusicBot = require("../../../handlers/Client");
 const { Queue } = require("distube");
+const { stopMarqueeActivity } = require("../../../handlers/ActivityManager");
 
 module.exports = {
   name: "detener",
@@ -39,9 +40,9 @@ module.exports = {
     await client.autoresume.delete(guildId).catch(() => {});
     queue.songs = [];
     await queue.stop().catch(() => {});
+    stopMarqueeActivity(client, interaction.guild);
     try {
-      const db = await client.music?.get(`${guildId}.vc`);
-      if (!db?.enable) await client.distube.voices.leave(interaction.guild);
+      await client.distube.voices.leave(interaction.guild);
     } catch {}
     client.logger.log(`[Stop Cmd] Música detenida en Guild ${guildId} por ${interaction.user.id}`);
     client.embed(

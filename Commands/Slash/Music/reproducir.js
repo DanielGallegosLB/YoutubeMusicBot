@@ -10,6 +10,7 @@ const { spawn } = require("child_process");
 const path = require("path");
 const fs = require("fs");
 const UserHistory = require("../../../handlers/UserHistory");
+const { isAgeGateError, friendlyPlaybackError } = require("../../../handlers/PlaybackError");
 const { searchYoutube } = require("../../../handlers/PlaylistFetcher");
 
 const YTDLP_PATH = path.join(
@@ -443,7 +444,7 @@ module.exports = {
         }
       }
       const errorMsg = { 
-        content: `❌ No se pudo reproducir: ${e.message.slice(0, 100)}`,
+        content: isAgeGateError(e) ? friendlyPlaybackError(e) : `❌ No se pudo reproducir: ${e.message.slice(0, 100)}`,
         ephemeral: true 
       };
       try {
