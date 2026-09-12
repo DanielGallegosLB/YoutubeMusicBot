@@ -11,7 +11,7 @@ module.exports = {
   botPermissions: PermissionFlagsBits.Connect,
   category: "Music",
   cooldown: 5,
-  Player: true,
+  Player: false,
   djOnly: true,
 
   /**
@@ -27,8 +27,10 @@ module.exports = {
     client.playlistLoading.delete(guildId);
     client.playlistStopped.set(guildId, Date.now());
     await client.autoresume.delete(guildId).catch(() => {});
-    queue.songs = [];
-    await queue.stop().catch(() => {});
+    if (queue) {
+      queue.songs = [];
+      await queue.stop().catch(() => {});
+    }
     stopMarqueeActivity(client, message.guild);
     try {
       await client.distube.voices.leave(message.guild);

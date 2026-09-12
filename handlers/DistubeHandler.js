@@ -1,9 +1,11 @@
 const { EmbedBuilder, Events, ChannelType, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle } = require("discord.js");
 const MusicBot = require("./Client");
+const DashboardFeed = require("./DashboardFeed");
 const Store = require("./PlaylistStore");
 const UserHistory = require("./UserHistory");
 const { check_dj, skip } = require("./functions");
 const { fetchPlaylistURLs } = require("./PlaylistFetcher");
+const { stopMarqueeActivity } = require("./ActivityManager");
 
 /**
  *
@@ -242,8 +244,13 @@ module.exports = async (client) => {
           client.autoDjPrev?.set(interaction.guildId, _queue.songs.slice());
 
           try {
-            // 1) Current up-next songs already in queue (real DisTube Song objects)
+            // 1) Current up-next songs already in queue (real DisTube Song objects).
+            //    Separate the user's OWN list from leftovers of previous Auto DJ
+            //    runs (tagged _autoDj) so they never get mixed as if they were
+            //    the user's real queue again.
             const upNext = _queue.songs.slice(1);
+            const userSongs = upNext.filter((s) => !s._autoDj);
+            const staleDj = upNext.filter((s) => s._autoDj);
 
             // 2) User's favorites sorted best-first (score = (likes-dislikes)*10 + plays)
             const favs = await Store.getSortedFavorites(client, interaction.guildId, interaction.user.id);
@@ -253,19 +260,31 @@ module.exports = async (client) => {
               return interaction.editReply({ content: "❌ No tienes canciones favoritas para el Auto DJ. ¡Usa el botón ❤️ Like para añadirlas!" }).catch(() => {});
             }
 
-            // 3) Dedup against songs already in the queue
+            // 3) Dedup against songs already in the queue AND against the favorites
+            //    list itself, so a favorite is never added twice. Never add more
+            //    favorites than there are real user songs, or the queue drowns
+            //    in Auto DJ tracks again.
             const known = new Set(_queue.songs.map((s) => s.url));
-            const toAdd = favs.filter((f) => f.url && !known.has(f.url)).slice(0, 20);
+            const favCap = Math.min(20, Math.max(1, userSongs.length));
+            const favSeen = new Set();
+            const toAdd = [];
+            for (const f of favs) {
+              if (!f.url || known.has(f.url) || favSeen.has(f.url)) continue;
+              favSeen.add(f.url);
+              toAdd.push(f);
+              if (toAdd.length >= favCap) break;
+            }
 
             // 4) No new favorites to mix: just shuffle the existing up-next
             if (!toAdd.length) {
-              if (!upNext.length) {
+              const listCount = userSongs.length + staleDj.length;
+              if (!listCount) {
                 client.autoDj?.delete(interaction.guildId);
                 client.autoDjPrev?.delete(interaction.guildId);
-                return interaction.editReply({ content: "❌ No hay canciones favoritas nuevas para reproducir." }).catch(() => {});
+                return interaction.editReply({ content: "❌ No hay canciones en tu cola para intercalar con tus favoritas. Añade tu música primero." }).catch(() => {});
               }
               const shuffleOnly = (arr) => { for (let i = arr.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [arr[i], arr[j]] = [arr[j], arr[i]]; } return arr; };
-              _queue.songs = [_queue.songs[0]].concat(shuffleOnly(upNext));
+              _queue.songs = [_queue.songs[0]].concat(shuffleOnly(userSongs.length ? userSongs : staleDj));
               client.updatequeue(_queue).catch(() => {});
               client.updateplayer(_queue).catch(() => {});
               const ID0 = client.temp.get(interaction.guildId);
@@ -273,7 +292,7 @@ module.exports = async (client) => {
                 const msg0 = interaction.channel.messages.cache.get(ID0) || await interaction.channel.messages.fetch(ID0).catch(() => null);
                 if (msg0) msg0.edit({ components: client.buttons(false, _queue) }).catch(() => {});
               }
-              return interaction.editReply({ content: `🛸 **Auto DJ activado**\n▸ No había favoritas nuevas para añadir.\n▸ Barajé ${upNext.length} canciones de tu cola actual.\n🔄 Pulsa el botón otra vez para deshacerlo y recuperar tu cola original.` }).catch(() => {});
+              return interaction.editReply({ content: `🛸 **Auto DJ activado**\n▸ No había favoritas nuevas para añadir (máx. ${favCap} porque hay ${userSongs.length} canción${userSongs.length === 1 ? "" : "es"} tuya${userSongs.length === 1 ? "" : "s"} en la cola).\n▸ Barajé ${listCount} canciones de tu cola.\n🔄 Pulsa el botón otra vez para deshacerlo y recuperar tu cola original.` }).catch(() => {});
             }
 
             // 5) Addition + reorder run in background so the button never blocks on heavy work
@@ -298,7 +317,7 @@ module.exports = async (client) => {
                   }
                 }
 
-                const hadUpNext = upNext.length > 0;
+                const hadUpNext = userSongs.length > 0;
                 const addedCount = addedUrls.length;
                 if (!addedCount && !hadUpNext) {
                   client.autoDj?.delete(interaction.guildId);
@@ -312,29 +331,43 @@ module.exports = async (client) => {
                 for (const s of q.songs) if (s.url && !songByUrl.has(s.url)) songByUrl.set(s.url, s);
 
                 const favSongs = addedUrls.map((u) => songByUrl.get(u)).filter(Boolean);
+                // Tag tracks added by the Auto DJ so the queue can mark them
+                for (const s of favSongs) s._autoDj = true;
                 const upSongs = [];
                 const seenUp = new Set();
-                for (const s of upNext) {
+                for (const s of userSongs) {
                   if (!s.url || seenUp.has(s.url)) continue;
                   seenUp.add(s.url);
                   upSongs.push(songByUrl.get(s.url) || s);
                 }
 
-                // Mix: best-score favorites up front, then shuffle-blend favorites with the existing up-next
+                // Mix: two independent groups shuffled separately (favorites and
+                // the existing up-next) and then interleaved STRICTLY one and one,
+                // starting with a favorite. No more "all favorites up front".
                 const shuffleBg = (arr) => { for (let i = arr.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [arr[i], arr[j]] = [arr[j], arr[i]]; } return arr; };
-                const lead = addedUrls.slice(0, 3).map((u) => songByUrl.get(u)).filter(Boolean);
-                const favPool = shuffleBg(favSongs.filter((s) => !lead.includes(s)));
-                const upPool = shuffleBg(upSongs);
+                const djPool = shuffleBg(favSongs.slice());
+                const listPool = shuffleBg(upSongs);
                 const mixed = [];
-                while (lead.length) mixed.push(lead.shift());
-                while (upPool.length || favPool.length) {
-                  if (upPool.length && Math.random() < 0.6) mixed.push(upPool.shift());
-                  else if (favPool.length) mixed.push(favPool.shift());
-                  else if (upPool.length) mixed.push(upPool.shift());
+                let djTurn = true;
+                while (djPool.length || listPool.length) {
+                  if (djTurn && djPool.length) mixed.push(djPool.shift());
+                  else if (listPool.length) mixed.push(listPool.shift());
+                  else if (djPool.length) mixed.push(djPool.shift());
+                  djTurn = !djTurn;
                 }
 
-                // Replace the up-next portion of the queue with the mixed list
+                // Replace the up-next portion of the queue with the mixed list,
+                // then guarantee ZERO repeated URLs across the whole queue.
                 q.songs = [q.songs[0]].concat(mixed);
+                const cleanSeen = new Set(q.songs[0]?.url ? [q.songs[0].url] : []);
+                const cleanQueue = [];
+                for (const s of q.songs) {
+                  if (!s.url || !cleanSeen.has(s.url)) {
+                    if (s.url) cleanSeen.add(s.url);
+                    cleanQueue.push(s);
+                  }
+                }
+                q.songs = cleanQueue;
 
                 // Persist / refresh embeds without blocking playback
                 client.updatequeue(q).catch(() => {});
@@ -345,10 +378,9 @@ module.exports = async (client) => {
                   if (msg) msg.edit({ components: client.buttons(false, q) }).catch(() => {});
                 }
 
-                const leadTitles = addedUrls.slice(0, 3).map((u) => songByUrl.get(u)).filter(Boolean).map((s) => `\`${client.getTitle(s)}\``).join(", ");
                 const summary = [`🛸 **Auto DJ activado**`];
-                summary.push(`▸ Añadí ${addedCount} favorita${addedCount === 1 ? "" : "s"} al inicio${leadTitles ? `: ${leadTitles}.` : "."}`);
-                summary.push(`▸ Mezclé ${mixed.length} canciones en cola barajando lo que ya tenías con tus favoritas.`);
+                summary.push(`▸ Intercalé ${addedCount} favorita${addedCount === 1 ? "" : "s"} de una en una entre las ${upSongs.length} canciones de tu cola${cleanQueue.length < mixed.length + 1 ? " (quitando repetidas)" : ""}.`);
+                summary.push(`▸ Mezclé ${cleanQueue.length} canciones en cola sin duplicados.`);
                 summary.push(`🔄 Pulsa el botón otra vez para deshacerlo y recuperar tu cola original.`);
                 interaction.editReply({ content: summary.join("\n") }).catch(() => {});
               } catch (err) {
@@ -397,6 +429,7 @@ module.exports = async (client) => {
           return client.updatequeue(freshQueue).catch(() => {});
         }
         if (!controlButtons.includes(customId)) return;
+        DashboardFeed.logButton(customId, interaction);
         await interaction.deferUpdate().catch((e) => {});
         let voiceMember = interaction.guild.members.cache.get(member.id);
         let channel = voiceMember.voice.channel;
@@ -584,42 +617,46 @@ module.exports = async (client) => {
             break;
           case "stop":
             {
-              if (!queue) {
-                return send(
-                  interaction,
-                  ` ${client.config.emoji.ERROR} No hay nada sonando ahora `
-                );
-              } else if (checkDJ) {
-                return send(
-                  interaction,
-                  `${client.config.emoji.SUCCESS} No eres DJ ni has solicitado esta canción..`
-                );
-              } else {
-                const guildId = interaction.guildId;
-                const stoppedBy = interaction.user;
+              const guildId = interaction.guildId;
+              const stoppedBy = interaction.user;
+
+              if (queue) {
+                if (checkDJ) {
+                  return send(
+                    interaction,
+                    `${client.config.emoji.SUCCESS} No eres DJ ni has solicitado esta canción..`
+                  );
+                }
                 client.playlistLoading.delete(guildId);
                 client.playlistStopped.set(guildId, Date.now());
                 await client.autoresume.delete(guildId).catch(() => {});
                 queue.songs = [];
                 await queue.stop().catch((e) => {});
-                try {
-                  const db = await client.music?.get(`${guildId}.vc`);
-                  if (!db?.enable) await client.distube.voices.leave(interaction.guild);
-                  try {
-                    await client.updateembed(client, interaction.guild);
-                    await client.editPlayerMessage(queue.textChannel);
-                  } catch {}
-                } catch {}
-                client.logger.log(`[Stop Button] Música detenida en Guild ${guildId} por ${stoppedBy.id}`);
-                return interaction.followUp({
-                  embeds: [
-                    new EmbedBuilder()
-                      .setColor(client.config.embed.color)
-                      .setDescription(`> ${client.config.emoji.SUCCESS} La reproducción fue **detenida** por <@${stoppedBy.id}>`)
-                      .setFooter(client.getFooter(stoppedBy)),
-                  ],
-                }).catch(() => {});
               }
+
+              // Always disconnect the bot and reset activity/nickname,
+              // even if there is no active queue anymore.
+              try {
+                stopMarqueeActivity(client, interaction.guild);
+              } catch {}
+              try {
+                await client.distube.voices.leave(interaction.guild);
+              } catch {}
+              try {
+                await client.updateembed(client, interaction.guild);
+                if (queue?.textChannel)
+                  await client.editPlayerMessage(queue.textChannel);
+              } catch {}
+
+              client.logger.log(`[Stop Button] Música detenida en Guild ${guildId} por ${stoppedBy.id}`);
+              return interaction.followUp({
+                embeds: [
+                  new EmbedBuilder()
+                    .setColor(client.config.embed.color)
+                    .setDescription(`> ${client.config.emoji.SUCCESS} La reproducción fue **detenida** por <@${stoppedBy.id}>`)
+                    .setFooter(client.getFooter(stoppedBy)),
+                ],
+              }).catch(() => {});
             }
             break;
           case "pauseresume":

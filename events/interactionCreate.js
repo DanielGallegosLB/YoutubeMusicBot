@@ -1,4 +1,5 @@
 const client = require("../index");
+const DashboardFeed = require("../handlers/DashboardFeed");
 const {
   cooldown,
   check_dj,
@@ -102,6 +103,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       } else {
         try {
           await cmd.run(client, interaction, args, queue);
+          DashboardFeed.logCommand(cmd.name, interaction, args);
         } catch (error) {
           client.logger.error(`[Command Error] ${cmd.name}`, error);
           if (interaction.deferred || interaction.replied) {

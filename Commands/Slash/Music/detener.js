@@ -23,7 +23,7 @@ module.exports = {
   category: "Music",
   cooldown: 5,
   type: ApplicationCommandType.ChatInput,
-  Player: true,
+  Player: false,
   djOnly: true,
 
   /**
@@ -38,8 +38,10 @@ module.exports = {
     client.playlistLoading.delete(guildId);
     client.playlistStopped.set(guildId, Date.now());
     await client.autoresume.delete(guildId).catch(() => {});
-    queue.songs = [];
-    await queue.stop().catch(() => {});
+    if (queue) {
+      queue.songs = [];
+      await queue.stop().catch(() => {});
+    }
     stopMarqueeActivity(client, interaction.guild);
     try {
       await client.distube.voices.leave(interaction.guild);

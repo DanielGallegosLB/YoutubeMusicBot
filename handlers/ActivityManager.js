@@ -10,7 +10,9 @@ function startMarqueeActivity(client, text, guild) {
 
   const update = () => {
     const rotated = paddedText.slice(pos) + paddedText.slice(0, pos);
-    client.user.setActivity(rotated, { type: ActivityType.Playing }).catch(() => {});
+    try {
+      client.user.setActivity(rotated, { type: ActivityType.Playing });
+    } catch (e) {}
     pos = (pos + 1) % paddedText.length;
   };
 
@@ -29,7 +31,9 @@ function stopMarqueeActivity(client, guild) {
     clearInterval(interval);
     activityIntervals.delete(client.user.id);
   }
-  client.user.setActivity(null).catch(() => {});
+  try {
+    client.user.setActivity(null);
+  } catch (e) {}
   if (guild) {
     guild.members.me.setNickname(null).catch(() => {});
   }

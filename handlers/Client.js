@@ -122,6 +122,7 @@ class MusicBot extends Client {
       "Database",
       "DistubeEvents",
       "RequestChannel",
+      "ChannelCleaner",
       "DistubeHandler",
       "utils",
     ].forEach((handler) => {

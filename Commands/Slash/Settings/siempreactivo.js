@@ -5,6 +5,7 @@ const {
 } = require("discord.js");
 const MusicBot = require("../../../handlers/Client");
 const { Queue } = require("distube");
+const { maybeScheduleLeave, cancelLeave } = require("../../../handlers/EmptyChannelLeave");
 
 module.exports = {
   name: "siempreactivo",
@@ -46,6 +47,7 @@ module.exports = {
         channel: null,
       };
       await client.music.set(`${interaction.guild.id}.vc`, dataOptions);
+      cancelLeave(client, interaction.guild.id);
       // if (player) await player.destroy();
       client.embed(
         interaction,
@@ -57,10 +59,15 @@ module.exports = {
         channel: channel.id,
       };
       await client.music.set(`${interaction.guild.id}.vc`, dataOptions);
+      cancelLeave(client, interaction.guild.id);
       client.embed(
         interaction,
         `** ${client.config.emoji.SUCCESS} 24/7 System Enabled **`
       );
+    }
+    // If the bot is alone and 24/7 was just disabled, schedule the leave.
+    if (!(await client.music.get(`${interaction.guild.id}.vc`))?.enable) {
+      await maybeScheduleLeave(client, interaction.guild);
     }
   },
 };

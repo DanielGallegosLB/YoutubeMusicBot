@@ -406,7 +406,7 @@ module.exports = async (client) => {
         const tStatsStr = tStatsParts.length > 0 ? ` | ${tStatsParts.join(" ")}` : "";
         queueString += `\`${index}.\` **${client.getTitle(track)}** - ${
           track.isLive ? "LIVE STREAM" : track.formattedDuration.split(" | ")[0]
-        } - \`${track.user.tag}\`${tStatsStr}\n`;
+        } - \`${track.user.tag}\`${tStatsStr}${track._autoDj ? " 🛸 **· Auto DJ**" : ""}\n`;
       });
 
       const newQueueEmbed = new EmbedBuilder()
@@ -425,7 +425,9 @@ module.exports = async (client) => {
               currentSong?.isLive
                 ? "LIVE STREAM"
                 : currentSong?.formattedDuration.split(" | ")[0]
-            } - \`${currentSong?.user.tag}\`${currentStatsText}`,
+            } - \`${currentSong?.user.tag}\`${currentStatsText}${
+              currentSong?._autoDj ? " 🛸 **· Auto DJ**" : ""
+            }`,
           },
         ]);
 
@@ -627,15 +629,7 @@ module.exports = async (client) => {
     });
 
     const filter = async (i) => {
-      if (i.user.id === user.id) return true;
-      else {
-        await i.deferReply().catch(() => {});
-        i.followUp({
-          content: `Not Your Interaction !!`,
-          ephemeral: true,
-        }).catch(() => {});
-        return false;
-      }
+      return true;
     };
 
     const colector = main_msg.createMessageComponentCollector({ filter });
