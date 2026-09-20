@@ -45,16 +45,16 @@ module.exports = {
     if (oldChannel) {
       return client.embed(
         interaction,
-        `** ${client.config.emoji.ERROR} Music Request Channel already Setup in ${oldChannel} Delete first and Setup Again **`
+        `** ${client.config.emoji.ERROR} El panel de música ya está configurado en ${oldChannel}. Elimínalo antes de configurarlo de nuevo. **`
       );
     } else {
       interaction.guild.channels
         .create({
-          name: `${client.user.username}-requests`,
+          name: `🎵〡panel-de-musica`,
           type: ChannelType.GuildText,
           rateLimitPerUser: 3,
-          reason: `Management of music requests channel.`,
-          topic: `Music Request Channel for ${client.user.username}. Please submit song names or links to play music.`,
+          reason: `Gestión del panel de música.`,
+          topic: `🎵 Panel de música: envía el nombre o el enlace de una canción para pedirla.`,
           permissionOverwrites: [
             {
               id: client.user.id,
@@ -90,7 +90,7 @@ module.exports = {
                   });
                   client.embed(
                     interaction,
-                    `${client.config.emoji.SUCCESS} Successfully Setup Music System in ${ch}`
+                    `${client.config.emoji.SUCCESS} Panel de música configurado correctamente en ${ch}`
                   );
                 });
             });

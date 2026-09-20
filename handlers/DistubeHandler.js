@@ -178,7 +178,7 @@ module.exports = async (client) => {
           Store.sortFavorites(client, interaction.guildId, interaction.user.id).catch(() => {});
           client.updatequeue(_queue).catch(() => {});
           client.updateplayer(_queue).catch(() => {});
-          const msg = `❤️ Like! (${result.score >= 0 ? "+" : ""}${result.score} pts · ${result.likeCount}❤️ ${result.dislikeCount}👎)`;
+          const msg = `👍 Like! (${result.score >= 0 ? "+" : ""}${result.score} pts · ${result.likeCount}👍 ${result.dislikeCount}👎)`;
           return interaction.editReply({ content: msg }).catch(() => {});
         }
 
@@ -209,7 +209,29 @@ module.exports = async (client) => {
           Store.sortFavorites(client, interaction.guildId, interaction.user.id).catch(() => {});
           client.updatequeue(_queue).catch(() => {});
           client.updateplayer(_queue).catch(() => {});
-          return interaction.editReply({ content: `👎 Dislike! (${result.score >= 0 ? "+" : ""}${result.score} pts · ${result.likeCount}❤️ ${result.dislikeCount}👎)` }).catch(() => {});
+          return interaction.editReply({ content: `👎 Dislike! (${result.score >= 0 ? "+" : ""}${result.score} pts · ${result.likeCount}👍 ${result.dislikeCount}👎)` }).catch(() => {});
+        }
+
+        if (customId === "favorite_btn") {
+          const _queue = client.distube.getQueue(interaction.guildId);
+          const _track = _queue?.songs?.[0];
+          if (!_track || !_queue) return interaction.deferUpdate().catch(() => {});
+          await interaction.deferReply({ ephemeral: true }).catch(() => {});
+          await Store.create(client, interaction.guildId, interaction.user.id, "Canciones Favoritas");
+          const existing = await Store.get(client, interaction.guildId, interaction.user.id, "Canciones Favoritas");
+          const isFavorited = existing?.tracks?.some((t) => t.url === _track.url);
+          if (isFavorited) {
+            return interaction.editReply({ content: "⭐ Ya tenías esta canción en tus favoritas." }).catch(() => {});
+          }
+          const serialized = Store.serializeSong(_track, interaction.user);
+          const added = await Store.addTracks(client, interaction.guildId, interaction.user.id, "Canciones Favoritas", [serialized]);
+          Store.sortFavorites(client, interaction.guildId, interaction.user.id).catch(() => {});
+          client.updatequeue(_queue).catch(() => {});
+          client.updateplayer(_queue).catch(() => {});
+          const reply = added > 0
+            ? "⭐ ¡Cancion guardada en tus favoritas!"
+            : "⭐ Ya tenías esta canción en tus favoritas.";
+          return interaction.editReply({ content: reply }).catch(() => {});
         }
 
         if (customId === "autodj") {
@@ -257,7 +279,7 @@ module.exports = async (client) => {
             if (!favs.length) {
               client.autoDj?.delete(interaction.guildId);
               client.autoDjPrev?.delete(interaction.guildId);
-              return interaction.editReply({ content: "❌ No tienes canciones favoritas para el Auto DJ. ¡Usa el botón ❤️ Like para añadirlas!" }).catch(() => {});
+              return interaction.editReply({ content: "❌ No tienes canciones favoritas para el Auto DJ. ¡Usa el botón ⭐ Favorita para añadirlas!" }).catch(() => {});
             }
 
             // 3) Dedup against songs already in the queue AND against the favorites
@@ -400,7 +422,7 @@ module.exports = async (client) => {
           }
         }
 
-        const controlButtons = ["previous", "rewind10", "pauseresume", "forward10", "skip", "stop", "shuffle", "loop_song", "loop_queue", "autoplay", "savecurrent_btn", "autodj"];
+        const controlButtons = ["previous", "rewind10", "pauseresume", "forward10", "skip", "stop", "shuffle", "loop_song", "loop_queue", "autoplay", "autodj"];
 
         // Paginación del embed de cola
         if (customId.startsWith("queue_page_")) {
@@ -734,78 +756,6 @@ module.exports = async (client) => {
                 interaction,
                 `${client.config.emoji.SUCCESS} Bucle de cola ${newMode === 2 ? "activado" : "desactivado"}`
               );
-            }
-            break;
-
-          case "savecurrent_btn":
-            {
-              // Validate context
-              if (!channel) {
-                return send(
-                  interaction,
-                  `${client.config.emoji.ERROR} Debes unirte a un canal de voz`
-                );
-              }
-              if (
-                interaction.guild.members.me.voice.channel &&
-                !interaction.guild.members.me.voice.channel.equals(channel)
-              ) {
-                return send(
-                  interaction,
-                  `${client.config.emoji.ERROR} Debes unirte a __mi__ canal de voz`
-                );
-              }
-              if (!queue || !queue.songs?.length) {
-                return send(
-                  interaction,
-                  `${client.config.emoji.ERROR} No hay nada sonando ahora`
-                );
-              }
-
-              // Open a private thread asking for playlist name
-              const baseMsgId = client.temp.get(interaction.guildId);
-              const baseMsg = baseMsgId
-                ? await interaction.channel.messages.fetch(baseMsgId).catch(() => null)
-                : null;
-              const threadName = `guardar ▶ ${interaction.user.username}`.substring(0, 90);
-              const starter = baseMsg || (await interaction.message?.fetch().catch(() => null)) || null;
-              let thread;
-              try {
-                thread = await interaction.channel.threads.create({
-                  name: threadName,
-                  autoArchiveDuration: 60,
-                  type: ChannelType.PrivateThread,
-                  reason: `Solicitud de guardado de canción para ${interaction.user.tag}`,
-                });
-              } catch (e) {
-                return send(
-                  interaction,
-                  `${client.config.emoji.ERROR} Necesito permiso para crear hilos en este canal.`
-                );
-              }
-              // Invite only the clicker
-              try { await thread.members.add(interaction.user.id).catch(() => {}); } catch {}
-              await thread.send({
-                content: `${interaction.user}, responde con el nombre de la lista para guardar "${client.getTitle(queue.songs[0])}" (tiempo límite 60s).`,
-              });
-
-              const collector = thread.createMessageCollector({
-                time: 60_000,
-                max: 1,
-                filter: (m) => m.author.id === interaction.user.id,
-              });
-
-              collector.on("collect", async (m) => {
-                const name = m.content.trim().slice(0, 64);
-                const track = Store.serializeSong(queue.songs[0], interaction.user);
-                await Store.create(client, interaction.guildId, interaction.user.id, name);
-                await Store.addTracks(client, interaction.guildId, interaction.user.id, name, [track]);
-                await thread.send(`${client.config.emoji.SUCCESS} Guardado en \`${name}\`. Este hilo se cerrará pronto.`);
-              });
-
-              collector.on("end", async () => {
-                setTimeout(() => thread.setArchived(true, "Solicitud completada").catch(() => {}), 5000);
-              });
             }
             break;
 

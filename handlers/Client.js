@@ -8,12 +8,13 @@ const {
 } = require("discord.js");
 const fs = require("fs");
 const Distube = require("distube").default;
+const { Song } = require("distube");
 const { SpotifyPlugin } = require("@distube/spotify");
-const { SoundCloudPlugin } = require("@distube/soundcloud");
 const { YouTubePlugin } = require("@distube/youtube");
 const { filters, options } = require("../settings/config");
-const { YtDlpPlugin } = require("@distube/yt-dlp");
+const { YtDlpPlugin, json: ytDlpJson } = require("@distube/yt-dlp");
 const Logger = require("./Logger");
+const resolveSpotifyFallback = require("./spotify-fallback");
 
 class MusicBot extends Client {
   constructor() {
@@ -61,7 +62,89 @@ class MusicBot extends Client {
     this.config = require("../settings/config");
     this.logger = Logger;
 
+    const ytDlpPlugin = new YtDlpPlugin({
+      update: false,
+      ytdlpOptions: (() => {
+        const opts = {
+          socketTimeout: 60,
+          fragmentRetries: 10,
+          addHeader: [
+            "referer:https://www.youtube.com",
+          ],
+          jsRuntimes: "node",
+          noCheckCertificates: true,
+          format: "bestaudio/best",
+          extractorArgs: "youtube:player_client=web_embedded,android",
+        };
+        try {
+          const cookiePath = require("path").join(__dirname, "../yt-cookies.txt");
+          if (require("fs").existsSync(cookiePath) && require("fs").statSync(cookiePath).size > 10) {
+            opts.cookies = cookiePath;
+          }
+        } catch (_) {}
+        return opts;
+      })(),
+    });
+
     this.searcher = new YouTubePlugin();
+    this.searcher.getStreamURL = (song) => ytDlpPlugin.getStreamURL(song);
+    this.searcher.validate = () => false;
+    const originalSearchSong = this.searcher.searchSong.bind(this.searcher);
+    this.searcher.searchSong = async (query, options = {}) => {
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+          const result = await originalSearchSong(query, options);
+          if (result) return result;
+        } catch (_) {}
+        await new Promise((resolve) => setTimeout(resolve, 500 * attempt));
+      }
+      try {
+        const info = await ytDlpJson(`ytsearch1:${query}`, ytDlpPlugin.ytdlpOptions, {});
+        const entry = info && info.entries ? info.entries[0] : info;
+        if (!entry || !entry.id) return null;
+        return new Song(
+          {
+            plugin: this.searcher,
+            source: "youtube",
+            playFromSource: true,
+            id: entry.id,
+            name: entry.title,
+            url: entry.webpage_url || `https://www.youtube.com/watch?v=${entry.id}`,
+            thumbnail: entry.thumbnail,
+            duration: entry.duration,
+            uploader: { name: entry.channel || entry.uploader || "" },
+          },
+          options
+        );
+      } catch (error) {
+        this.logger.error(`[YTSEARCH_FALLBACK] Búsqueda con yt-dlp falló para "${query}": ${error.message || error}`);
+        throw error;
+      }
+    };
+
+    const spotifyPlugin = new SpotifyPlugin({
+      api: {
+        clientId: this.config.SPOTIFY_CLIENT_ID,
+        clientSecret: this.config.SPOTIFY_CLIENT_SECRET,
+      },
+    });
+    const originalSpotifyResolve = spotifyPlugin.resolve.bind(spotifyPlugin);
+    spotifyPlugin.resolve = async (url, options = {}) => {
+      try {
+        return await originalSpotifyResolve(url, options);
+      } catch (error) {
+        try {
+          const fallback = await resolveSpotifyFallback(spotifyPlugin, url, options);
+          if (fallback) {
+            this.logger.warn(
+              `[SPOTIFY_FALLBACK] Scraping oficial de Spotify falló (${error.message || error}); se usó el parser embebido.`
+            );
+            return fallback;
+          }
+        } catch (_) {}
+        throw error;
+      }
+    };
 
     this.distube = new Distube(this, {
       emitNewSongOnly: true,
@@ -70,31 +153,9 @@ class MusicBot extends Client {
       joinNewVoiceChannel: false,
       customFilters: filters,
       plugins: [
-        new SpotifyPlugin(),
-        new SoundCloudPlugin(),
-        new YtDlpPlugin({
-          update: false,
-          ytdlpOptions: (() => {
-            const opts = {
-              socketTimeout: 60,
-              fragmentRetries: 10,
-              addHeader: [
-                "referer:https://www.youtube.com",
-              ],
-              jsRuntimes: "node",
-              noCheckCertificates: true,
-              format: "bestaudio/best",
-              extractorArgs: "youtube:player_client=web_embedded",
-            };
-            try {
-              const cookiePath = require("path").join(__dirname, "../yt-cookies.txt");
-              if (require("fs").existsSync(cookiePath) && require("fs").statSync(cookiePath).size > 10) {
-                opts.cookies = cookiePath;
-              }
-            } catch (_) {}
-            return opts;
-          })(),
-        }),
+        spotifyPlugin,
+        this.searcher,
+        ytDlpPlugin,
       ],
       ffmpeg: {
         path: (() => {

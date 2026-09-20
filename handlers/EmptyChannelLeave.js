@@ -102,7 +102,7 @@ async function maybeScheduleLeave(client, guild) {
         await q.stop().catch(() => {});
       }
       await client.autoresume?.delete(guildId).catch(() => {});
-      await client.distube.voices.leave(guild).catch(() => {});
+      client.distube.voices.leave(guild);
       await client.updateembed(client, guild).catch(() => {});
       if (textChannel) {
         await client.editPlayerMessage(textChannel).catch(() => {});

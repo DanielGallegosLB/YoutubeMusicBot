@@ -123,7 +123,7 @@ module.exports = async (client) => {
         .setDisabled(state),
     ]);
 
-    // Row 3: Auto DJ 🛸 • Like ❤️ • Dislike 👎 • SaveCurrent ⭐
+    // Row 3: Auto DJ 🛸 • Like 👍 • Dislike 👎 • Favorita ⭐
     // Auto DJ visuals (toggle state)
     const autoDjOn = !!client.autoDj?.get(queue?.textChannel?.guildId || queue?.guildId);
     const autoDjStyle = autoDjOn ? ButtonStyle.Success : ButtonStyle.Primary;
@@ -137,7 +137,7 @@ module.exports = async (client) => {
       new ButtonBuilder()
         .setStyle(ButtonStyle.Secondary)
         .setCustomId("player_like")
-        .setEmoji("❤️")
+        .setEmoji("👍")
         .setLabel("Like")
         .setDisabled(dis(!track)),
       new ButtonBuilder()
@@ -147,10 +147,10 @@ module.exports = async (client) => {
         .setLabel("Dislike")
         .setDisabled(dis(!track)),
       new ButtonBuilder()
-        .setStyle(ButtonStyle.Secondary)
-        .setCustomId("savecurrent_btn")
+        .setStyle(ButtonStyle.Success)
+        .setCustomId("favorite_btn")
         .setEmoji("⭐")
-        .setLabel("Save Current Song")
+        .setLabel("Favorita")
         .setDisabled(dis(!track)),
     ]);
 
@@ -374,7 +374,7 @@ module.exports = async (client) => {
 
       const currentStats = currentSong?.url ? await PlaylistStore.getGlobalTrackStats(client, guildId, currentSong.url, allPlaylists).catch(() => ({ likes: 0, dislikes: 0, plays: 0 })) : { likes: 0, dislikes: 0, plays: 0 };
       const currentStatsParts = [];
-      if (currentStats.likes > 0) currentStatsParts.push(`❤️${currentStats.likes}`);
+      if (currentStats.likes > 0) currentStatsParts.push(`👍${currentStats.likes}`);
       if (currentStats.dislikes > 0) currentStatsParts.push(`👎${currentStats.dislikes}`);
       if (currentStats.plays > 0) currentStatsParts.push(`🔥${currentStats.plays}`);
       const currentStatsText = currentStatsParts.length > 0 ? ` | ${currentStatsParts.join(" ")}` : "";
@@ -400,7 +400,7 @@ module.exports = async (client) => {
         const index = from + i;
         const tStats = upNextStats[i] || { likes: 0, dislikes: 0, plays: 0 };
         const tStatsParts = [];
-        if (tStats.likes > 0) tStatsParts.push(`❤️${tStats.likes}`);
+        if (tStats.likes > 0) tStatsParts.push(`👍${tStats.likes}`);
         if (tStats.dislikes > 0) tStatsParts.push(`👎${tStats.dislikes}`);
         if (tStats.plays > 0) tStatsParts.push(`🔥${tStats.plays}`);
         const tStatsStr = tStatsParts.length > 0 ? ` | ${tStatsParts.join(" ")}` : "";
@@ -494,11 +494,11 @@ module.exports = async (client) => {
 
       const stats = track.url ? await PlaylistStore.getGlobalTrackStats(client, guildId, track.url).catch(() => ({ likes: 0, dislikes: 0, plays: 0, likedBy: [], dislikedBy: [] })) : { likes: 0, dislikes: 0, plays: 0, likedBy: [], dislikedBy: [] };
       const statsParts = [];
-      if (stats.likes > 0) statsParts.push(`❤️${stats.likes}`);
+      if (stats.likes > 0) statsParts.push(`👍${stats.likes}`);
       if (stats.dislikes > 0) statsParts.push(`👎${stats.dislikes}`);
       if (stats.plays > 0) statsParts.push(`🔥${stats.plays}`);
-      const likeNames = (stats.likedBy || []).length ? `\nLikes: ${stats.likedBy.join(", ")}` : "";
-      const dislikeNames = (stats.dislikedBy || []).length ? `\nDislikes: ${stats.dislikedBy.join(", ")}` : "";
+      const likeNames = (stats.likedBy || []).length ? `\n👍 Likes: ${stats.likedBy.join(", ")}` : "";
+      const dislikeNames = (stats.dislikedBy || []).length ? `\n👎 Dislikes: ${stats.dislikedBy.join(", ")}` : "";
       const statsValue = stats.likes > 0 || stats.dislikes > 0 || stats.plays > 0
         ? `${statsParts.join(" · ")}${likeNames}${dislikeNames}`
         : "Sin stats aún";

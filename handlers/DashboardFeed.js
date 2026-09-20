@@ -40,7 +40,7 @@ const BTN_LABEL = {
   loop_song: "cambió el bucle de la canción",
   loop_queue: "cambió el bucle de la cola",
   autoplay: "cambió la reproducción automática",
-  savecurrent_btn: "guardó la canción en sus listas",
+  favorite_btn: "guardó la canción actual en sus favoritas",
   autodj: "activó o desactivó el Auto DJ",
 };
 

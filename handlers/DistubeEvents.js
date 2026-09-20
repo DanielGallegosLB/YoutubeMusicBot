@@ -84,6 +84,8 @@ module.exports = async (client) => {
   client.distube.on("playSong", async (queue, song) => {
     console.log(`[DisTube] Playing: ${song.name} in ${queue.textChannel.guild.name}`);
 
+    instrumentVoice(queue);
+
     queue._playSeq = (queue._playSeq || 0) + 1;
 
     MusicTracker.logPlay(queue.textChannel.guildId, song.user.id, song);
@@ -131,11 +133,11 @@ module.exports = async (client) => {
         const stats = await PlaylistStore.getGlobalTrackStats(client, queue.textChannel.guildId, song.url)
           .catch(() => ({ likes: 0, dislikes: 0, plays: 0, likedBy: [], dislikedBy: [] }));
         const statsParts = [];
-        if (stats.likes > 0) statsParts.push(`❤️${stats.likes}`);
+        if (stats.likes > 0) statsParts.push(`👍${stats.likes}`);
         if (stats.dislikes > 0) statsParts.push(`👎${stats.dislikes}`);
         if (stats.plays > 0) statsParts.push(`🔥${stats.plays}`);
-        const likeNames = (stats.likedBy || []).length ? `\nLikes: ${stats.likedBy.join(", ")}` : "";
-        const dislikeNames = (stats.dislikedBy || []).length ? `\nDislikes: ${stats.dislikedBy.join(", ")}` : "";
+        const likeNames = (stats.likedBy || []).length ? `\n👍 Likes: ${stats.likedBy.join(", ")}` : "";
+        const dislikeNames = (stats.dislikedBy || []).length ? `\n👎 Dislikes: ${stats.dislikedBy.join(", ")}` : "";
         statsValue = stats.likes > 0 || stats.dislikes > 0 || stats.plays > 0
           ? `${statsParts.join(" · ")}${likeNames}${dislikeNames}`
           : "Sin stats aún";
@@ -410,7 +412,35 @@ module.exports = async (client) => {
       });
   });
 
-  client.distube.on("initQueue", async (queue) => {
+  // ---- Voice / DAVE / player diagnostics (one-time per guild) ----
+    const instrumentVoice = (queue) => {
+      const guildId = queue.textChannel?.guildId || queue.guildId;
+      const voice = queue.voice;
+      if (!voice || voice._jvdDiag) return;
+      voice._jvdDiag = true;
+      const conn = voice.connection;
+      if (conn) {
+        conn.on("stateChange", (oldState, newState) => {
+          client.logger.log(`[VoiceDiag ${guildId}] conn ${oldState.status} -> ${newState.status}`);
+        });
+        conn.on("debug", (msg) => client.logger.log(`[VoiceDiag ${guildId}] DBG ${String(msg).slice(0, 400)}`));
+      }
+      if (voice.audioPlayer) {
+        voice.audioPlayer.on("stateChange", (oldState, newState) => {
+          client.logger.log(
+            `[VoiceDiag ${guildId}] player ${oldState.status} -> ${newState.status} (missedFrames=${newState.missedFrames ?? 0}, playbackMs=${newState.playbackDuration})`
+          );
+        });
+        voice.audioPlayer.on("error", (e) => client.logger.error(`[VoiceDiag ${guildId}] player error: ${e.message}`));
+        voice.audioPlayer.on("debug", (msg) => client.logger.log(`[VoiceDiag ${guildId}] PDBG ${String(msg).slice(0, 200)}`));
+      }
+    };
+
+    client.distube.on("ffmpegDebug", (guildId, data) => {
+      client.logger.log(`[FFMPEG ${guildId}] ${String(data).slice(0, 400)}`);
+    });
+
+    client.distube.on("initQueue", async (queue) => {
     queue.volume = client.config.options.defaultVolume;
 
     // Reset Auto DJ to off by default on every new play session
@@ -420,6 +450,7 @@ module.exports = async (client) => {
 
     // init auto resume for the queue
     await InitAutoResume(client, queue);
+    instrumentVoice(queue);
   });
 
   client.distube.on("searchCancel", async (message, quary) => {

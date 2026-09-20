@@ -295,7 +295,7 @@ module.exports = {
         new ButtonBuilder()
           .setCustomId("suggest_favorites")
           .setLabel("Reproducir Favoritos")
-          .setEmoji("❤️")
+          .setEmoji("⭐")
           .setStyle(ButtonStyle.Success),
         new ButtonBuilder()
           .setCustomId(`no_suggest_${userId}`)
@@ -332,16 +332,16 @@ module.exports = {
       const score = likes - dislikes;
       const scoreStr = score !== 0 ? (score > 0 ? ` +${score}` : ` ${score}`) : "";
       const fire = plays > 1 ? ` 🔥${plays}` : "";
-      const heart = likes > 0 ? ` ❤️${likes}` : "";
+      const thumbsUp = likes > 0 ? ` 👍${likes}` : "";
       const thumbsDown = dislikes > 0 ? ` 👎${dislikes}` : "";
-      return `**${num}.** ${t.name || "Desconocido"} - \`${t.formattedDuration || "?"}\`${fire}${heart}${thumbsDown}${scoreStr ? ` \`[${scoreStr}]\`` : ""}`;
+      return `**${num}.** ${t.name || "Desconocido"} - \`${t.formattedDuration || "?"}\`${fire}${thumbsUp}${thumbsDown}${scoreStr ? ` \`[${scoreStr}]\`` : ""}`;
     }).join("\n");
 
     const embed = new EmbedBuilder()
       .setColor(client.config.embed.color)
       .setTitle(`🎵 Tus Canciones Favoritas (${favs.length} - ${durationStr})`)
       .setDescription(songList)
-      .setFooter({ text: `Página ${safePage + 1}/${totalPages} • 🔥reproducciones • ❤️likes • 👎dislikes • [score]` });
+      .setFooter({ text: `Página ${safePage + 1}/${totalPages} • 🔥reproducciones • 👍likes • 👎dislikes • [score]` });
 
     return embed;
   },

@@ -4,6 +4,8 @@ const defaultSettings = {
   TOKEN: process.env.TOKEN || "BOT_TOKEN",
   PREFIX: process.env.PREFIX || "BOT_PREFIX",
   MONGO_URL: process.env.MONGO_URL || null,
+  SPOTIFY_CLIENT_ID: process.env.SPOTIFY_CLIENT_ID || null,
+  SPOTIFY_CLIENT_SECRET: process.env.SPOTIFY_CLIENT_SECRET || null,
 };
 
 const embedSettings = {
