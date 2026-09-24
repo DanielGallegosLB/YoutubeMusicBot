@@ -29,6 +29,7 @@ async function leaveGuild(client, guild) {
   try {
     const q = client.distube.getQueue(guild.id);
     if (q) {
+      if (client.actualPlaying) client.actualPlaying.delete(guild.id);
       q.songs = [];
       await q.stop().catch(() => {});
     }
@@ -37,6 +38,7 @@ async function leaveGuild(client, guild) {
     await client.distube.voices.leave(guild);
   } catch {}
   try {
+    if (client.actualPlaying) client.actualPlaying.delete(guild.id);
     await client.autoresume?.delete(guild.id).catch(() => {});
   } catch {}
 }
@@ -98,10 +100,12 @@ async function maybeScheduleLeave(client, guild) {
       stopMarqueeActivity(client, guild);
 
       if (q) {
+        if (client.actualPlaying) client.actualPlaying.delete(guildId);
         q.songs = [];
         await q.stop().catch(() => {});
       }
       await client.autoresume?.delete(guildId).catch(() => {});
+      if (client.actualPlaying) client.actualPlaying.delete(guildId);
       client.distube.voices.leave(guild);
       await client.updateembed(client, guild).catch(() => {});
       if (textChannel) {

@@ -38,6 +38,7 @@ module.exports = {
     client.playlistLoading.delete(guildId);
     client.playlistStopped.set(guildId, Date.now());
     await client.autoresume.delete(guildId).catch(() => {});
+    if (client.actualPlaying) client.actualPlaying.delete(guildId);
     if (queue) {
       queue.songs = [];
       await queue.stop().catch(() => {});

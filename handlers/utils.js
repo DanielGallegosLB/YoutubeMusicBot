@@ -406,7 +406,7 @@ module.exports = async (client) => {
         const tStatsStr = tStatsParts.length > 0 ? ` | ${tStatsParts.join(" ")}` : "";
         queueString += `\`${index}.\` **${client.getTitle(track)}** - ${
           track.isLive ? "LIVE STREAM" : track.formattedDuration.split(" | ")[0]
-        } - \`${track.user.tag}\`${tStatsStr}${track._autoDj ? " 🛸 **· Auto DJ**" : ""}\n`;
+        } - \`${track.user?.tag || "Auto DJ"}\`${tStatsStr}${track._autoDj ? " 🛸 **· Auto DJ**" : ""}\n`;
       });
 
       const newQueueEmbed = new EmbedBuilder()
@@ -425,7 +425,7 @@ module.exports = async (client) => {
               currentSong?.isLive
                 ? "LIVE STREAM"
                 : currentSong?.formattedDuration.split(" | ")[0]
-            } - \`${currentSong?.user.tag}\`${currentStatsText}${
+            } - \`${currentSong?.user?.tag || "Auto DJ"}\`${currentStatsText}${
               currentSong?._autoDj ? " 🛸 **· Auto DJ**" : ""
             }`,
           },

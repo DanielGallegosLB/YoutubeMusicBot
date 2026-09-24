@@ -247,6 +247,8 @@ module.exports = async (client) => {
           // Toggle OFF: pressing the button again deactivates Auto DJ and restores the original order
           if (client.autoDj?.get(interaction.guildId)) {
             client.autoDj.delete(interaction.guildId);
+            if (_queue._autoDjSeen) { _queue._autoDjSeen.clear(); delete _queue._autoDjSeen; }
+            if (_queue._autoDjSelected) { _queue._autoDjSelected.clear(); delete _queue._autoDjSelected; }
             const snapshot = client.autoDjPrev?.get(interaction.guildId) || null;
             const kept = snapshot?.length ? snapshot.filter((s) => s !== _queue.songs[0]) : [];
             if (snapshot?.length) _queue.songs = [_queue.songs[0]].concat(kept);
@@ -265,160 +267,32 @@ module.exports = async (client) => {
           client.autoDj?.set(interaction.guildId, true);
           client.autoDjPrev?.set(interaction.guildId, _queue.songs.slice());
 
+          // Responder SIEMPRE al instante para no dejar "Clubot está pensando" colgado.
+          // El refinado/reordenamiento corre en background y refresca embeds.
+          const listenerCount = _channel.members ? _channel.members.filter((m) => !m.user.bot).size : 0;
+          interaction.editReply({
+            content: `🛸 **Auto DJ activado**\n▸ Reordené la cola para que escuches más seguido lo que más te gusta, mezclado con canciones aleatorias.\n▸ Voy a intercalar canciones según los gustos de ${listenerCount} que escuchan en el canal.\n🔄 Pulsa el botón otra vez para deshacerlo y recuperar tu cola original.`
+          }).catch(() => {});
+
           try {
-            // 1) Current up-next songs already in queue (real DisTube Song objects).
-            //    Separate the user's OWN list from leftovers of previous Auto DJ
-            //    runs (tagged _autoDj) so they never get mixed as if they were
-            //    the user's real queue again.
-            const upNext = _queue.songs.slice(1);
-            const userSongs = upNext.filter((s) => !s._autoDj);
-            const staleDj = upNext.filter((s) => s._autoDj);
-
-            // 2) User's favorites sorted best-first (score = (likes-dislikes)*10 + plays)
-            const favs = await Store.getSortedFavorites(client, interaction.guildId, interaction.user.id);
-            if (!favs.length) {
-              client.autoDj?.delete(interaction.guildId);
-              client.autoDjPrev?.delete(interaction.guildId);
-              return interaction.editReply({ content: "❌ No tienes canciones favoritas para el Auto DJ. ¡Usa el botón ⭐ Favorita para añadirlas!" }).catch(() => {});
-            }
-
-            // 3) Dedup against songs already in the queue AND against the favorites
-            //    list itself, so a favorite is never added twice. Never add more
-            //    favorites than there are real user songs, or the queue drowns
-            //    in Auto DJ tracks again.
-            const known = new Set(_queue.songs.map((s) => s.url));
-            const favCap = Math.min(20, Math.max(1, userSongs.length));
-            const favSeen = new Set();
-            const toAdd = [];
-            for (const f of favs) {
-              if (!f.url || known.has(f.url) || favSeen.has(f.url)) continue;
-              favSeen.add(f.url);
-              toAdd.push(f);
-              if (toAdd.length >= favCap) break;
-            }
-
-            // 4) No new favorites to mix: just shuffle the existing up-next
-            if (!toAdd.length) {
-              const listCount = userSongs.length + staleDj.length;
-              if (!listCount) {
-                client.autoDj?.delete(interaction.guildId);
-                client.autoDjPrev?.delete(interaction.guildId);
-                return interaction.editReply({ content: "❌ No hay canciones en tu cola para intercalar con tus favoritas. Añade tu música primero." }).catch(() => {});
-              }
-              const shuffleOnly = (arr) => { for (let i = arr.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [arr[i], arr[j]] = [arr[j], arr[i]]; } return arr; };
-              _queue.songs = [_queue.songs[0]].concat(shuffleOnly(userSongs.length ? userSongs : staleDj));
-              client.updatequeue(_queue).catch(() => {});
-              client.updateplayer(_queue).catch(() => {});
-              const ID0 = client.temp.get(interaction.guildId);
-              if (ID0) {
-                const msg0 = interaction.channel.messages.cache.get(ID0) || await interaction.channel.messages.fetch(ID0).catch(() => null);
-                if (msg0) msg0.edit({ components: client.buttons(false, _queue) }).catch(() => {});
-              }
-              return interaction.editReply({ content: `🛸 **Auto DJ activado**\n▸ No había favoritas nuevas para añadir (máx. ${favCap} porque hay ${userSongs.length} canción${userSongs.length === 1 ? "" : "es"} tuya${userSongs.length === 1 ? "" : "s"} en la cola).\n▸ Barajé ${listCount} canciones de tu cola.\n🔄 Pulsa el botón otra vez para deshacerlo y recuperar tu cola original.` }).catch(() => {});
-            }
-
-            // 5) Addition + reorder run in background so the button never blocks on heavy work
-            interaction.editReply({ content: `🛸 Activando Auto DJ, añadiendo ${toAdd.length} favoritas...` }).catch(() => {});
-            (async () => {
-              try {
-                const addedUrls = [];
-                const seen = new Set(known);
-                const playOpts = { member: interaction.member, textChannel: interaction.channel, selfDeaf: true, skip: false };
-                for (let i = 0; i < toAdd.length; i++) {
-                  const f = toAdd[i];
-                  if (seen.has(f.url)) continue;
-                  try {
-                    await client.distube.play(_channel, f.url, playOpts);
-                    addedUrls.push(f.url);
-                    seen.add(f.url);
-                  } catch (e) {
-                    client.logger.error(`[AutoDJ] No se pudo añadir favorita ${f.url}:`, e?.message || e);
-                  }
-                  if (i + 1 === toAdd.length || (i + 1) % 5 === 0) {
-                    interaction.editReply({ content: `🛸 Auto DJ: procesando favoritas ${i + 1}/${toAdd.length}...` }).catch(() => {});
-                  }
+            client.autoDjRefill(_queue, { channel: _channel, force: true })
+              .then(async () => {
+                const queueNow = client.distube.getQueue(interaction.guildId) || _queue;
+                client.updatequeue(queueNow).catch(() => {});
+                client.updateplayer(queueNow).catch(() => {});
+                const ID0 = client.temp.get(interaction.guildId);
+                if (ID0) {
+                  const msg0 = interaction.channel.messages.cache.get(ID0) || await interaction.channel.messages.fetch(ID0).catch(() => null);
+                  if (msg0) msg0.edit({ components: client.buttons(false, queueNow) }).catch(() => {});
                 }
-
-                const hadUpNext = userSongs.length > 0;
-                const addedCount = addedUrls.length;
-                if (!addedCount && !hadUpNext) {
-                  client.autoDj?.delete(interaction.guildId);
-                  client.autoDjPrev?.delete(interaction.guildId);
-                  return interaction.editReply({ content: "❌ No hay canciones favoritas nuevas para reproducir." }).catch(() => {});
-                }
-
-                // Grab the fresh queue and map real Song objects by URL
-                const q = client.distube.getQueue(interaction.guildId) || _queue;
-                const songByUrl = new Map();
-                for (const s of q.songs) if (s.url && !songByUrl.has(s.url)) songByUrl.set(s.url, s);
-
-                const favSongs = addedUrls.map((u) => songByUrl.get(u)).filter(Boolean);
-                // Tag tracks added by the Auto DJ so the queue can mark them
-                for (const s of favSongs) s._autoDj = true;
-                const upSongs = [];
-                const seenUp = new Set();
-                for (const s of userSongs) {
-                  if (!s.url || seenUp.has(s.url)) continue;
-                  seenUp.add(s.url);
-                  upSongs.push(songByUrl.get(s.url) || s);
-                }
-
-                // Mix: two independent groups shuffled separately (favorites and
-                // the existing up-next) and then interleaved STRICTLY one and one,
-                // starting with a favorite. No more "all favorites up front".
-                const shuffleBg = (arr) => { for (let i = arr.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [arr[i], arr[j]] = [arr[j], arr[i]]; } return arr; };
-                const djPool = shuffleBg(favSongs.slice());
-                const listPool = shuffleBg(upSongs);
-                const mixed = [];
-                let djTurn = true;
-                while (djPool.length || listPool.length) {
-                  if (djTurn && djPool.length) mixed.push(djPool.shift());
-                  else if (listPool.length) mixed.push(listPool.shift());
-                  else if (djPool.length) mixed.push(djPool.shift());
-                  djTurn = !djTurn;
-                }
-
-                // Replace the up-next portion of the queue with the mixed list,
-                // then guarantee ZERO repeated URLs across the whole queue.
-                q.songs = [q.songs[0]].concat(mixed);
-                const cleanSeen = new Set(q.songs[0]?.url ? [q.songs[0].url] : []);
-                const cleanQueue = [];
-                for (const s of q.songs) {
-                  if (!s.url || !cleanSeen.has(s.url)) {
-                    if (s.url) cleanSeen.add(s.url);
-                    cleanQueue.push(s);
-                  }
-                }
-                q.songs = cleanQueue;
-
-                // Persist / refresh embeds without blocking playback
-                client.updatequeue(q).catch(() => {});
-                client.updateplayer(q).catch(() => {});
-                const ID = client.temp.get(interaction.guildId);
-                if (ID) {
-                  const msg = interaction.channel.messages.cache.get(ID) || await interaction.channel.messages.fetch(ID).catch(() => null);
-                  if (msg) msg.edit({ components: client.buttons(false, q) }).catch(() => {});
-                }
-
-                const summary = [`🛸 **Auto DJ activado**`];
-                summary.push(`▸ Intercalé ${addedCount} favorita${addedCount === 1 ? "" : "s"} de una en una entre las ${upSongs.length} canciones de tu cola${cleanQueue.length < mixed.length + 1 ? " (quitando repetidas)" : ""}.`);
-                summary.push(`▸ Mezclé ${cleanQueue.length} canciones en cola sin duplicados.`);
-                summary.push(`🔄 Pulsa el botón otra vez para deshacerlo y recuperar tu cola original.`);
-                interaction.editReply({ content: summary.join("\n") }).catch(() => {});
-              } catch (err) {
-                client.logger.error(`[AutoDJ] Error:`, err);
-                client.autoDj?.delete(interaction.guildId);
-                client.autoDjPrev?.delete(interaction.guildId);
+              })
+              .catch((err) => {
+                client.logger.error(`[AutoDJ] Error en refill:`, err);
                 client.updateplayer(client.distube.getQueue(interaction.guildId) || _queue).catch(() => {});
-                interaction.editReply({ content: "❌ Ocurrió un error al activar el Auto DJ." }).catch(() => {});
-              }
-            })();
+              });
           } catch (err) {
             client.logger.error(`[AutoDJ] Error:`, err);
-            client.autoDj?.delete(interaction.guildId);
-            client.autoDjPrev?.delete(interaction.guildId);
             client.updateplayer(client.distube.getQueue(interaction.guildId) || _queue).catch(() => {});
-            return interaction.editReply({ content: "❌ Ocurrió un error al activar el Auto DJ." }).catch(() => {});
           }
         }
 
@@ -652,6 +526,7 @@ module.exports = async (client) => {
                 client.playlistLoading.delete(guildId);
                 client.playlistStopped.set(guildId, Date.now());
                 await client.autoresume.delete(guildId).catch(() => {});
+                if (client.actualPlaying) client.actualPlaying.delete(guildId);
                 queue.songs = [];
                 await queue.stop().catch((e) => {});
               }

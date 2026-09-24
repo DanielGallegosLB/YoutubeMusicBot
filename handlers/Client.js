@@ -185,6 +185,7 @@ class MusicBot extends Client {
       "RequestChannel",
       "ChannelCleaner",
       "DistubeHandler",
+      "QueueBridge",
       "utils",
     ].forEach((handler) => {
       require(`./${handler}`)(this);
