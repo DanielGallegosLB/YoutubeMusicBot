@@ -26,6 +26,13 @@ module.exports = {
     const guildId = message.guildId;
     client.playlistLoading.delete(guildId);
     client.playlistStopped.set(guildId, Date.now());
+    // Detener el timer de autoresume de este guild para que NO re-guarde la
+    // cola tras el stop (si seguía corriendo, en el próximo reinicio volvía a
+    // reproducir lo que el usuario ya había detenido).
+    if (client._autoresumeTimers?.has(guildId)) {
+      clearInterval(client._autoresumeTimers.get(guildId));
+      client._autoresumeTimers.delete(guildId);
+    }
     await client.autoresume.delete(guildId).catch(() => {});
     if (client.actualPlaying) client.actualPlaying.delete(guildId);
     if (queue) {
@@ -35,6 +42,15 @@ module.exports = {
     stopMarqueeActivity(client, message.guild);
     try {
       await client.distube.voices.leave(message.guild);
+    } catch {}
+    // Resetear el embed del player y la cola para que no queden controles viejos.
+    try {
+      await client.updateembed(client, message.guild).catch(() => {});
+      const mus = await client.music.get(`${guildId}.music`).catch(() => null);
+      if (mus?.channel) {
+        const ch = message.guild.channels.cache.get(mus.channel);
+        if (ch) await client.editPlayerMessage(ch).catch(() => {});
+      }
     } catch {}
     client.logger.log(`[Stop Msg] Música detenida en Guild ${guildId} por ${message.author.id}`);
     client.embed(message, `${client.config.emoji.SUCCESS} La reproducción fue **detenida** por <@${message.author.id}> y la cola fue limpiada!`);

@@ -4,8 +4,13 @@ const DashboardFeed = require("./DashboardFeed");
 const Store = require("./PlaylistStore");
 const UserHistory = require("./UserHistory");
 const { check_dj, skip } = require("./functions");
-const { fetchPlaylistURLs } = require("./PlaylistFetcher");
+const { streamPlaylist } = require("./PlaylistLoader");
 const { stopMarqueeActivity } = require("./ActivityManager");
+
+function logStream(client, guildId, msg) {
+  const ts = new Date().toLocaleTimeString("es-ES", { hour12: false });
+  console.log(`[PlaylistLoader][${ts}] G:${guildId} ${msg}`);
+}
 
 /**
  *
@@ -26,7 +31,7 @@ module.exports = async (client) => {
             return interaction.reply({ content: "Este botón no es para ti.", ephemeral: true }).catch(() => {});
           }
           await UserHistory.setNoSuggestions(client, interaction.guildId, userId, true);
-          return interaction.reply({ content: "✅ No recibirás más sugerencias al conectar.", ephemeral: true }).catch(() => {});
+          return interaction.reply({ content: "✅ No recibirás más sugerencias al conectar.", ephemeral: true }).then(() => client.scheduleDelete(interaction)).catch(() => {});
         }
 
         // Handle "Reproducir Favoritos" button
@@ -41,7 +46,8 @@ module.exports = async (client) => {
             const members = channel.members.filter((m) => !m.user.bot).map((m) => m.id);
             let favs;
             if (members.length > 1) {
-              favs = await Store.getInterleavedFavorites(client, interaction.guildId, members);
+              const excludes = await Store.getAutodjExcludes(client, interaction.guildId).catch(() => ({}));
+              favs = await Store.getInterleavedFavorites(client, interaction.guildId, members, excludes);
             } else {
               const playlists = await Store.getAll(client, interaction.guildId, interaction.user.id);
               favs = playlists["Canciones Favoritas"] || [];
@@ -62,7 +68,7 @@ module.exports = async (client) => {
             const label = members.length > 1
               ? `✅ Reproduciendo ${favs.length} favoritos intercalados (${members.length} usuarios).`
               : `✅ Reproduciendo ${favs.length} canciones de tus favoritos.`;
-            return interaction.followUp({ content: label, ephemeral: true }).catch(() => {});
+            return interaction.followUp({ content: label, ephemeral: true }).then(() => client.scheduleDelete(interaction)).catch(() => {});
           } catch (e) {
             return interaction.followUp({ content: "❌ Error al reproducir favoritos.", ephemeral: true }).catch(() => {});
           }
@@ -234,9 +240,42 @@ module.exports = async (client) => {
           return interaction.editReply({ content: reply }).catch(() => {});
         }
 
+        // Botón "🚫 No AutoDJ": salta la canción actual y la excluye para
+        // este usuario, de modo que el AutoDJ no vuelva a elegirla para él.
+        if (customId === "autodj_skipban") {
+          const _queue = client.distube.getQueue(interaction.guildId);
+          const _channel = interaction.member.voice.channel;
+          if (!_channel) {
+            await interaction.deferReply({ ephemeral: true }).catch(() => {});
+            return interaction.editReply({ content: "❌ Debes unirte a un canal de voz.", ephemeral: true }).catch(() => {});
+          }
+          await interaction.deferReply({ ephemeral: true }).catch(() => {});
+          const current = _queue?.songs?.[0];
+          if (!_queue || !current?.url) {
+            return interaction.editReply({ content: "❌ No hay una canción sonando ahora.", ephemeral: true }).catch(() => {});
+          }
+          try {
+            await Store.addAutodjExclude(client, interaction.guildId, interaction.user.id, current.url);
+            // Esta sesión tampoco la vuelve a elegir mientras dure la cola.
+            if (_queue._autoDjSeen) _queue._autoDjSeen.add(current.url);
+            let skipMsg = "";
+            if (_queue.songs.length > 1) {
+              try { await _queue.skip(); skipMsg = " La salté."; } catch {}
+            }
+            client.updatequeue(_queue).catch(() => {});
+            client.updateplayer(_queue).catch(() => {});
+            return interaction.editReply({
+              content: `🚫 Listo: **${current.name || "esa canción"}** ya no la va a poner el AutoDJ para vos.${skipMsg}`,
+              ephemeral: true,
+            }).catch(() => {});
+          } catch (e) {
+            return interaction.editReply({ content: "❌ No se pudo guardar la preferencia.", ephemeral: true }).catch(() => {});
+          }
+        }
+
+        //toggle autodj
         if (customId === "autodj") {
           const _queue = client.distube.getQueue(interaction.guildId);
-          if (!_queue || !_queue.songs?.length) return interaction.deferUpdate().catch(() => {});
           const _channel = interaction.member.voice.channel;
           if (!_channel) {
             await interaction.deferReply({ ephemeral: true }).catch(() => {});
@@ -244,14 +283,25 @@ module.exports = async (client) => {
           }
           await interaction.deferReply({ ephemeral: true }).catch(() => {});
 
-          // Toggle OFF: pressing the button again deactivates Auto DJ and restores the original order
+          // Toggle OFF: pressing the button again deactivates Auto DJ and restores the original order.
+          // Funciona aunque la cola esté vacía/muerta (p.ej. tras un FFMPEG_EXITED): antes, con cola
+          // vacía el botón no hacía NADA y parecía que "no obedecía" al quitar el AutoDJ.
           if (client.autoDj?.get(interaction.guildId)) {
             client.autoDj.delete(interaction.guildId);
-            if (_queue._autoDjSeen) { _queue._autoDjSeen.clear(); delete _queue._autoDjSeen; }
-            if (_queue._autoDjSelected) { _queue._autoDjSelected.clear(); delete _queue._autoDjSelected; }
-            const snapshot = client.autoDjPrev?.get(interaction.guildId) || null;
-            const kept = snapshot?.length ? snapshot.filter((s) => s !== _queue.songs[0]) : [];
-            if (snapshot?.length) _queue.songs = [_queue.songs[0]].concat(kept);
+            client.autoDjIntent?.delete(interaction.guildId);
+            if (_queue?._autoDjSeen) { _queue._autoDjSeen.clear(); delete _queue._autoDjSeen; }
+            if (_queue?._autoDjSelected) { _queue._autoDjSelected.clear(); delete _queue._autoDjSelected; }
+            let undoTxt = "▸ No había orden previo que restaurar.";
+            if (_queue?.songs?.length) {
+              const snapshot = client.autoDjPrev?.get(interaction.guildId) || null;
+              const kept = snapshot?.length ? snapshot.filter((s) => s !== _queue.songs[0]) : [];
+              if (snapshot?.length) _queue.songs = [_queue.songs[0]].concat(kept);
+              for (const s of _queue.songs) if (s) { s.autoDj = false; s._autoDj = false; }
+              undoTxt = kept.length
+                ? `▸ Restauré tu cola original (${kept.length} canciones pendientes) tal como estaba.\n▸ La canción actual sigue sonando.`
+                : "▸ No había orden previo que restaurar.";
+              client.updatequeue(_queue).catch(() => {});
+            }
             client.autoDjPrev?.delete(interaction.guildId);
             client.updateplayer(_queue).catch(() => {});
             const ID0 = client.temp.get(interaction.guildId);
@@ -259,12 +309,17 @@ module.exports = async (client) => {
               const msg0 = interaction.channel.messages.cache.get(ID0) || await interaction.channel.messages.fetch(ID0).catch(() => null);
               if (msg0) msg0.edit({ components: client.buttons(false, _queue) }).catch(() => {});
             }
-            const undoTxt = kept.length
-              ? `▸ Restauré tu cola original (${kept.length} canciones pendientes) tal como estaba.\n▸ La canción actual sigue sonando.`
-              : `▸ No había orden previo que restaurar.`;
             return interaction.editReply({ content: `🛸 Auto DJ desactivado\n${undoTxt}` }).catch(() => {});
           }
+
+          if (!_queue || !_queue.songs?.length) {
+            return interaction.editReply({
+              content: "❌ No hay una cola activa para activar el Auto DJ. Reproducí algo primero.",
+              ephemeral: true,
+            }).catch(() => {});
+          }
           client.autoDj?.set(interaction.guildId, true);
+          client.autoDjIntent?.set(interaction.guildId, true);
           client.autoDjPrev?.set(interaction.guildId, _queue.songs.slice());
 
           // Responder SIEMPRE al instante para no dejar "Clubot está pensando" colgado.
@@ -502,6 +557,26 @@ module.exports = async (client) => {
                 setTimeout(() => {
                   if (client.skipLocks.get(gid) === now) client.skipLocks.delete(gid);
                 }, 1200);
+
+                // Conteo de skips: si este usuario salta 2+ veces la MISMA canción,
+                // se excluye automáticamente para él y el AutoDJ ya no la elige.
+                const skipSong = queue.songs?.[0];
+                if (skipSong?.url && client.autoDj?.get(gid)) {
+                  try {
+                    const gidData = (await client.music.get(`${gid}.autodj`).catch(() => null)) || {};
+                    gidData.skips = gidData.skips || {};
+                    gidData.skips[skipSong.url] = gidData.skips[skipSong.url] || {};
+                    const cnt = (gidData.skips[skipSong.url][interaction.user.id] || 0) + 1;
+                    gidData.skips[skipSong.url][interaction.user.id] = cnt;
+                    if (cnt >= 2) {
+                      gidData.exclude = gidData.exclude || {};
+                      const ulist = (gidData.exclude[interaction.user.id] = gidData.exclude[interaction.user.id] || []);
+                      if (!ulist.includes(skipSong.url)) ulist.push(skipSong.url);
+                    }
+                    await client.music.set(`${gid}.autodj`, gidData);
+                  } catch (_) {}
+                }
+
                 skip(queue).catch(() => {});
                 refresh(queue, 300);
                 return send(
@@ -525,6 +600,10 @@ module.exports = async (client) => {
                 }
                 client.playlistLoading.delete(guildId);
                 client.playlistStopped.set(guildId, Date.now());
+                if (client._autoresumeTimers?.has(guildId)) {
+                  clearInterval(client._autoresumeTimers.get(guildId));
+                  client._autoresumeTimers.delete(guildId);
+                }
                 await client.autoresume.delete(guildId).catch(() => {});
                 if (client.actualPlaying) client.actualPlaying.delete(guildId);
                 queue.songs = [];
@@ -640,6 +719,35 @@ module.exports = async (client) => {
       }
 
       // Handle select menu for preview playlist selection
+      if (interaction.isStringSelectMenu() && interaction.customId === "fav_remove_select") {
+        const idx1 = Number(interaction.values[0]);
+        if (!idx1) return interaction.deferUpdate().catch(() => {});
+        const removed = await Store.removeTrack(client, interaction.guildId, interaction.user.id, "Canciones Favoritas", idx1);
+        await interaction.deferUpdate().catch(() => {});
+        const page = (client.favPages?.get(interaction.message.id) || 0);
+        if (removed) {
+          const { totalPages, newPage } = await (async () => {
+            const favs = await Store.getSortedFavorites(client, interaction.guildId, interaction.user.id);
+            const tp = Math.max(1, Math.ceil(favs.length / UserHistory.FAVORITES_PER_PAGE));
+            const np = Math.max(0, Math.min(page, tp - 1));
+            return { totalPages: tp, newPage: np };
+          })();
+          client.favPages.set(interaction.message.id, newPage);
+          const embed = await UserHistory.buildFavoritesEmbed(client, interaction.guildId, interaction.user.id, newPage);
+          if (!embed) {
+            return interaction.editReply({
+              embeds: [new EmbedBuilder().setColor("#00FF00").setDescription("✅ Todas las favoritas eliminadas.")],
+              components: []
+            }).catch(() => {});
+          }
+          const components = await UserHistory.buildFavoritesComponents(client, interaction.guildId, interaction.user.id, newPage);
+          return interaction.editReply({ embeds: [embed], components }).catch(() => {});
+        } else {
+          return interaction.editReply({ content: "❌ No se encontró la canción.", ephemeral: true }).catch(() => {});
+        }
+      }
+
+      // Handle select menu for preview playlist selection
       if (interaction.isStringSelectMenu() && interaction.customId === "preview_select_playlist") {
         await interaction.deferReply({ ephemeral: true }).catch((e) => {
           console.error("[Preview Select] deferReply failed:", e);
@@ -657,30 +765,18 @@ module.exports = async (client) => {
           };
           if (value.startsWith("url:")) {
             const playlistUrl = value.slice(4);
-            console.log(`[Preview Select] Fetching playlist URLs from: ${playlistUrl}`);
-            const urls = await fetchPlaylistURLs(playlistUrl);
-            console.log(`[Preview Select] Got ${urls.length} URLs`);
-            if (urls.length === 0) {
-              return interaction.editReply({ content: "❌ No se encontraron canciones en la lista." }).catch(() => {});
+            const result = await streamPlaylist({
+              client,
+              channel,
+              playlistUrl,
+              playOpts,
+              onStatus: (msg) => interaction.editReply({ content: msg }).catch(() => {}),
+            });
+            if (!result.firstPlayed) {
+              return interaction.editReply({ content: `❌ No se encontraron canciones en la lista o la primera falló.` }).catch(() => {});
             }
-            try {
-              await client.distube.voices.join(channel);
-            } catch (e) {
-              console.error("[Preview Select] Error joining voice:", e);
-            }
-            await client.distube.play(channel, urls[0], playOpts);
-            client.playlistLoading.set(interaction.guildId, true);
-            (async () => {
-              for (let i = 1; i < urls.length; i++) {
-                if (!client.playlistLoading.get(interaction.guildId)) break;
-                try {
-                  await client.distube.play(channel, urls[i], { ...playOpts, skip: false });
-                } catch (e) {}
-                await new Promise((r) => setTimeout(r, 250));
-              }
-              client.playlistLoading.delete(interaction.guildId);
-            })();
-            return interaction.editReply({ content: `✅ Cargando lista: \`${urls.length}\` canciones.` }).catch(() => {});
+            logStream(client, interaction.guildId, `[Preview Select] Lista cargada: ${result.matchedCount} canciones.`);
+            return interaction.editReply({ content: `✅ Cargando lista: \`${result.matchedCount}\` canciones.` }).catch(() => {});
           } else if (value.startsWith("store:")) {
             const playlistName = value.slice(6);
             const playlist = await Store.get(client, interaction.guildId, interaction.user.id, playlistName);
@@ -764,7 +860,7 @@ module.exports = async (client) => {
             }
           }
 
-          await interaction.reply({ content: `✅ Se eliminaron ${removed} canción(es).`, ephemeral: true }).catch(() => {});
+          await interaction.reply({ content: `✅ Se eliminaron ${removed} canción(es).`, ephemeral: true }).then(() => client.scheduleDelete(interaction)).catch(() => {});
         } catch (e) {
           client.logger.error(`[Fav Remove Modal Error]`, e);
           interaction.reply({ content: "❌ Error al procesar.", ephemeral: true }).catch(() => {});
@@ -774,15 +870,22 @@ module.exports = async (client) => {
     });
 
     async function send(interaction, string) {
-      await interaction.followUp({
-        embeds: [
-          new EmbedBuilder()
-            .setColor(client.config.embed.color)
-            .setDescription(`> ${string.substring(0, 3000)}`)
-            .setFooter(client.getFooter(interaction.user)),
-        ],
-        ephemeral: true,
-      }).catch((e) => null);
+      try {
+        await interaction.followUp({
+          embeds: [
+            new EmbedBuilder()
+              .setColor(client.config.embed.color)
+              .setDescription(`> ${string.substring(0, 3000)}`)
+              .setFooter(client.getFooter(interaction.user)),
+          ],
+          ephemeral: true,
+        });
+      } catch (e) {
+        client.logger?.error?.(`[Send] followUp falló:`, e?.message || e);
+      }
+      // OJO: los mensajes efímeros NO se borran con message.delete()
+      // (no existen para la API del canal); solo interaction.deleteReply().
+      client.scheduleDelete(interaction);
     }
   } catch (e) {
     console.log(e);

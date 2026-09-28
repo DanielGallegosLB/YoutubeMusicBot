@@ -1,13 +1,16 @@
 const fs = require("fs");
 const path = require("path");
+const PlaylistStore = require("./PlaylistStore");
 
 // Puente bidireccional con el dashboard de ParadiseBot mediante archivos
 // compartidos (misma idea que musicbot_events.txt):
 //   →  musicbot_queue.json : snapshot de todas las colas activas (escribe JUGNU)
 //   ←  musicbot_cmds.json  : comandos del dashboard (reordenar) que JUGNU aplica
+//   ack musicbot_favclear_result.json : resultado del "quitar favoritas de todos"
 const DASH_DIR = "C:/Users/Dani/Downloads/Proyectos/34-ParadiseBot-Economy/dashboard";
 const QUEUE_FILE = path.join(DASH_DIR, "musicbot_queue.json");
 const CMDS_FILE = path.join(DASH_DIR, "musicbot_cmds.json");
+const CLEAR_RESULT_FILE = path.join(DASH_DIR, "musicbot_favclear_result.json");
 
 const SNAPSHOT_INTERVAL = 5000; // ms
 const CMDS_INTERVAL = 2000; // ms
@@ -126,9 +129,11 @@ async function writeSnapshot(client) {
 }
 
 // Procesa los comandos que el dashboard dejó en musicbot_cmds.json.
-// Formato: array de { action: "move", guildId, from, to } (índices 1-based,
-// igual que /reordenar). Tras aplicar, reemplaza el archivo con [].
-function processCommands(client) {
+// Formato: array de comandos. Soportados:
+//   { action: "move", guildId, from, to }          → reordenar cola (índices 1-based)
+//   { action: "clear_guild_favorites", guildId, t } → vaciar favoritas de todos
+// Tras aplicar, reemplaza el archivo con [].
+async function processCommands(client) {
   let cmds = [];
   try {
     if (fs.existsSync(CMDS_FILE)) {
@@ -143,7 +148,28 @@ function processCommands(client) {
 
   const queueCache = new Map();
   for (const cmd of cmds) {
-    if (!cmd || cmd.action !== "move" || !cmd.guildId) continue;
+    if (!cmd || !cmd.guildId) continue;
+
+    if (cmd.action === "clear_guild_favorites") {
+      try {
+        const res = await PlaylistStore.clearGuildFavorites(client, cmd.guildId);
+        queueWrite(
+          CLEAR_RESULT_FILE,
+          JSON.stringify({
+            requestedAt: cmd.t || null,
+            doneAt: new Date().toISOString(),
+            guildId: cmd.guildId,
+            removed: res.removed || 0,
+            users: res.users || 0,
+          })
+        );
+      } catch (e) {
+        console.warn("[Bridge] Error al limpiar favoritas:", e?.message || e);
+      }
+      continue;
+    }
+
+    if (cmd.action !== "move") continue;
     const from = cmd.from;
     const to = cmd.to;
     if (!Number.isInteger(from) || !Number.isInteger(to)) continue;
@@ -175,6 +201,8 @@ function processCommands(client) {
 
 module.exports = (client) => {
   setInterval(() => writeSnapshot(client), SNAPSHOT_INTERVAL);
-  setInterval(() => processCommands(client), CMDS_INTERVAL);
+  setInterval(() => {
+    processCommands(client).catch((e) => console.warn("[Bridge] processCommands:", e?.message || e));
+  }, CMDS_INTERVAL);
   setTimeout(() => writeSnapshot(client), 1500); // primer snapshot apenas inicie
 };

@@ -295,7 +295,7 @@ module.exports = {
           const resolved = await searchYoutube(song);
           if (resolved) {
             await client.distube.play(channel, resolved, playOpts);
-            interaction.followUp({ content: `✅ Saltando a \`${song}\`...`, ephemeral: true }).then((msg) => setTimeout(() => msg.delete().catch(() => {}), 3000));
+            interaction.followUp({ content: `✅ Saltando a \`${song}\`...`, ephemeral: true }).then(() => client.scheduleDelete(interaction));
             return;
           }
         } catch (e2) {
@@ -311,6 +311,6 @@ module.exports = {
     interaction.followUp({
       content: `🔍 Buscando \`${song}\` y saltando la actual...`,
       ephemeral: true,
-    }).then((msg) => setTimeout(() => msg.delete().catch(() => {}), 3000));
+    }).then(() => client.scheduleDelete(interaction));
   },
 };

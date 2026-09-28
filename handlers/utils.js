@@ -152,10 +152,37 @@ module.exports = async (client) => {
         .setEmoji("⭐")
         .setLabel("Favorita")
         .setDisabled(dis(!track)),
+      new ButtonBuilder()
+        .setStyle(ButtonStyle.Danger)
+        .setCustomId("autodj_skipban")
+        .setEmoji("🚫")
+        .setLabel("No AutoDJ")
+        .setDisabled(dis(!track)),
     ]);
 
     return [row1, row2, row3];
   };
+
+  // Programa el auto-borrado de confirmaciones efímeras. Tiempo configurable
+  // desde settings/config.js → options.ephemeralTTL (ms). 0 = no borrar.
+  client.scheduleDelete = (target, ms) => {
+    if (!target) return;
+    const ttl =
+      Number.isInteger(ms) && ms > 0
+        ? ms
+        : client.config?.options?.ephemeralTTL || 10000;
+    if (!ttl || ttl <= 0) return;
+    setTimeout(() => {
+      try {
+        if (typeof target.delete === "function") target.delete().catch(() => {});
+        else if (typeof target.deleteReply === "function")
+          target.deleteReply().catch(() => {});
+      } catch {}
+    }, ttl);
+  };
+  console.log(
+    `[Utils] scheduleDelete listo (ephemeralTTL=${client.config?.options?.ephemeralTTL ?? 10000}ms)`
+  );
 
   client.editPlayerMessage = async (channel) => {
     try {

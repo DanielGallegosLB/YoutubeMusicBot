@@ -382,7 +382,7 @@ module.exports = {
     const actionRow = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setCustomId("fav_remove")
-        .setLabel("Eliminar")
+        .setLabel("Eliminar por n°")
         .setEmoji("🗑️")
         .setStyle(ButtonStyle.Danger),
       new ButtonBuilder()
@@ -397,6 +397,21 @@ module.exports = {
         .setStyle(ButtonStyle.Success)
     );
 
-    return [navRow, actionRow];
+    // Menú para eliminar una canción de la página actual (más simple que escribir números).
+    const pageTracks = favs.slice(safePage * FAVORITES_PER_PAGE, safePage * FAVORITES_PER_PAGE + FAVORITES_PER_PAGE);
+    const removeSel = new StringSelectMenuBuilder()
+      .setCustomId("fav_remove_select")
+      .setPlaceholder("🗑️ Eliminar una canción de esta página...")
+      .setMaxValues(1)
+      .setMinValues(1)
+      .addOptions(
+        pageTracks.map((t, i) => ({
+          label: (t.name || "Desconocido").substring(0, 100),
+          value: String(safePage * FAVORITES_PER_PAGE + i + 1),
+        }))
+      );
+    const removeRow = new ActionRowBuilder().addComponents(removeSel);
+
+    return [navRow, removeRow, actionRow];
   },
 };

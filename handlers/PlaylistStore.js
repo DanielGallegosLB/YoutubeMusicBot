@@ -117,6 +117,89 @@ module.exports = {
     return removedCount;
   },
 
+  /** Vacía la lista "Canciones Favoritas" de TODOS los usuarios del servidor y
+   *  devuelve `{ removed, users }` (canciones eliminadas / usuarios afectados).
+   *  Conserva el resto de playlists de cada usuario (y trackstats / autodj).
+   *  Usa un solo get + set del árbol de la guild para no iterar miembros. */
+  async clearGuildFavorites(client, guildId) {
+    const root = await client.music.get(guildId);
+    if (!root || typeof root !== "object" || !root.playlists || typeof root.playlists !== "object") {
+      return { removed: 0, users: 0 };
+    }
+    const playlists = root.playlists;
+    const target = "canciones favoritas";
+    let removed = 0;
+    let users = 0;
+    for (const userId of Object.keys(playlists)) {
+      const pl = playlists[userId];
+      if (!pl || typeof pl !== "object") continue;
+      let dirty = false;
+      for (const name of Object.keys(pl)) {
+        if (String(name).toLowerCase() === target) {
+          removed += Array.isArray(pl[name]) ? pl[name].length : 0;
+          delete pl[name];
+          dirty = true;
+        }
+      }
+      if (dirty) users++;
+    }
+    await client.music.set(`${guildId}.playlists`, playlists);
+    return { removed, users };
+  },
+
+  // ── Stats globales por canción en el gremio (persisten aunque se quiten de
+  // las favoritas: likes/dislikes/plays NO viven dentro del track de favoritos,
+  // sino en un store aparte por url). ──
+
+  /** Leer el store de stats del gremio: { [url]: { plays, likedBy[], dislikedBy[] } } */
+  async guildStats(client, guildId) {
+    const key = `${guildId}.trackstats`;
+    await client.music.ensure(key, {});
+    return (await client.music.get(key)) || {};
+  },
+
+  async saveGuildStats(client, guildId, stats) {
+    await client.music.set(`${guildId}.trackstats`, stats);
+  },
+
+  /** Registra un like global de un usuario a una canción (sin duplicar el mismo user). */
+  async trackLike(client, guildId, trackUrl, userId) {
+    if (!trackUrl) return;
+    const st = await this.guildStats(client, guildId);
+    const e = st[trackUrl] || { plays: 0, likedBy: [], dislikedBy: [] };
+    e.likedBy = e.likedBy || [];
+    e.dislikedBy = e.dislikedBy || [];
+    if (!e.likedBy.includes(userId)) e.likedBy.push(userId);
+    const di = e.dislikedBy.indexOf(userId);
+    if (di !== -1) e.dislikedBy.splice(di, 1);
+    st[trackUrl] = e;
+    await this.saveGuildStats(client, guildId, st);
+  },
+
+  /** Registra un dislike global de un usuario a una canción (sin duplicar el mismo user). */
+  async trackDislike(client, guildId, trackUrl, userId) {
+    if (!trackUrl) return;
+    const st = await this.guildStats(client, guildId);
+    const e = st[trackUrl] || { plays: 0, likedBy: [], dislikedBy: [] };
+    e.likedBy = e.likedBy || [];
+    e.dislikedBy = e.dislikedBy || [];
+    if (!e.dislikedBy.includes(userId)) e.dislikedBy.push(userId);
+    const li = e.likedBy.indexOf(userId);
+    if (li !== -1) e.likedBy.splice(li, 1);
+    st[trackUrl] = e;
+    await this.saveGuildStats(client, guildId, st);
+  },
+
+  /** Registra una reproducción global de una canción en el gremio. */
+  async trackPlay(client, guildId, trackUrl) {
+    if (!trackUrl) return;
+    const st = await this.guildStats(client, guildId);
+    const e = st[trackUrl] || { plays: 0, likedBy: [], dislikedBy: [] };
+    e.plays = (e.plays || 0) + 1;
+    st[trackUrl] = e;
+    await this.saveGuildStats(client, guildId, st);
+  },
+
   /** Delete a playlist; returns true if deleted */
   async delete(client, guildId, userId, name) {
     const key = `${guildId}.playlists.${userId}`;
@@ -142,7 +225,10 @@ module.exports = {
     // Accumulate a like (allows multiple likes per user across different plays)
     track.likedBy.push(userId);
     all[name] = list;
-    await client.music.set(key, all);
+    await Promise.all([
+      client.music.set(key, all),
+      this.trackLike(client, guildId, trackUrl, userId),
+    ]);
     return {
       liked: true,
       likeCount: track.likedBy.length,
@@ -166,7 +252,10 @@ module.exports = {
     // Accumulate a dislike
     track.dislikedBy.push(userId);
     all[name] = list;
-    await client.music.set(key, all);
+    await Promise.all([
+      client.music.set(key, all),
+      this.trackDislike(client, guildId, trackUrl, userId),
+    ]);
     return {
       liked: false,
       likeCount: track.likedBy.length,
@@ -222,10 +311,11 @@ module.exports = {
    * @param {string[]} userIds - array of user IDs in the voice channel
    * @returns {Array} interleaved track list
    */
-  async getInterleavedFavorites(client, guildId, userIds) {
+  async getInterleavedFavorites(client, guildId, userIds, excludes = {}) {
     const userLists = [];
     for (const uid of userIds) {
-      const sorted = await this.getSortedFavorites(client, guildId, uid);
+      const exclude = new Set(excludes?.[uid] || []);
+      const sorted = (await this.getSortedFavorites(client, guildId, uid)).filter((t) => !exclude.has(t.url));
       if (sorted.length > 0) userLists.push(sorted);
     }
     if (userLists.length === 0) return [];
@@ -251,29 +341,55 @@ module.exports = {
     return result;
   },
 
+  /** Get the per-user AutoDJ exclusion lists for a guild: { [userId]: [urls...] } */
+  async getAutodjExcludes(client, guildId) {
+    const data = (await client.music.get(`${guildId}.autodj`).catch(() => null)) || {};
+    return data?.exclude || {};
+  },
+
+  /** Add a URL to a user's AutoDJ exclude list (persistent). Returns the updated list */
+  async addAutodjExclude(client, guildId, userId, url) {
+    const data = (await client.music.get(`${guildId}.autodj`).catch(() => null)) || {};
+    data.exclude = data.exclude || {};
+    data.exclude[userId] = data.exclude[userId] || [];
+    if (!data.exclude[userId].includes(url)) data.exclude[userId].push(url);
+    await client.music.set(`${guildId}.autodj`, data);
+    return data.exclude[userId];
+  },
+
+  /** Get the AutoDJ skip counters per user: { [url]: { [userId]: count } } */
+  async getAutodjSkips(client, guildId) {
+    const data = (await client.music.get(`${guildId}.autodj`).catch(() => null)) || {};
+    return data?.skips || {};
+  },
+
   /** Get global stats (likes, dislikes, plays) for a track URL across all users in a guild */
   async getGlobalTrackStats(client, guildId, trackUrl, allPlaylists) {
     if (!allPlaylists) allPlaylists = await client.music.get(`${guildId}.playlists`) || {};
-    let likes = 0;
-    let dislikes = 0;
     let plays = 0;
     const likedByIds = [];
     const dislikedByIds = [];
     const likedNames = [];
     const dislikedNames = [];
+    const pushUnique = (arr, id) => { if (!arr.includes(id)) arr.push(id); };
     for (const userId of Object.keys(allPlaylists)) {
       const userPlaylists = allPlaylists[userId];
       const favs = userPlaylists?.["Canciones Favoritas"] || [];
       for (const t of favs) {
         if (t.url === trackUrl) {
-          likes += (t.likedBy || []).length;
-          dislikes += (t.dislikedBy || []).length;
           plays += (t.playCount || 0);
-          for (const uid of (t.likedBy || [])) if (!likedByIds.includes(uid)) likedByIds.push(uid);
-          for (const uid of (t.dislikedBy || [])) if (!dislikedByIds.includes(uid)) dislikedByIds.push(uid);
+          for (const uid of (t.likedBy || [])) pushUnique(likedByIds, uid);
+          for (const uid of (t.dislikedBy || [])) pushUnique(dislikedByIds, uid);
           break;
         }
       }
+    }
+    // Sum the persistent guild stats too (survive favorites removal), de-duplicating user IDs.
+    const gStat = (await this.guildStats(client, guildId))[trackUrl];
+    if (gStat) {
+      plays = Math.max(plays, gStat.plays || 0);
+      for (const uid of (gStat.likedBy || [])) pushUnique(likedByIds, uid);
+      for (const uid of (gStat.dislikedBy || [])) pushUnique(dislikedByIds, uid);
     }
     const resolveNames = (ids) => Promise.all(ids.map(async (id) => {
       const member = await client.users.fetch(id).catch(() => null);
@@ -282,8 +398,8 @@ module.exports = {
     likedNames.push(...await resolveNames(likedByIds));
     dislikedNames.push(...await resolveNames(dislikedByIds));
     return {
-      likes,
-      dislikes,
+      likes: likedByIds.length,
+      dislikes: dislikedByIds.length,
       plays,
       likedBy: likedNames,
       dislikedBy: dislikedNames,
@@ -299,7 +415,10 @@ module.exports = {
     if (!track) return false;
     track.playCount = typeof track.playCount === "number" && track.playCount > 0 ? track.playCount + 1 : 1;
     all[name] = list;
-    await client.music.set(key, all);
+    await Promise.all([
+      client.music.set(key, all),
+      this.trackPlay(client, guildId, trackUrl),
+    ]);
     return true;
   },
 

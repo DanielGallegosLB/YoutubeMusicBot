@@ -91,7 +91,23 @@ module.exports = async (client) => {
    * @param {boolean} [opts.force]  - fuerza el reabastecimiento aunque queden canciones
    * @returns {Promise<number>} - cantidad de canciones añadidas
    */
-  client.autoDjRefill = async (queue, { channel, force = false } = {}) => {
+  client.autoDjRefill = async function _autoDjRefill(autodjTaskQueue, autodjTaskOpts = {}) {
+    const _gid = autodjTaskQueue?.textChannel?.guildId || autodjTaskQueue?.guildId;
+    if (!_gid) return 0;
+    client.autoDjBusy = client.autoDjBusy || new Map();
+    if (client.autoDjBusy.get(_gid)) return 0;
+    client.autoDjBusy.set(_gid, true);
+    try {
+      return await client.autoDjRefillInner(autodjTaskQueue, autodjTaskOpts);
+    } catch (e) {
+      client.logger.error(`[AutoDJ] Refill error:`, e);
+      return 0;
+    } finally {
+      client.autoDjBusy.delete(_gid);
+    }
+  };
+
+  client.autoDjRefillInner = async (queue, { channel, force = false } = {}) => {
     const guildId = queue.textChannel?.guildId || queue.guildId;
     if (!guildId || !client.autoDj?.get(guildId) || !queue?.songs?.length) return 0;
 
@@ -105,8 +121,11 @@ module.exports = async (client) => {
     const seen = queue._autoDjSeen;
 
     // Pool = favoritas intercaladas de TODA la gente que escucha, ordenadas
-    // por score (el algoritmo del bot).
-    const favs = await PlaylistStore.getInterleavedFavorites(client, guildId, listeners);
+    // por score (el algoritmo del bot). Se filtran las que cada oyente pidió
+    // NO volver a escuchar con AutoDJ (botón "🚫 No AutoDJ" / 2+ skips).
+    const excludeData = await PlaylistStore.getAutodjExcludes(client, guildId).catch(() => ({}));
+    const excludedUrls = new Set(Object.values(excludeData || {}).flat());
+    const favs = await PlaylistStore.getInterleavedFavorites(client, guildId, listeners, excludeData);
     if (!favs.length) return 0;
 
     const shuffleAny = (arr) => { for (let i = arr.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [arr[i], arr[j]] = [arr[j], arr[i]]; } return arr; };
@@ -129,7 +148,9 @@ module.exports = async (client) => {
       const selectedUrls = queue._autoDjSelected;
       const orderUrl = favs.map((f) => f.url);
       const byScore = (a, b) => orderUrl.indexOf(a.url) - orderUrl.indexOf(b.url);
-      let candidates = favsInQueue.filter((s) => !selectedUrls.has(s.url)).sort(byScore);
+      // El AutoDJ también respeta las exclusiones de la cola: un tema excluido no
+      // recibe badge ni se vuelve a intercalar.
+      let candidates = favsInQueue.filter((s) => !selectedUrls.has(s.url) && !excludedUrls.has(s.url)).sort(byScore);
       if (!candidates.length) { selectedUrls.clear(); candidates = favsInQueue.slice().sort(byScore); }
       // ≈1 cada 4 canciones llevan badge (patrón 1 seleccionada : 3 aleatorias).
       const selCount = Math.max(1, Math.floor(rest.length / 4));
@@ -174,14 +195,14 @@ module.exports = async (client) => {
     const upNext = queue.songs.length - 1;
     if (!force && upNext >= 4) return 0;
 
-    const algoPick = favs.find((f) => f.url && !seen.has(f.url));
+    const algoPick = favs.find((f) => f.url && !seen.has(f.url) && !excludedUrls.has(f.url));
     if (!algoPick) return 0;
     seen.add(algoPick.url);
 
     // "3 aleatorias": canciones que le gustan al oyente (sus favoritas, que incluyen
     // lo de la lista reproducida porque addSong lo va guardando). Filtra lo ya
-    // usado/encolado y el algoPick para no repetir.
-    const randPool = favs.filter((f) => f.url && f !== algoPick && !seen.has(f.url));
+    // usado/encolado, las exclusiones y el algoPick para no repetir.
+    const randPool = favs.filter((f) => f.url && f !== algoPick && !seen.has(f.url) && !excludedUrls.has(f.url));
     const randomCount = 3; // patrón pedido: 1 algorítmica + 3 aleatorias
     const randoms = shuffleAny(randPool).slice(0, randomCount);
     for (const f of randoms) if (f?.url) seen.add(f.url);
@@ -404,14 +425,11 @@ module.exports = async (client) => {
     const _head = queue.songs.slice(0, 3).map((s) => s?.name || "?").join(" | ");
     client.logger.log(`[addSong] "${song.name}" -> head: ${_head} (len ${queue.songs.length})`);
 
-    // Auto-save individual songs to user's favorites (skip if part of a playlist load)
-    if (!queue._sessionSourcePlaylist && song.user?.id) {
-      try {
-        await UserHistory.recordSongPlay(client, queue.textChannel.guildId, song.user.id, song, song.user, queue.textChannel.id);
-      } catch (e) {
-        client.logger.error(`[UserHistory] Error saving song to favorites:`, e);
-      }
-    }
+    // Las favoritas se llenan SOLO a mano (comando guardar/like). Ya NO se
+    // auto-guardan canciones al reproducirse, aunque las haya pedido otro
+    // usuario o el AutoDJ: evita que "pongan favorito a una canción y se
+    // agregue toda la lista". countPlay (línea 289) solo cuenta reproducciones
+    // de canciones QUE YA ESTÁN en favoritas, no agrega nada nuevo.
 
     let data = await client.music.get(`${queue.textChannel.guildId}.music`);
     if (data && data.channel === queue.textChannel.id) return;
@@ -512,9 +530,47 @@ module.exports = async (client) => {
     const code = error?.errorCode || error?.code;
     if (code === "FFMPEG_EXITED") {
       const trackName = song?.name ? `"${song.name}"` : `#${queue?.songs?.[0]?.name || "desconocida"}`;
+      const url = song?.url || queue?.songs?.[0]?.url;
+
+      // Auto-retry: el stream de YouTube a veces muere por throttle momentáneo.
+      // Volvemos a reproducir el MISMO tema con un stream fresco (yt-dlp re-resuelve)
+      // hasta 2 veces en 30 segundos; si sigue fallando, se salta como antes.
+      if (queue && url) {
+        if (!client.ffmpegRetry) client.ffmpegRetry = new Map();
+        const st = client.ffmpegRetry.get(url) || { n: 0, ts: 0 };
+        if (Date.now() - st.ts > 30000) st.n = 0;
+        st.ts = Date.now();
+        if (st.n < 2) {
+          st.n += 1;
+          client.ffmpegRetry.set(url, st);
+          const vc = queue.voice?.connection?.channel || queue.textChannel?.guild?.members?.me?.voice?.channel;
+          if (vc && vc.members) {
+            try {
+              client.logger.error(
+                `[FFMPEG_EXITED] Reintentando (${st.n}/2) la canción ${trackName} con un stream nuevo... ` +
+                `(si persiste, regenera las cookies del navegador: npm run export-cookies)`
+              );
+              await client.distube.play(vc, url, {
+                member: queue.songs?.[0]?.member || vc.guild?.members?.me,
+                textChannel: queue.textChannel,
+                selfDeaf: true,
+                skip: true,
+              });
+              return;
+            } catch (e) {
+              client.logger.error(`[FFMPEG_EXITED] El reintento de ${trackName} también falló:`, e?.message || e);
+            }
+          }
+          client.ffmpegRetry.delete(url);
+        } else {
+          client.ffmpegRetry.delete(url);
+        }
+      }
+
       client.logger.error(
-        `[FFMPEG_EXITED] La reproducción de la canción ${trackName} se interrumpió. ` +
-        `Causa probable: el stream de YouTube fue throttled/cortado (cookies faltantes o cliente web_embedded) o el proceso de ffmpeg falló. ` +
+        `[FFMPEG_EXITED] La reproducción de la canción ${trackName} se interrumpió tras varios intentos. ` +
+        `Causa probable: el stream de YouTube fue throttled/cortado (cookies viejas) o el proceso de ffmpeg falló. ` +
+        `Regenerá las cookies frescas con "npm run export-cookies" en la PC del bot. ` +
         `Saltando a la siguiente canción si existe para continuar la reproducción.`
       );
       // Try to skip to the next song so playback continues instead of dying silently
@@ -664,16 +720,18 @@ module.exports = async (client) => {
     client.distube.on("initQueue", async (queue) => {
     queue.volume = client.config.options.defaultVolume;
 
-    // Reset Auto DJ to off by default on every new play session,
-    // PERO si estaba activo antes de un Stop/limpieza, se conserva
-    // (así el refill vuelve a correr sin que el usuario reactive el botón).
+    // Reset Auto DJ to off by default on every new play session.
+    // El Auto DJ NUNCA se reactiva solo: solo arranca si el usuario lo pidió
+    // explícitamente (autoDjIntent=true) y sigue apagado si lo apagó, aunque la
+    // cola se reinicie por errores/Stop (antes se re-enableaba solo y parecía
+    // que los controles de skip/pausa "no hacían caso" tras quitar el AutoDJ).
     const guildId = queue.textChannel?.guildId || queue.guildId;
-    const wasOn = client.autoDj?.get(guildId) === true;
-    if (wasOn) {
+    if (client.autoDjIntent?.get(guildId) === true) {
       client.autoDj?.set(guildId, true);
     } else {
       client.autoDj?.delete(guildId);
       client.autoDjPrev?.delete(guildId);
+      client.autoDjBusy?.delete(guildId);
     }
 
     // init auto resume for the queue

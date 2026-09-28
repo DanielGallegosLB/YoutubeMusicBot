@@ -41,6 +41,12 @@ module.exports = async (client, queue) => {
 
   const timer = setInterval(async () => {
     try {
+      // Si hubo un stop reciente en este guild, no re-guardar el estado de
+      // autoresume (cerraba la carrera timer vs. stop que volvía a reproducir).
+      if (client.playlistStopped?.get?.(queue.textChannel.guildId)) {
+        await client.autoresume.delete(queue.textChannel.guildId).catch(() => {});
+        return;
+      }
       // Get the current queue for the guild
       const newQueue = client.distube.getQueue(queue.textChannel.guild);
       // Get autoresume data for the guild

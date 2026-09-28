@@ -109,7 +109,7 @@ module.exports = {
         client.playlistLoading.delete(interaction.guild.id);
       })();
 
-      setTimeout(() => interaction.deleteReply().catch(() => {}), 10000);
+      client.scheduleDelete(interaction);
     } catch (e) {
       client.logger.error("Error al reproducir lista guardada:", e);
       return client.embed(interaction, `${client.config.emoji.ERROR} Error: ${e.message}`);

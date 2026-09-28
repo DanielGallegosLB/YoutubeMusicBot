@@ -55,6 +55,9 @@ class MusicBot extends Client {
     this.skipLocks = new Map();
     this.autoDj = new Map();
     this.autoDjPrev = new Map();
+    this.autoDjIntent = new Map();
+    this.autoDjBusy = new Map();
+    this.ffmpegRetry = new Map();
     this.mcategories = fs.readdirSync("./Commands/Message");
     this.scategories = fs.readdirSync("./Commands/Slash");
     this.temp = new Collection();
@@ -77,9 +80,14 @@ class MusicBot extends Client {
           extractorArgs: "youtube:player_client=web_embedded,android",
         };
         try {
-          const cookiePath = require("path").join(__dirname, "../yt-cookies.txt");
-          if (require("fs").existsSync(cookiePath) && require("fs").statSync(cookiePath).size > 10) {
-            opts.cookies = cookiePath;
+          const pathMod = require("path");
+          const fsMod = require("fs");
+          for (const rel of ["../yt-cookies.txt", "../yt-cookies.txt.bak"]) {
+            const cookiePath = pathMod.join(__dirname, rel);
+            if (fsMod.existsSync(cookiePath) && fsMod.statSync(cookiePath).size > 10) {
+              opts.cookies = cookiePath;
+              break;
+            }
           }
         } catch (_) {}
         return opts;

@@ -59,6 +59,10 @@ async function check_dj(client, member, song = null) {
   //if no dj roles return false, so that it continues
   let isdj = false;
   if (!roleid) return false;
+  // Las canciones que pone el AutoDJ tienen al BOT como solicitante (nadie las
+  // pidió): cualquiera puede controlarlas. Sin esto, con rol DJ configurado los
+  // controles de skip/pausa "no hacían caso" cuando sonaba una canción del AutoDJ.
+  if (song?.autoDj || song?._autoDj || song?.user?.id === client.user?.id) return false;
   //if the role does not exist, then skip this current loop run
   if (!member.guild.roles.cache.get(roleid)) {
     await client.music.set(`${member.guild.id}.djrole`, null);

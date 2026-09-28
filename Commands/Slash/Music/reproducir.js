@@ -5,13 +5,13 @@ const {
   ApplicationCommandOptionType,
 } = require("discord.js");
 const MusicBot = require("../../../handlers/Client");
-const { Queue } = require("distube");
 const { spawn } = require("child_process");
 const path = require("path");
 const fs = require("fs");
 const UserHistory = require("../../../handlers/UserHistory");
 const { isAgeGateError, friendlyPlaybackError } = require("../../../handlers/PlaybackError");
 const { searchYoutube } = require("../../../handlers/PlaylistFetcher");
+const { streamPlaylist } = require("../../../handlers/PlaylistLoader");
 
 const YTDLP_PATH = path.join(
   process.cwd(),
@@ -96,100 +96,6 @@ function fetchPlaylistTitle(playlistUrl) {
       resolve(title || "");
     });
   });
-}
-
-function fetchPlaylistURLs(playlistUrl) {
-  return new Promise(async (resolve, reject) => {
-    let allUrls = [];
-    let startItem = 1;
-    const batchSize = 100;
-    const maxItems = 1000;
-    const cookiePath = path.join(process.cwd(), "yt-cookies.txt");
-    let lastStderr = "";
-
-    while (startItem <= maxItems) {
-      const endItem = startItem + batchSize - 1;
-      const args = [
-        "--flat-playlist",
-        "--print", "webpage_url",
-        "--no-warnings",
-        "--ignore-errors",
-        "--no-check-certificates",
-        "--js-runtimes", "node",
-        "--playlist-items", `${startItem}-${endItem}`,
-        playlistUrl,
-      ];
-      if (fs.existsSync(cookiePath)) {
-        args.push("--cookies", cookiePath);
-      }
-
-      let batchUrls;
-      try {
-        const result = await new Promise((res, rej) => {
-          const proc = spawn(YTDLP_PATH, args);
-          let stdout = "", stderr = "";
-          proc.stdout.on("data", (d) => stdout += d);
-          proc.stderr.on("data", (d) => stderr += d);
-          proc.on("close", (code) => {
-            const urls = stdout.trim().split("\n").filter(Boolean);
-            res({ urls, stderr: stderr.trim(), code });
-          });
-          proc.on("error", rej);
-        });
-        batchUrls = result.urls;
-        if (result.stderr) lastStderr = result.stderr;
-      } catch (e) {
-        const errMsg = `[fetchPlaylistURLs] Error en batch ${startItem}: ${e.message}`;
-        console.error(errMsg);
-        reject(new Error(errMsg));
-        return;
-      }
-
-      if (batchUrls.length === 0) {
-        // Lista vacía o yt-dlp falló; si hay stderr se reporta al final
-        break;
-      }
-
-      // Add only unique URLs to avoid duplicates if YouTube overlaps
-      for (const url of batchUrls) {
-        if (!allUrls.includes(url)) allUrls.push(url);
-      }
-
-      // If we got fewer items than requested, we reached the end
-      if (batchUrls.length < batchSize) break;
-
-      startItem += batchSize;
-    }
-
-    if (allUrls.length > 0) {
-      if (lastStderr) {
-        console.error(`[fetchPlaylistURLs] Parcial: se extrajeron ${allUrls.length} tracks pero yt-dlp reportó errores. Primer error:\n${lastStderr.split("\n")[0]}`);
-      }
-      resolve(allUrls);
-    } else if (lastStderr) {
-      reject(new Error("yt-dlp no pudo extraer la lista: " + lastStderr.split("\n")[0]));
-    } else {
-      resolve([]);
-    }
-  });
-}
-
-async function playFirstAvailableTrack(client, channel, urls, playOpts) {
-  for (let index = 0; index < urls.length; index++) {
-    const url = urls[index];
-    try {
-      await client.distube.play(channel, url, playOpts);
-      const queue = client.distube.getQueue(channel.guild.id);
-      if (!queue) {
-        throw new Error("No se pudo obtener la cola después de iniciar la reproducción.");
-      }
-      return { index, queue };
-    } catch (e) {
-      client.logger.warn(`[Slash Play] Track ${index + 1} no disponible, saltando: ${url}`, e.message);
-      if (index === urls.length - 1) throw e;
-    }
-  }
-  throw new Error("No se encontró ningún track reproducible en la playlist.");
 }
 
 module.exports = {
@@ -278,23 +184,8 @@ module.exports = {
         await interaction.followUp({
           content: `⏳ Obteniendo playlist...`,
           ephemeral: true,
-        });
+        }).then(() => client.scheduleDelete(interaction)).catch(() => {});
       } catch (e) {}
-
-      let urls;
-      try {
-        urls = await fetchPlaylistURLs(song);
-        client.logger.log(`[Slash Play] Playlist cargada: ${urls.length} tracks`);
-      } catch (e) {
-        client.logger.error("[Slash Play Playlist Error]", e);
-        try {
-          await interaction.followUp({
-            content: `❌ No se pudo cargar la playlist: ${e.message}`,
-            ephemeral: true,
-          });
-        } catch (err) {}
-        return;
-      }
 
       let playlistName = song;
       try {
@@ -304,111 +195,67 @@ module.exports = {
         client.logger.warn(`[Slash Play] No se pudo obtener el título de la playlist:`, e.message);
       }
 
-      try { await client.distube.voices.join(channel); } catch {}
+      // Reproduce la primera canción apenas se resuelve su URL y carga el resto por tandas.
+      const { matchedCount: loadedCount, firstPlayed, urls } = await streamPlaylist({
+        client,
+        channel,
+        playlistUrl: song,
+        playOpts,
+        onStatus: async (msg) => {
+          try { await interaction.editReply({ content: msg }).catch(() => {}); } catch {}
+        },
+      });
 
-      // Toca el primer track reproducible y salta los inválidos
-      let firstPlayedIndex;
-      let queue;
-      try {
-        const result = await playFirstAvailableTrack(client, channel, urls, playOpts);
-        firstPlayedIndex = result.index;
-        queue = result.queue;
-        queue._sessionSaved = true;
-        queue._sessionSourcePlaylist = true;
-        client.logger.log(`[Slash Play Success] First playable track index ${firstPlayedIndex + 1}: ${urls[firstPlayedIndex]}`);
-      } catch (e) {
-        client.logger.error("[Slash Play First Track Error]", e);
+      if (!firstPlayed) {
+        client.logger.error("[Slash Play First Track Error] No se pudo iniciar la reproducción de la playlist.");
         try {
           await interaction.followUp({
-            content: `❌ Error en el primer track reproducible: ${e.message}`,
+            content: `❌ Error en el primer track reproducible.`,
             ephemeral: true,
           });
         } catch (err) {}
+        client.scheduleDelete(interaction);
         return;
       }
 
-      // Resto en background uno por uno con espera para mayor respuesta a instrucciones
-      const nextPlayOpts = { ...playOpts, skip: false };
-      client.playlistLoading.set(interaction.guildId, true);
-      (async () => {
-        const remaining = urls.slice(firstPlayedIndex + 1);
-        let addedCount = firstPlayedIndex + 1;
+      // Guardar sesión y registrar historial al completar la carga.
+      const queue = client.distube.getQueue(interaction.guildId);
+      if (queue) {
+        queue._sessionSaved = true;
+        queue._sessionSourcePlaylist = true;
+      }
+
+      await interaction.editReply({
+        content: `✅ Lista cargada exitosamente: \`${loadedCount}/${urls.length}\` canciones procesadas.`
+      }).then(() => client.scheduleDelete(interaction)).catch(() => {});
+
+      if (queue && typeof client.createMusicSession === "function" && typeof client.saveMusicSession === "function") {
         try {
-          for (let i = 0; i < remaining.length; i++) {
-            // Verificar si se detuvo la carga o si el bot salió
-            if (!client.playlistLoading.get(interaction.guildId) || client.playlistStopped.get(interaction.guildId)) break;
-            
-            const url = remaining[i];
-            try {
-              await client.distube.play(channel, url, nextPlayOpts);
-              addedCount++;
-            } catch (e) {
-              client.logger.warn(`[Slash Play] Track ${firstPlayedIndex + i + 2} saltado en Guild ${interaction.guildId}:`, e.message);
-            }
-
-            // Re-check after play — stop may have been pressed during await
-            if (!client.playlistLoading.get(interaction.guildId) || client.playlistStopped.get(interaction.guildId)) {
-              // Stop was pressed while play() was resolving — kill the new queue
-              try {
-                const q = client.distube.getQueue(interaction.guildId);
-                if (q) { q.songs = []; await q.stop().catch(() => {}); }
-              } catch {}
-              break;
-            }
-            
-            // Actualizar progreso cada 5 canciones o al final
-            if (addedCount % 5 === 0 || i === remaining.length - 1) {
-              await interaction.editReply({ 
-                content: `⏳ Procesando lista: \`${addedCount}/${urls.length}\` canciones cargadas...` 
-              }).catch(() => {});
-            }
-
-            // Tiempo de espera para que el bot procese otras instrucciones (interacciones)
-            await new Promise((r) => setTimeout(r, 250));
-          }
-
-          if (queue && queue.repeatMode === 2) {
-            client.logger.log(`[Playlist Load] Queue loop is active (repeatMode: 2) in Guild ${interaction.guildId}. New items included.`);
-          }
-
-          await interaction.editReply({ 
-            content: `✅ Lista cargada exitosamente: \`${addedCount}/${urls.length}\` canciones procesadas.` 
-          }).catch(() => {});
-
-          if (queue && typeof client.createMusicSession === "function" && typeof client.saveMusicSession === "function") {
-            try {
-              const session = client.createMusicSession(
-                queue,
-                "playlist",
-                undefined,
-                song,
-                interaction.user,
-                queue.songs
-              );
-              await client.saveMusicSession(interaction.guildId, session);
-              client.logger.log(`[Slash Play] Playlist session guardada: ${queue.songs.length} canciones`);
-            } catch (e) {
-              client.logger.error(`[Slash Play] Error guardando sesión de playlist:`, e);
-            }
-          }
-
-          // Record playlist in user's history
-          try {
-            await UserHistory.recordPlaylistPlay(
-              client, interaction.guildId, interaction.user.id, song, playlistName, interaction.channel.id
-            );
-          } catch (e) {
-            client.logger.error(`[Slash Play] Error recording playlist history:`, e);
-          }
-
-          client.logger.log(`[Slash Play] ${urls.length} tracks procesados en Guild: ${interaction.guildId}`);
+          const session = client.createMusicSession(
+            queue,
+            "playlist",
+            undefined,
+            song,
+            interaction.user,
+            queue.songs
+          );
+          await client.saveMusicSession(interaction.guildId, session);
+          client.logger.log(`[Slash Play] Playlist session guardada: ${queue.songs.length} canciones`);
         } catch (e) {
-          client.logger.error(`[Slash Play] Error en background loading:`, e);
-        } finally {
-          client.playlistLoading.delete(interaction.guildId);
+          client.logger.error(`[Slash Play] Error guardando sesión de playlist:`, e);
         }
-      })();
+      }
 
+      // Record playlist in user's history
+      try {
+        await UserHistory.recordPlaylistPlay(
+          client, interaction.guildId, interaction.user.id, song, playlistName, interaction.channel.id
+        );
+      } catch (e) {
+        client.logger.error(`[Slash Play] Error recording playlist history:`, e);
+      }
+
+      client.logger.log(`[Slash Play] ${urls.length} tracks procesados en Guild: ${interaction.guildId}`);
       return;
     }
 
@@ -421,8 +268,10 @@ module.exports = {
         await interaction.followUp({
           content: `✅ Reproduciendo \`${song.slice(0, 70)}\``,
           ephemeral: true,
-        }).catch(() => {});
+        }).then(() => client.scheduleDelete(interaction)).catch(() => {});
       } catch (err) {}
+      // Limpiar el efímero "🔍 Procesando..." ya confirmada la reproducción.
+      client.scheduleDelete(interaction);
     } catch (e) {
       client.logger.error(`[Slash Play Error] Guild: ${interaction.guildId} Query: ${song}`, e);
       // Search failed (common when YouTube blocks the search API / missing cookies).
@@ -435,7 +284,8 @@ module.exports = {
             await client.distube.play(channel, resolved, playOpts);
             client.logger.log(`[Slash Play] yt-dlp fallback OK: ${resolved}`);
             try {
-              if (interaction.deferred || interaction.replied) await interaction.followUp({ content: `✅ Reproduciendo \`${song.slice(0, 70)}\``, ephemeral: true }).catch(() => {});
+              if (interaction.deferred || interaction.replied) await interaction.followUp({ content: `✅ Reproduciendo \`${song.slice(0, 70)}\``, ephemeral: true }).then(() => client.scheduleDelete(interaction)).catch(() => {});
+              client.scheduleDelete(interaction);
             } catch (err) {}
             return;
           }
@@ -456,6 +306,8 @@ module.exports = {
       } catch (err) {
         client.logger.error(`[Slash Play Reply Error]`, err);
       }
+      // Limpiar el efímero "🔍 Procesando..." (el error queda como followUp aparte).
+      client.scheduleDelete(interaction);
     }
   },
 };

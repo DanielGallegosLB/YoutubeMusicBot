@@ -13,57 +13,122 @@ function isPlaylistURL(url) {
     (/[?&]list=/.test(url) && !/watch\?v=/.test(url));
 }
 
-function fetchPlaylistURLs(playlistUrl) {
+function buildArgs(playlistUrl, startItem, endItem, extraPrints = []) {
+  const cookiePath = path.join(process.cwd(), "yt-cookies.txt");
+  const args = [
+    "--flat-playlist",
+    "--print", "webpage_url",
+    ...extraPrints,
+    "--no-warnings",
+    "--ignore-errors",
+    "--no-check-certificates",
+    "--js-runtimes", "node",
+    "--playlist-items", `${startItem}-${endItem}`,
+    playlistUrl,
+  ];
+  if (fs.existsSync(cookiePath)) {
+    args.push("--cookies", cookiePath);
+  }
+  return args;
+}
+
+function runYtDlp(args) {
+  return new Promise((resolve, reject) => {
+    const proc = spawn(YTDLP_PATH, args);
+    let stdout = "", stderr = "";
+    proc.stdout.on("data", (d) => stdout += d);
+    proc.stderr.on("data", (d) => stderr += d);
+    proc.on("close", (code) => {
+      resolve({ stdout, stderr, code });
+    });
+    proc.on("error", reject);
+  });
+}
+
+/**
+ * Fetch ONLY the first track URL of a playlist. Fast (~seconds), used to
+ * start playback immediately while the rest is fetched in the background.
+ * @param {string} playlistUrl
+ * @returns {Promise<string|null>}
+ */
+function fetchPlaylistFirstURL(playlistUrl) {
+  return new Promise(async (resolve) => {
+    try {
+      const { stdout, stderr } = await runYtDlp(buildArgs(playlistUrl, 1, 1));
+      const url = stdout.trim().split("\n").find(Boolean);
+      if (!url) console.error(`[fetchPlaylistFirstURL] Empty result for ${playlistUrl}\n${stderr.trim().slice(0, 500)}`);
+      resolve(url || null);
+    } catch (e) {
+      console.error("[fetchPlaylistFirstURL] Error:", e);
+      resolve(null);
+    }
+  });
+}
+
+/**
+ * Fetch playlist URLs in chunks so the caller can start playback with the
+ * first URLs immediately instead of waiting for the whole playlist.
+ * Calls onBatch(urls, isLastChunk) for each chunk (first chunk -> rest), and
+ * resolves with the complete dedup list at the end.
+ * If onBatch returns `false`, streaming is aborted early.
+ * @param {string} playlistUrl
+ * @param {(urls: string[], isLastChunk: boolean) => void|boolean|Promise<void|boolean>} onBatch
+ * @param {{ startItem?: number, batchSize?: number, maxItems?: number }} [opts]
+ * @returns {Promise<string[]>}
+ */
+function fetchPlaylistURLsIncrementally(playlistUrl, onBatch, opts = {}) {
+  const startItem = opts.startItem || 1;
+  const batchSize = opts.batchSize || 100;
+  const maxItems = opts.maxItems || 1000;
   return new Promise(async (resolve) => {
     let allUrls = [];
-    let startItem = 1;
-    const batchSize = 100;
-    const maxItems = 1000;
-    const cookiePath = path.join(process.cwd(), "yt-cookies.txt");
+    let cursor = startItem;
 
-    while (startItem <= maxItems) {
-      const endItem = startItem + batchSize - 1;
-      const args = [
-        "--flat-playlist",
-        "--print", "webpage_url",
-        "--no-warnings",
-        "--ignore-errors",
-        "--no-check-certificates",
-        "--js-runtimes", "node",
-        "--playlist-items", `${startItem}-${endItem}`,
-        playlistUrl,
-      ];
-      if (fs.existsSync(cookiePath)) {
-        args.push("--cookies", cookiePath);
-      }
-
+    while (cursor <= maxItems) {
+      const endItem = cursor + batchSize - 1;
+      let batchUrls = [];
       try {
-        const batchUrls = await new Promise((res, rej) => {
-          const proc = spawn(YTDLP_PATH, args);
-          let stdout = "", stderr = "";
-          proc.stdout.on("data", (d) => stdout += d);
-          proc.stderr.on("data", (d) => stderr += d);
-          proc.on("close", () => {
-            const urls = stdout.trim().split("\n").filter(Boolean);
-            res(urls);
-          });
-          proc.on("error", rej);
-        });
-
-        if (batchUrls.length === 0) break;
-        for (const url of batchUrls) {
-          if (!allUrls.includes(url)) allUrls.push(url);
+        const { stdout, stderr } = await runYtDlp(buildArgs(playlistUrl, cursor, endItem));
+        batchUrls = stdout.trim().split("\n").filter(Boolean);
+        if (batchUrls.length === 0 && stderr) {
+          console.error(`[fetchPlaylistURLs] batch ${cursor}-${endItem} vacío:\n${stderr.trim().slice(0, 500)}`);
         }
-        if (batchUrls.length < batchSize) break;
-        startItem += batchSize;
       } catch (e) {
-        console.error(`[fetchPlaylistURLs] Error in batch ${startItem}:`, e);
+        console.error(`[fetchPlaylistURLs] Error in batch ${cursor}:`, e);
         break;
       }
+
+      if (batchUrls.length === 0) break;
+      const freshUrls = [];
+      for (const url of batchUrls) {
+        if (!allUrls.includes(url)) {
+          allUrls.push(url);
+          freshUrls.push(url);
+        }
+      }
+      try {
+        if (typeof onBatch === "function" && freshUrls.length > 0) {
+          const shouldAbort = (await onBatch(freshUrls, batchUrls.length < batchSize)) === false;
+          if (shouldAbort) break;
+        }
+      } catch (e) {
+        console.error(`[fetchPlaylistURLs] Error in onBatch ${cursor}:`, e);
+        break;
+      }
+      if (batchUrls.length < batchSize) break;
+      cursor += batchSize;
     }
 
     resolve(allUrls.length > 0 ? allUrls : []);
   });
+}
+
+/**
+ * @param {string} playlistUrl
+ * @returns {Promise<string[]>}
+ */
+function fetchPlaylistURLs(playlistUrl) {
+  return fetchPlaylistURLsIncrementally(playlistUrl, null);
 }
 
 /**
@@ -99,4 +164,4 @@ function searchYoutube(query) {
   });
 }
 
-module.exports = { YTDLP_PATH, isPlaylistURL, fetchPlaylistURLs, searchYoutube };
+module.exports = { YTDLP_PATH, isPlaylistURL, fetchPlaylistURLs, fetchPlaylistURLsIncrementally, fetchPlaylistFirstURL, searchYoutube };

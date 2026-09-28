@@ -11,10 +11,13 @@ client.on(Events.ShardResume, async (shardId, replayedEvents) => {
   }
 });
 
+// OJO: en un ARRANQUE EN FRÍO (ShardReady tras reiniciar el proceso) NO se
+// restaura ninguna cola. Reanudar música que quedó guardada hace que el bot
+// "empiece a reproducir algo que el usuario no pidió" después de reiniciar.
+// La auto-reanudación queda solo para ShardResume (reconexión de la misma sesión).
 client.on(Events.ShardReady, async (shardId) => {
   try {
-    client.logger.log(`[ShardReady] Shard ${shardId} ready, checking for queues to restore...`);
-    await AutoresumeHandler(client);
+    client.logger.log(`[ShardReady] Shard ${shardId} ready (fresh start: auto-resume disabled).`);
   } catch (error) {
     client.logger.error(`[ShardReady Error] Shard ${shardId}:`, error);
   }

@@ -96,6 +96,7 @@ const options = {
   nowplayingMsg: true,
   defaultVolume: 90,
   leaveTimeout: 300000, // 5 minutes
+  ephemeralTTL: 10000, // ms que duran las confirmaciones efímeras antes de auto-borrarse (0 = nunca)
 };
 
 const numberEmojis = [
