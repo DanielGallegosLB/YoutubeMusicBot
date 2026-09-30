@@ -193,7 +193,7 @@ module.exports = {
       
       await interaction.editReply({ 
         content: `✅ Carga finalizada: \`${playlistName}\` (${addedCount} canciones añadidas exitosamente).` 
-      }).then(() => client.scheduleDelete(interaction)).catch(() => {});
+      }).then((m) => client.scheduleDelete(m, interaction)).catch(() => {});
       
       client.playlistLoading.delete(interaction.guildId);
     })();

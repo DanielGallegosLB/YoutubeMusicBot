@@ -9,6 +9,7 @@ const { spawn } = require("child_process");
 const path = require("path");
 const fs = require("fs");
 const UserHistory = require("../../../handlers/UserHistory");
+const PlaylistStore = require("../../../handlers/PlaylistStore");
 const { isAgeGateError, friendlyPlaybackError } = require("../../../handlers/PlaybackError");
 const { searchYoutube } = require("../../../handlers/PlaylistFetcher");
 const { streamPlaylist } = require("../../../handlers/PlaylistLoader");
@@ -184,7 +185,7 @@ module.exports = {
         await interaction.followUp({
           content: `⏳ Obteniendo playlist...`,
           ephemeral: true,
-        }).then(() => client.scheduleDelete(interaction)).catch(() => {});
+        }).then((m) => client.scheduleDelete(m, interaction)).catch(() => {});
       } catch (e) {}
 
       let playlistName = song;
@@ -196,7 +197,7 @@ module.exports = {
       }
 
       // Reproduce la primera canción apenas se resuelve su URL y carga el resto por tandas.
-      const { matchedCount: loadedCount, firstPlayed, urls } = await streamPlaylist({
+      const { matchedCount: loadedCount, firstPlayed, urls, skipped } = await streamPlaylist({
         client,
         channel,
         playlistUrl: song,
@@ -207,12 +208,13 @@ module.exports = {
       });
 
       if (!firstPlayed) {
-        client.logger.error("[Slash Play First Track Error] No se pudo iniciar la reproducción de la playlist.");
+        client.logger.error("[Slash Play First Track Error] No se pudo encolar ninguna canción de la playlist.");
         try {
-          await interaction.followUp({
-            content: `❌ Error en el primer track reproducible.`,
+          const errMsg = await interaction.followUp({
+            content: `❌ Ninguna canción de la lista se pudo reproducir.`,
             ephemeral: true,
           });
+          client.scheduleDelete(errMsg, interaction);
         } catch (err) {}
         client.scheduleDelete(interaction);
         return;
@@ -225,9 +227,23 @@ module.exports = {
         queue._sessionSourcePlaylist = true;
       }
 
+      const skipNote = skipped?.length ? ` · \`${skipped.length}\` no disponibles (omitidas)` : "";
       await interaction.editReply({
-        content: `✅ Lista cargada exitosamente: \`${loadedCount}/${urls.length}\` canciones procesadas.`
-      }).then(() => client.scheduleDelete(interaction)).catch(() => {});
+        content: `✅ Lista cargada exitosamente: \`${loadedCount}\` canciones en cola${skipNote}.`,
+      }).then((m) => client.scheduleDelete(m, interaction)).catch(() => {});
+
+      // La 1ª canción de la lista es la que el usuario realmente quería (muchas
+      // veces suben una lista de 300 temas "por error" y solo la primera les
+      // interesa). Se guarda como candidata del AutoDJ para cuando no haya
+      // ninguna favorita con like.
+      if (urls?.[0]) {
+        try {
+          const firstSong = client.distube.getQueue(interaction.guildId)?.songs?.find((s) => s?.url === urls[0]);
+          await PlaylistStore.addAutoDjPick(client, interaction.guildId, urls[0], firstSong?.name || null);
+        } catch (e) {
+          client.logger.warn(`[Slash Play] No se pudo guardar la 1ra canción como candidata AutoDJ: ${e.message}`);
+        }
+      }
 
       if (queue && typeof client.createMusicSession === "function" && typeof client.saveMusicSession === "function") {
         try {
@@ -268,7 +284,7 @@ module.exports = {
         await interaction.followUp({
           content: `✅ Reproduciendo \`${song.slice(0, 70)}\``,
           ephemeral: true,
-        }).then(() => client.scheduleDelete(interaction)).catch(() => {});
+        }).then((m) => client.scheduleDelete(m, interaction)).catch(() => {});
       } catch (err) {}
       // Limpiar el efímero "🔍 Procesando..." ya confirmada la reproducción.
       client.scheduleDelete(interaction);
@@ -284,7 +300,7 @@ module.exports = {
             await client.distube.play(channel, resolved, playOpts);
             client.logger.log(`[Slash Play] yt-dlp fallback OK: ${resolved}`);
             try {
-              if (interaction.deferred || interaction.replied) await interaction.followUp({ content: `✅ Reproduciendo \`${song.slice(0, 70)}\``, ephemeral: true }).then(() => client.scheduleDelete(interaction)).catch(() => {});
+              if (interaction.deferred || interaction.replied) await interaction.followUp({ content: `✅ Reproduciendo \`${song.slice(0, 70)}\``, ephemeral: true }).then((m) => client.scheduleDelete(m, interaction)).catch(() => {});
               client.scheduleDelete(interaction);
             } catch (err) {}
             return;

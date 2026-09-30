@@ -66,16 +66,10 @@ module.exports = {
   },
 
   async recordSongPlay(client, guildId, userId, song, user, channelId) {
-    if (!song || !userId) return;
-    const track = PlaylistStore.serializeSong(song, user);
-    if (!track) return;
-    await PlaylistStore.create(client, guildId, userId, FAVORITES_PLAYLIST);
-    await PlaylistStore.addTracks(client, guildId, userId, FAVORITES_PLAYLIST, [track]);
-    if (channelId) {
-      const key = `${guildId}.userHistory.${userId}`;
-      await client.music.ensure(key, { playlistHistory: [], noSuggestions: false });
-      await client.music.set(`${key}.lastChannelId`, channelId);
-    }
+    // ELIMINADO: este método guardaba AUTOMÁTICAMENTE cada canción que sonaba en
+    // "Canciones Favoritas", lo que contaminó las listas con ~500 temas por
+    // usuario. Las favoritas ahora SOLO se guardan con 👍/👎/⭐ (a mano).
+    // Se conserva como no-op para no romper call-sites existentes.
   },
 
   async setNoSuggestions(client, guildId, userId, value) {
@@ -268,6 +262,18 @@ module.exports = {
           new StringSelectMenuBuilder()
             .setCustomId("preview_select_playlist")
             .setPlaceholder("Selecciona una lista para reproducir...")
+            .addOptions(options)
+        )
+      );
+
+      // 🔀 Reproduce la lista seleccionada en modo ALEATORIO (mezclada), como
+      // /reproduciraleatorio. Así la lista ya viene mezclada y el AutoDJ solo
+      // se ocupa de meter 🛸 recomendaciones en medio.
+      components.push(
+        new ActionRowBuilder().addComponents(
+          new StringSelectMenuBuilder()
+            .setCustomId("shuffle_select_playlist")
+            .setPlaceholder("🔀 Reproducir aleatorio (lista mezclada)...")
             .addOptions(options)
         )
       );

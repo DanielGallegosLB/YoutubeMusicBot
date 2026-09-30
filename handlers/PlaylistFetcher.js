@@ -32,16 +32,33 @@ function buildArgs(playlistUrl, startItem, endItem, extraPrints = []) {
   return args;
 }
 
-function runYtDlp(args) {
+function runYtDlp(args, timeoutMs = 0) {
   return new Promise((resolve, reject) => {
     const proc = spawn(YTDLP_PATH, args);
     let stdout = "", stderr = "";
+    let done = false;
+    const timer =
+      timeoutMs > 0
+        ? setTimeout(() => {
+            // El proceso no responde: matarlo para no colgar a su llamador.
+            try { proc.kill(); } catch {}
+            if (!done) { done = true; reject(new Error(`yt-dlp timeout ${timeoutMs}ms`)); }
+          }, timeoutMs)
+        : null;
     proc.stdout.on("data", (d) => stdout += d);
     proc.stderr.on("data", (d) => stderr += d);
     proc.on("close", (code) => {
+      if (timer) clearTimeout(timer);
+      if (done) return;
+      done = true;
       resolve({ stdout, stderr, code });
     });
-    proc.on("error", reject);
+    proc.on("error", (e) => {
+      if (timer) clearTimeout(timer);
+      if (done) return;
+      done = true;
+      reject(e);
+    });
   });
 }
 
@@ -51,15 +68,17 @@ function runYtDlp(args) {
  * @param {string} playlistUrl
  * @returns {Promise<string|null>}
  */
-function fetchPlaylistFirstURL(playlistUrl) {
+function fetchPlaylistFirstURL(playlistUrl, opts = {}) {
   return new Promise(async (resolve) => {
     try {
-      const { stdout, stderr } = await runYtDlp(buildArgs(playlistUrl, 1, 1));
+      const timeoutMs = opts.timeoutMs || 0;
+      const { stdout, stderr } = await runYtDlp(buildArgs(playlistUrl, 1, 1), timeoutMs);
       const url = stdout.trim().split("\n").find(Boolean);
       if (!url) console.error(`[fetchPlaylistFirstURL] Empty result for ${playlistUrl}\n${stderr.trim().slice(0, 500)}`);
       resolve(url || null);
     } catch (e) {
-      console.error("[fetchPlaylistFirstURL] Error:", e);
+      if (/timeout/i.test(e?.message || "")) console.error(`[fetchPlaylistFirstURL] Timeout (${opts.timeoutMs}ms) for ${playlistUrl}`);
+      else console.error("[fetchPlaylistFirstURL] Error:", e);
       resolve(null);
     }
   });
@@ -124,6 +143,24 @@ function fetchPlaylistURLsIncrementally(playlistUrl, onBatch, opts = {}) {
 }
 
 /**
+ * Lista COMPLETA de urls en UNA sola llamada flat (rápida: no resuelve cada
+ * video). La usa el AutoDJ para saber las 316 desde el inicio, aunque el loader
+ * todavía vaya por la 40.
+ * @param {string} playlistUrl
+ * @param {number} [maxItems]
+ * @returns {Promise<string[]>}
+ */
+async function fetchPlaylistAllURLsFlat(playlistUrl, maxItems = 1000) {
+  try {
+    const { stdout } = await runYtDlp(buildArgs(playlistUrl, 1, maxItems));
+    return [...new Set(stdout.trim().split("\n").map((l) => l.trim()).filter(Boolean))];
+  } catch (e) {
+    console.error("[fetchPlaylistAllURLsFlat] Error:", e);
+    return [];
+  }
+}
+
+/**
  * @param {string} playlistUrl
  * @returns {Promise<string[]>}
  */
@@ -164,4 +201,4 @@ function searchYoutube(query) {
   });
 }
 
-module.exports = { YTDLP_PATH, isPlaylistURL, fetchPlaylistURLs, fetchPlaylistURLsIncrementally, fetchPlaylistFirstURL, searchYoutube };
+module.exports = { YTDLP_PATH, isPlaylistURL, fetchPlaylistURLs, fetchPlaylistAllURLsFlat, fetchPlaylistURLsIncrementally, fetchPlaylistFirstURL, searchYoutube };

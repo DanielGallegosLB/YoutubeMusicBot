@@ -1,5 +1,23 @@
 const AGE_GATE_RE = /Sign in to confirm your age|age-restricted|age restricted|LOGIN_REQUIRED/i;
 
+// Videos que ya no se pueden reproducir (canal terminated, borrado, privado...).
+// No son un error del bot: se saltan y la cola sigue con el resto.
+const UNAVAILABLE_RE =
+  /no longer available|account associated with this video has been terminated|video is private|has been removed|removed by the uploader|unavailable|terminated|blocked it in your country|not available in your country/i;
+
+function isUnavailableVideoError(e) {
+  return UNAVAILABLE_RE.test(String(e?.message || e || ""));
+}
+
+function friendlyUnavailableError(e) {
+  const msg = String(e?.message || e || "");
+  if (/has been terminated/i.test(msg)) return "el canal de YouTube de este video fue termina";
+  if (/video is private/i.test(msg)) return "el video es privado";
+  if (/has been removed|removed by the uploader/i.test(msg)) return "el video fue eliminado por su autor";
+  if (/not available in your country|blocked it in your country/i.test(msg)) return "el video no está disponible en tu país";
+  return "el video ya no está disponible";
+}
+
 function isAgeGateError(e) {
   return AGE_GATE_RE.test(String(e?.message || e || ""));
 }
@@ -17,4 +35,4 @@ function friendlyPlaybackError(e) {
   return msg;
 }
 
-module.exports = { isAgeGateError, friendlyPlaybackError };
+module.exports = { isAgeGateError, friendlyPlaybackError, isUnavailableVideoError, friendlyUnavailableError };

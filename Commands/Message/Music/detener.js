@@ -24,6 +24,7 @@ module.exports = {
    */
   run: async (client, message, args, prefix, queue) => {
     const guildId = message.guildId;
+    client.autoDjDisable?.(guildId);
     client.playlistLoading.delete(guildId);
     client.playlistStopped.set(guildId, Date.now());
     // Detener el timer de autoresume de este guild para que NO re-guarde la

@@ -11,6 +11,7 @@ const {
 } = require("discord.js");
 const { Queue, Song } = require("distube");
 const PlaylistStore = require("./PlaylistStore");
+const AutoDjSource = require("./Autodjsource");
 
 /**
  *
@@ -165,18 +166,28 @@ module.exports = async (client) => {
 
   // Programa el auto-borrado de confirmaciones efímeras. Tiempo configurable
   // desde settings/config.js → options.ephemeralTTL (ms). 0 = no borrar.
-  client.scheduleDelete = (target, ms) => {
+  //
+  // Uso: client.scheduleDelete(msg, interaction) donde `msg` es el RESULTADO de
+  // interaction.reply()/interaction.followUp(). Así se borra el mensaje CONCRETO
+  // (via interaction.webhook.deleteMessage), porque interaction.deleteReply()
+  // solo borra @original y deja vivos los followUp ephemeral.
+  // Si `msg` es una interaction (compat), se conserva el viejo deleteReply().
+  client.scheduleDelete = (target, interaction) => {
     if (!target) return;
-    const ttl =
-      Number.isInteger(ms) && ms > 0
-        ? ms
-        : client.config?.options?.ephemeralTTL || 10000;
+    const ttl = client.config?.options?.ephemeralTTL || 10000;
     if (!ttl || ttl <= 0) return;
+    const isInteraction = typeof target?.deleteReply === "function";
+    const msgId = isInteraction ? null : target?.id;
+    const hook = !isInteraction ? interaction?.webhook : null;
     setTimeout(() => {
       try {
-        if (typeof target.delete === "function") target.delete().catch(() => {});
-        else if (typeof target.deleteReply === "function")
+        if (!isInteraction && msgId && hook) {
+          hook.deleteMessage(msgId).catch(() => {});
+        } else if (!isInteraction && typeof target.delete === "function") {
+          target.delete().catch(() => {});
+        } else if (isInteraction) {
           target.deleteReply().catch(() => {});
+        }
       } catch {}
     }, ttl);
   };
@@ -310,49 +321,124 @@ module.exports = async (client) => {
    * @param {Guild} guild
    * @returns
    */
+  /**
+   * Trae un mensaje del panel distinguiendo "NO EXISTE" de "falló el fetch".
+   *   - Message  → existe
+   *   - null     → Discord confirmó que no existe (10008 Unknown Message) o no hay id
+   *   - undefined→ error transitorio (rate limit, timeout, red, permisos):
+   *                NO se debe recrear nada, solo reintentar más tarde.
+   * Antes, cualquier error del fetch se trataba como "mensaje borrado" y el
+   * Self-Repair recreaba paneles que sí existían.
+   */
+  client.fetchPanelMessage = async (channel, id) => {
+    if (!id) return null;
+    const cached = channel.messages.cache.get(id);
+    if (cached) return cached;
+    try {
+      return await channel.messages.fetch(id);
+    } catch (e) {
+      if (e?.code === 10008 || e?.status === 404) return null;
+      client.logger.warn(`[Self-Repair] fetch transitorio falló (${e?.code || e?.status || e?.message}), no se recrea.`);
+      return undefined;
+    }
+  };
+
+  // Un solo repair a la vez por guild (updatequeue y updateplayer lo disparaban
+  // en paralelo: el 2º leía ids viejos y volvía a "reparar" mensajes ya nuevos).
+  client._panelRepair = client._panelRepair || new Map();
+
+  // Apaga el AutoDJ por completo (usado por Stop / detener): borra los flags de
+  // ON e intención (para que una cola nueva NO lo re-active solo), el previo, el
+  // reporte y la fuente de la 🎲 junto con lo visto por usuario.
+  client.autoDjDisable = (guildId) => {
+    client.autoDj?.delete(guildId);
+    client.autoDjIntent?.delete(guildId);
+    client.autoDjPrev?.delete(guildId);
+    client.autoDjReport?.delete(guildId);
+    AutoDjSource.reset(client, guildId);
+    client.logger.log(`[AutoDJ] Apagado (stop/detener) G:${guildId}`);
+  };
+
+  client._panelRepairT = client._panelRepairT || new Map();
   client.updateembed = async (client, guild) => {
     try {
-      const data = await client.music.get(`${guild.id}.music`);
-      if (!data || !data.channel) return;
+      // Cooldown por guild: si Discord mantiene el pmsg marcado como inexistente,
+      // un repair inmediato solo re-crea paneles en bucle (borrados que el usuario ve).
+      // No volver a "reparar" durante unos segundos tras el último intento.
+      const lastRepair = client._panelRepairT.get(guild.id) || 0;
+      if (Date.now() - lastRepair < 4000) return;
 
-      const musicchannel = guild.channels.cache.get(data.channel) || await guild.channels.fetch(data.channel).catch(() => null);
-      if (!musicchannel) return;
+      const pending = client._panelRepair.get(guild.id);
+      if (pending) return await pending;
 
-      // Fetch both playmsg and queuemsg simultaneously
-      let playmsg = await musicchannel.messages.fetch(data.pmsg).catch(() => null);
-      let queuemsg = await musicchannel.messages.fetch(data.qmsg).catch(() => null);
+      const run = (async () => {
+        // Se lee la data DENTRO del lock: si otro repair ya la actualizó, se ven los ids nuevos.
+        const data = await client.music.get(`${guild.id}.music`);
+        if (!data || !data.channel) return;
 
-      // Self-Repair: If messages are missing, recreate them
-      if (!playmsg || !queuemsg) {
-        client.logger.warn(`[Self-Repair] Missing messages in ${guild.name}. Recreating...`);
-        // Clean up any remaining one if it exists
-        if (playmsg) await playmsg.delete().catch(() => {});
-        if (queuemsg) await queuemsg.delete().catch(() => {});
+        const musicchannel = guild.channels.cache.get(data.channel) || await guild.channels.fetch(data.channel).catch(() => null);
+        if (!musicchannel) return;
 
-        const pMsg = await musicchannel.send({
-          embeds: [client.playembed(guild)],
-          components: client.buttons(true),
-        });
-        const qMsg = await musicchannel.send({
-          embeds: [client.queueembed(guild)],
-        });
+        const [playmsg, queuemsg] = await Promise.all([
+          client.fetchPanelMessage(musicchannel, data.pmsg),
+          client.fetchPanelMessage(musicchannel, data.qmsg),
+        ]);
 
-        await client.music.set(`${guild.id}.music`, {
-          channel: data.channel,
-          pmsg: pMsg.id,
-          qmsg: qMsg.id,
-        });
-        return;
-      }
+        // Error transitorio en alguno: no tocar nada.
+        if (playmsg === undefined || queuemsg === undefined) return;
 
-      // Edit playmsg and queuemsg simultaneously
-      await Promise.all([
-        playmsg.edit({
-          embeds: [client.playembed(guild)],
-          components: client.buttons(true),
-        }).catch(() => {}),
-        queuemsg.edit({ embeds: [client.queueembed(guild)] }).catch(() => {}),
-      ]);
+        // Self-Repair: SOLO si Discord confirmó que falta alguno.
+        if (!playmsg || !queuemsg) {
+          client._panelRepairT.set(guild.id, Date.now());
+          client.logger.warn(
+            `[Self-Repair] Missing messages in ${guild.name} (play:${!!playmsg} queue:${!!queuemsg}). ` +
+            `Recreating ONLY the missing one. ` +
+            `dbChannel=${data.channel} dbPmsg=${data.pmsg} dbQmsg=${data.qmsg}`
+          );
+
+          // NUNCA borrar un panel que sigue existiendo: se edita en su lugar.
+          // Así "los mensajes que sigue habiendo" dejan de parpadear/borrarse.
+          const keep = { playmsg, queuemsg };
+
+          if (!keep.playmsg) {
+            keep.playmsg = await musicchannel.send({
+              embeds: [client.playembed(guild)],
+              components: client.buttons(true),
+            });
+          } else {
+            await keep.playmsg.edit({
+              embeds: [client.playembed(guild)],
+              components: client.buttons(true),
+            }).catch(() => {});
+          }
+
+          if (!keep.queuemsg) {
+            keep.queuemsg = await musicchannel.send({
+              embeds: [client.queueembed(guild)],
+            });
+          } else {
+            await keep.queuemsg.edit({ embeds: [client.queueembed(guild)] }).catch(() => {});
+          }
+
+          await client.music.set(`${guild.id}.music`, {
+            channel: data.channel,
+            pmsg: keep.playmsg?.id,
+            qmsg: keep.queuemsg?.id,
+          });
+          return;
+        }
+
+        await Promise.all([
+          playmsg.edit({
+            embeds: [client.playembed(guild)],
+            components: client.buttons(true),
+          }).catch(() => {}),
+          queuemsg.edit({ embeds: [client.queueembed(guild)] }).catch(() => {}),
+        ]);
+      })();
+
+      client._panelRepair.set(guild.id, run);
+      try { await run; } finally { client._panelRepair.delete(guild.id); }
     } catch (error) {
       console.error("Error updating embed:", error);
     }
@@ -377,9 +463,10 @@ module.exports = async (client) => {
       const musicchannel = guild.channels.cache.get(data.channel) || await guild.channels.fetch(data.channel).catch(() => null);
       if (!musicchannel) return;
 
-      let queueembed = await musicchannel.messages.fetch(data.qmsg).catch(() => null);
+      let queueembed = await client.fetchPanelMessage(musicchannel, data.qmsg);
+      if (queueembed === undefined) return; // fallo transitorio: no recrear
 
-      // Self-Repair Trigger
+      // Self-Repair Trigger (solo si Discord confirmó que no existe)
       if (!queueembed) {
         return await client.updateembed(client, guild);
       }
@@ -405,6 +492,24 @@ module.exports = async (client) => {
       if (currentStats.dislikes > 0) currentStatsParts.push(`👎${currentStats.dislikes}`);
       if (currentStats.plays > 0) currentStatsParts.push(`🔥${currentStats.plays}`);
       const currentStatsText = currentStatsParts.length > 0 ? ` | ${currentStatsParts.join(" ")}` : "";
+      // A quién le gusta la canción actual (tiene el video en sus Favoritas).
+      const currentOwners = (currentStats.owners || []).slice(0, 3).join(", ");
+      // Para canciones del bot, SOLO el nombre de la persona usada para
+      // recomendar (si el patrón fue "de cualquiera", la 1ra dueña del tema);
+      // nada de listas largas ni "Recomendación de ...".
+      const currentIsAutoDj = !!(currentSong?.autoDj || currentSong?._autoDj);
+      const currentOwnersText =
+        currentIsAutoDj || !currentOwners ? "" : ` | 👤 ${currentOwners}`;
+      const currentRecName =
+        (currentSong?.autoDjUserId &&
+          guild?.members?.cache?.get(currentSong.autoDjUserId)?.user?.tag) ||
+        (currentOwners ? currentOwners.split(",")[0].trim() : null);
+      const currentReq =
+        currentIsAutoDj
+          ? (currentSong?.autoDjType === "rec"
+              ? `🛸 ${currentRecName || "Recomendación"}`
+              : "🎲 Aleatoria")
+          : (currentSong?.user?.tag || "Auto DJ");
 
       const storedLimit = await client.music.get(`${guild.id}.qlimit`).catch(() => undefined);
       const maxTracks = Number.isInteger(storedLimit) && storedLimit >= 1 && storedLimit <= 50 ? storedLimit : 10;
@@ -422,6 +527,20 @@ module.exports = async (client) => {
       const upNextStats = await Promise.all(upNextTracks.map((track) =>
         track.url ? PlaylistStore.getGlobalTrackStats(client, guildId, track.url, allPlaylists).catch(() => ({ likes: 0, dislikes: 0, plays: 0 })) : Promise.resolve({ likes: 0, dislikes: 0, plays: 0 })
       ));
+      // Rótulo para canciones puestas por el AutoDJ: SOLO el nombre de la persona
+      // usada para recomendar (para "rec"), o 🎲 Aleatoria. Nada de listas largas.
+      const autodjLabel = (track, firstOwner) => {
+        if (!track || (!track.autoDj && !track._autoDj)) return null;
+        if (track.autoDjType === "rec") {
+          const uid = track.autoDjUserId;
+          const name = uid
+            ? (guild?.members?.cache?.get(uid)?.user?.tag || track.user?.nickname || null)
+            : (firstOwner || null);
+          return name ? `🛸 ${name}` : "🛸 Recomendación";
+        }
+        return "🎲 Aleatoria";
+      };
+
       let queueString = "";
       upNextTracks.forEach((track, i) => {
         const index = from + i;
@@ -431,9 +550,15 @@ module.exports = async (client) => {
         if (tStats.dislikes > 0) tStatsParts.push(`👎${tStats.dislikes}`);
         if (tStats.plays > 0) tStatsParts.push(`🔥${tStats.plays}`);
         const tStatsStr = tStatsParts.length > 0 ? ` | ${tStatsParts.join(" ")}` : "";
+        // A la derecha (solo canciones tuyas): quién la pidió/le gusta. Las del
+        // bot (autoDj) ya llevan su rótulo arriba, nada de listas largas.
+        const tIsAutoDj = !!(track?.autoDj || track?._autoDj);
+        const tOwners = (tStats.owners || []).slice(0, 3).join(", ");
+        const tOwnersStr = tIsAutoDj || !tOwners ? "" : ` | 👤 ${tOwners}`;
+        const tReq = autodjLabel(track, (tStats.owners || [])[0]) || track.user?.tag || "Auto DJ";
         queueString += `\`${index}.\` **${client.getTitle(track)}** - ${
           track.isLive ? "LIVE STREAM" : track.formattedDuration.split(" | ")[0]
-        } - \`${track.user?.tag || "Auto DJ"}\`${tStatsStr}${track._autoDj ? " 🛸 **· Auto DJ**" : ""}\n`;
+        } - \`${tReq}\`${tStatsStr}${tOwnersStr}\n`;
       });
 
       const newQueueEmbed = new EmbedBuilder()
@@ -452,9 +577,7 @@ module.exports = async (client) => {
               currentSong?.isLive
                 ? "LIVE STREAM"
                 : currentSong?.formattedDuration.split(" | ")[0]
-            } - \`${currentSong?.user?.tag || "Auto DJ"}\`${currentStatsText}${
-              currentSong?._autoDj ? " 🛸 **· Auto DJ**" : ""
-            }`,
+            } - \`${currentReq}\`${currentStatsText}${currentOwnersText}`,
           },
         ]);
 
@@ -500,9 +623,10 @@ module.exports = async (client) => {
       const musicchannel = guild.channels.cache.get(data.channel) || await guild.channels.fetch(data.channel).catch(() => null);
       if (!musicchannel) return;
 
-      let playembed = await musicchannel.messages.fetch(data.pmsg).catch(() => null);
+      let playembed = await client.fetchPanelMessage(musicchannel, data.pmsg);
+      if (playembed === undefined) return; // fallo transitorio: no recrear
 
-      // Self-Repair Trigger
+      // Self-Repair Trigger (solo si Discord confirmó que no existe)
       if (!playembed) {
         return await client.updateembed(client, guild);
       }
