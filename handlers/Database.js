@@ -38,6 +38,12 @@ module.exports = async (client) => {
   client.music = new Josh({
     name: "music",
     provider,
+    // ensureProps=false: sin esto, ensure("guild.playlists.user", {}) hace
+    // internamente ensure("guild", {}) y REESCRIBE el documento entero del
+    // gremio en CADA lectura (getAll/guildStats). Esas escrituras de guild
+    // completo, hechas fuera del lock con un snapshot viejo, pisaban el
+    // likedBy (el 👍 quedaba solo en trackstats → fav.likedBy=0).
+    ensureProps: false,
     providerOptions: {
       ...dbOptions,
       collection: "music",
@@ -47,6 +53,12 @@ module.exports = async (client) => {
   client.autoresume = new Josh({
     name: "autoresume",
     provider,
+    // ensureProps=false: sin esto, ensure("guild.playlists.user", {}) hace
+    // internamente ensure("guild", {}) y REESCRIBE el documento entero del
+    // gremio en CADA lectura (getAll/guildStats). Esas escrituras de guild
+    // completo, hechas fuera del lock con un snapshot viejo, pisaban el
+    // likedBy (el 👍 quedaba solo en trackstats → fav.likedBy=0).
+    ensureProps: false,
     providerOptions: {
       ...dbOptions,
       collection: "autoresume",

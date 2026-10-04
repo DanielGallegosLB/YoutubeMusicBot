@@ -8,6 +8,7 @@ const {
   ComponentType,
   ButtonBuilder,
   ButtonStyle,
+  MessageFlags,
 } = require("discord.js");
 const { Song } = require("distube");
 const MusicBot = require("../../../handlers/Client");
@@ -69,7 +70,7 @@ module.exports = {
       if (!sessions.length) {
         return replyWith({
           content: `❌ No hay sesiones de música guardadas para este servidor.`,
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
       }
 
@@ -90,7 +91,7 @@ module.exports = {
       const replyData = {
         content: "📋 **Selecciona una sesión de música anterior:**",
         components: [selectRow],
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       };
 
       const replyMsg = interaction.deferred || interaction.replied
@@ -112,7 +113,7 @@ module.exports = {
         if (!selectedSession) {
           return selectInteraction.reply({
             content: "❌ Sesión no encontrada.",
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
           });
         }
 
@@ -157,7 +158,7 @@ ${selectedSession.truncated ? "\n**Nota:** sesión truncada a los primeros 150 t
         buttonCollector.on("collect", async (buttonInteraction) => {
           if (buttonInteraction.customId !== `resumir_resume_${selectedSession.id}`) return;
 
-          await buttonInteraction.deferReply({ ephemeral: true }).catch(() => {});
+          await buttonInteraction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => {});
 
           const member = interaction.member;
           const guild = interaction.guild;
@@ -225,7 +226,7 @@ ${selectedSession.truncated ? "\n**Nota:** sesión truncada a los primeros 150 t
       client.logger.error(`[Resumir Error]`, e);
       await interaction.followUp({
         content: `❌ Error al obtener resumen: ${e.message}`,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     }
   },

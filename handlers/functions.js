@@ -11,6 +11,7 @@ const {
 const client = require("../index");
 const { Song, Queue } = require("distube");
 const MusicBot = require("./Client");
+const Store = require("./PlaylistStore");
 
 /**
  *
@@ -342,6 +343,34 @@ async function skip(queue) {
   }
 }
 
+/**
+ * Registra la señal de "skip" de un usuario sobre la canción que está sonando.
+ *
+ * NO veta nada: el AutoDJ pasa a elegir esa canción MENOS SEGUIDA y solo para
+ * quien la saltó (ver `PlaylistStore.recordTrackSkip` y el peso aplicado en
+ * `DistubeEvents`). Se llama desde TODOS los caminos que saltan —botón del
+ * embed, /saltar, saltar a una posición, saltar y reproducir y el control del
+ * dashboard—, con el AutoDJ encendido o apagado.
+ *
+ * @param {MusicBot} client
+ * @param {String} guildId
+ * @param {String} userId quién saltó (si falta, no se registra nada)
+ * @param {Queue} queue de dónde se saca la canción actual (`songs[0]`)
+ */
+function recordSkipSignal(client, guildId, userId, queue) {
+  try {
+    const song = queue?.songs?.[0];
+    if (!song?.url || !userId || !guildId) return;
+    Store.recordTrackSkip(client, guildId, userId, song)
+      .then((n) => {
+        client.logger?.log(
+          `[Skip] ${userId} saltó "${song.name || song.url}" → ${n} skip(s) de ese usuario (G:${guildId}); el AutoDJ la elegirá menos`
+        );
+      })
+      .catch(() => {});
+  } catch {}
+}
+
 function formatBytes(x) {
   const units = ["bytes", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"];
   let l = 0,
@@ -417,6 +446,32 @@ async function registerSlashCommands(client) {
   }
 }
 
+/**
+ * Responde a una interacción sin importar si ya fue diferida o no.
+ *
+ * `events/interactionCreate.js` ya difiere TODOS los comandos de slash, así que
+ * un `editReply` es lo correcto. El problema aparecía cuando el defer inicial
+ * fallaba (Discord caduca el token a los 3s y devuelve 10062 "Unknown
+ * interaction"): el comando seguía igual y terminaba tirando `InteractionNot
+ * Replied`, que no dice nada de la causa real. Con esto se intenta `reply` si
+ * todavía no se respondió, y si el token ya venció solo se loguea.
+ */
+async function respondToInteraction(interaction, payload) {
+  try {
+    if (interaction.deferred || interaction.replied) {
+      return await interaction.editReply(payload);
+    }
+    return await interaction.reply(payload);
+  } catch (e) {
+    const code = e?.code || e?.rawError?.code;
+    if (code === 10062 || code === 40062) {
+      // Token vencido o ya respondido: no hay nada más que hacer.
+      return null;
+    }
+    throw e;
+  }
+}
+
 module.exports = {
   cooldown,
   check_dj,
@@ -426,8 +481,10 @@ module.exports = {
   createBar,
   msToDuration,
   skip,
+  recordSkipSignal,
   formatBytes,
   getPermissionName,
   arraysEqual,
   registerSlashCommands,
+  respondToInteraction,
 };

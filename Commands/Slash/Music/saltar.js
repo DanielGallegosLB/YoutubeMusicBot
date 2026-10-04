@@ -5,7 +5,7 @@ const {
 } = require("discord.js");
 const MusicBot = require("../../../handlers/Client");
 const { Queue } = require("distube");
-const { skip } = require("../../../handlers/functions");
+const { skip, recordSkipSignal } = require("../../../handlers/functions");
 
 module.exports = {
   name: "saltar",
@@ -37,6 +37,7 @@ module.exports = {
    */
   run: async (client, interaction, args, queue) => {
     // Code
+    recordSkipSignal(client, interaction.guildId, interaction.user.id, queue);
     await skip(queue);
     client.embed(
       interaction,

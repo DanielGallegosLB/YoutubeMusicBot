@@ -1,6 +1,7 @@
 const { Message, PermissionFlagsBits } = require("discord.js");
 const MusicBot = require("../../../handlers/Client");
 const { Queue } = require("distube");
+const { recordSkipSignal } = require("../../../handlers/functions");
 
 module.exports = {
   name: "saltara",
@@ -43,6 +44,9 @@ module.exports = {
         }\`!**`
       );
     } else {
+      // Saltar a otra posición deja fuera la canción actual: cuenta como skip
+      // para que el AutoDJ la elija menos (solo para quien saltó).
+      if (index >= 1) recordSkipSignal(client, message.guildId, message.author?.id, queue);
       queue.jump(index).then((q) => {
         client.embed(
           message,

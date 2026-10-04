@@ -1,4 +1,4 @@
-const { ApplicationCommandType, ApplicationCommandOptionType, PermissionFlagsBits } = require("discord.js");
+const { ApplicationCommandType, ApplicationCommandOptionType, PermissionFlagsBits, MessageFlags } = require("discord.js");
 const Store = require("../../../handlers/PlaylistStore");
 
 module.exports = {
@@ -49,7 +49,7 @@ module.exports = {
       if (!interaction.deferred && !interaction.replied) {
         await interaction.reply({
           content: `⏳ Cargando lista \`${pl.name}\` (${pl.tracks.length} canciones)...`,
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
       } else {
         await interaction.editReply({

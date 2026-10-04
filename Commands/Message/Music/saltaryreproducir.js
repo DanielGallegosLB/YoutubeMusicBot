@@ -1,6 +1,7 @@
 const { Message, PermissionFlagsBits, EmbedBuilder } = require("discord.js");
 const MusicBot = require("../../../handlers/Client");
 const { Queue } = require("distube");
+const { recordSkipSignal } = require("../../../handlers/functions");
 const { spawn } = require("child_process");
 const path = require("path");
 const fs = require("fs");
@@ -100,6 +101,9 @@ module.exports = {
     }
 
     let { channel } = message.member.voice;
+    // Reemplazar la canción actual es un skip: el AutoDJ la elegirá menos para
+    // quien la está salteando.
+    recordSkipSignal(client, message.guildId, message.author?.id, queue);
     const hqStored = await client.music.get(`${message.guildId}.hqmode`);
     const hqMode = (hqStored === undefined ? process.env.HQ_MODE === "true" : hqStored) || false;
     

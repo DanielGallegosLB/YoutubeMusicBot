@@ -97,6 +97,24 @@ const options = {
   defaultVolume: 90,
   leaveTimeout: 300000, // 5 minutes
   ephemeralTTL: 10000, // ms que duran las confirmaciones efímeras antes de auto-borrarse (0 = nunca)
+  cleanupTTL: 10000, // ms que duran los mensajes del bot en el canal de limpieza (0 = nunca)
+};
+
+// ------------------------------------------------------------------
+//  Canales de borrado. Antes el canal de previews estaba HARCODEADO en
+//  events/voiceStateUpdate.js y el borrado usabaImplicitamente
+//  `${guildId}.music`.channel, así que no había forma de cambiarlo.
+//
+//  cleanup:    canal donde se borran los mensajes del bot de TODO tipo
+//              (salvo el panel, la cola y los previews protegidos).
+//  noCleanup:  canales donde NO se borra nada, ni siquiera una efímera.
+//              Tiene prioridad sobre cleanup.
+//  preview:    canal donde se manda el preview de playlist al entrar.
+// ------------------------------------------------------------------
+const channels = {
+  cleanup: "1515058832508981459",
+  preview: "432435342738456590",
+  noCleanup: ["432435342738456590"],
 };
 
 const numberEmojis = [
@@ -127,6 +145,7 @@ module.exports = {
   filters,
   links,
   options,
+  channels,
   numberEmojis,
   slash: slashSettings,
 };

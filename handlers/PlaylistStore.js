@@ -3,6 +3,43 @@ const MAX_PATTERN_STEPS = 20;
 const MAX_AUTODJ_SEEN = 800;
 const FAVORITES_NAME = "canciones favoritas";
 
+// Resolver NOMBRES de Discord es la parte lenta de getGlobalTrackStats (un fetch
+// a la API por id). Con muchos 👍 por canción eso se comía el timeout de 4s del
+// render y el embed parpadeaba entre los stats reales y "Sin stats aún". Se
+// cachea id→nombre (los nombres no cambian) y se consulta primero el cache de
+// miembros del guild, que ya está en memoria y no cuesta nada.
+const _nameCache = new Map();
+const _resolveName = async (client, guild, id) => {
+  const hit = _nameCache.get(id);
+  if (hit) return hit;
+  let name = null;
+  const member = guild?.members?.cache?.get(id);
+  if (member?.user?.username) name = member.user.username;
+  else {
+    const u = client.users?.cache?.get(id);
+    if (u?.username) name = u.username;
+    else name = await client.users.fetch(id).then((x) => x?.username).catch(() => null);
+  }
+  if (!name) return id; // sin cachear: aún no lo sabemos, se reintenta
+  if (_nameCache.size > 5000) _nameCache.clear();
+  _nameCache.set(id, name);
+  return name;
+};
+
+// JoshDB (Mongo/JSON) guarda TODAS las claves de un guild en un SOLO documento
+// (playlists, trackstats, autodj…). Cada mutación es get→mutar→set: si dos
+// flujos (p. ej. un 👍 mientras suena la canción) hacen el get a la vez, el úl­
+// timo set reescribe la lista con un snapshot viejo y pierde el like/play. Este
+// lock POR GREMIO serializa la sección crítica completa (leer→mutar→guardar).
+const _guildLocks = new Map();
+async function _runGuildLocked(guildId, fn) {
+  const key = String(guildId);
+  const prev = _guildLocks.get(key) || Promise.resolve();
+  const run = prev.then(() => fn(), () => fn());
+  _guildLocks.set(key, run.then(() => {}, () => {}));
+  return run;
+}
+
 /**
  * Patrón por defecto: una RECOMENDACIÓN 🛸 y una ALEATORIA 🎲 en ciclo.
  * La 🎲 usa el resto de la lista que aún no sonó (siempre hay); la 🛸 usa las
@@ -42,12 +79,37 @@ module.exports = {
   MAX_PATTERN_STEPS,
   normalizeAutoDjPattern,
   /**
+   * Clave canónica de una URL: el MISMO video puede guardarse en favoritas con
+   * variantes (`watch?v=X&list=Y&index=1` vs limpio, mayúsculas, etc.) y cada
+   * variante se convertía en un "track" aparte con su propio conteo (por eso un
+   * 👍 repetido de "Toda la noche" seguía mostrando 👍1). Aquí solo importa el
+   * VIDEO id: así likes/dislikes/plays de todas las variantes se suman.
+   */
+  canonUrlKey(u) {
+    if (typeof u !== "string" || !u) return u;
+    try {
+      const nu = new URL(u.trim());
+      if (/youtube\.com|youtu\.be/i.test(nu.host || "")) {
+        const v = nu.searchParams.get("v");
+        if (v) return `yt:${v}`;
+        if (nu.pathname.startsWith("/shorts/")) return `yt:${nu.pathname.split("/")[2] || u}`;
+      }
+    } catch {}
+    return u.trim();
+  },
+  findTrackByCanon(list, url) {
+    const k = this.canonUrlKey(url);
+    return (list || []).find((t) => t?.url && this.canonUrlKey(t.url) === k);
+  },
+  /**
    * Ensure the user playlists object exists and return it
    */
   async getAll(client, guildId, userId) {
     const key = `${guildId}.playlists.${userId}`;
-    await client.music.ensure(key, {});
-    return (await client.music.get(key)) || {};
+    // Lectura PURA (sin ensure): el ensure sobre un path reescribía el guild
+    // completo y generaba escrituras fuera del lock que pisaban el likedBy.
+    const all = await client.music.get(key);
+    return all && typeof all === "object" ? all : {};
   },
 
   /**
@@ -189,8 +251,9 @@ module.exports = {
   /** Leer el store de stats del gremio: { [url]: { plays, likedBy[], dislikedBy[] } } */
   async guildStats(client, guildId) {
     const key = `${guildId}.trackstats`;
-    await client.music.ensure(key, {});
-    return (await client.music.get(key)) || {};
+    // Lectura PURA (sin ensure) por la misma razón que getAll.
+    const st = await client.music.get(key);
+    return st && typeof st === "object" ? st : {};
   },
 
   async saveGuildStats(client, guildId, stats) {
@@ -245,19 +308,32 @@ module.exports = {
     return true;
   },
 
-  /** Add a like on a track by URL (accumulates across plays; each user can like once per play) */
+  /** Add a like on a track by URL (acumula sin tope: cada 👍 suma) */
   async likeTrackByUrl(client, guildId, userId, name, trackUrl) {
     const key = `${guildId}.playlists.${userId}`;
     const all = await this.getAll(client, guildId, userId);
     const list = all[name] || [];
-    const track = list.find((t) => t.url === trackUrl);
+    // Match por clave canónica: no importa la variante de URL con la que suena.
+    let track = this.findTrackByCanon(list, trackUrl);
+    if (!track) track = list.find((t) => t.url === trackUrl);
     if (!track) return null;
     if (!track.likedBy) track.likedBy = [];
     if (!track.dislikedBy) track.dislikedBy = [];
     // Remove a dislike for this user for this play if present
     const disIdx = track.dislikedBy.indexOf(userId);
     if (disIdx !== -1) track.dislikedBy.splice(disIdx, 1);
-    // Accumulate a like (allows multiple likes per user across different plays)
+    // Acumula cada 👍 (sin tope): el mismo usuario sube el contador en cada
+    // clic, tanto desde el embed como desde el dashboard.
+    //
+    // Si el store global ya tiene un 👍 de ESTE usuario y la favorita no lo
+    // tenía (un set en carrera lo dejó solo en gStat), primero se siembra esa
+    // base. Sin esto el acumulador arrancaba en 0: la canción que ya tenía 1
+    // like seguía mostrando 1 después del primer click, y recién al segundo
+    // markaba 2 — "como si el like no se guardara".
+    const g0 = (await this.guildStats(client, guildId))[trackUrl];
+    if (g0?.likedBy?.includes(userId) && !track.likedBy.includes(userId)) {
+      track.likedBy.push(userId);
+    }
     track.likedBy.push(userId);
     all[name] = list;
     await Promise.all([
@@ -277,13 +353,17 @@ module.exports = {
    *  manda el dashboard, sin resolver por yt-dlp) y le suma el like: así el pool
    *  de 🛸 del AutoDJ de ESE usuario gana una recomendación real.
    *  `track` = { url, name, title, thumbnail, uploader, duration, formattedDuration }.
+   *  `claimKey` opcional: si se pasa, aplica el tope "máx 1 👍 por usuario por
+   *  reproducción" usando `client.likeClaims` (mismo mapa que el botón del embed).
    *  Devuelve { liked, created, likeCount, dislikeCount, score } o null si no hay url. */
-  async likeForUser(client, guildId, userId, track) {
+  async likeForUser(client, guildId, userId, track, claimKey) {
     if (!track || !track.url) return null;
     const key = `${guildId}.playlists.${userId}`;
     const all = await this.getAll(client, guildId, userId);
     const list = all["Canciones Favoritas"] || [];
-    let existing = list.find((t) => t.url === track.url);
+    // Match CANÓNICO (variantes `&list=` = misma canción) para no crear una
+    // entrada duplicada si el tema se guardó con otra variante de URL.
+    let existing = this.findTrackByCanon(list, track.url) || list.find((t) => t.url === track.url);
     let created = false;
     if (!existing) {
       existing = {
@@ -304,9 +384,30 @@ module.exports = {
     }
     existing.likedBy = existing.likedBy || [];
     existing.dislikedBy = existing.dislikedBy || [];
+    // Tope por reproducción (si el dashboard manda el claimKey de la canción
+    // que está sonando): si este usuario ya sumó en esta reproducción, no suma.
+    if (claimKey) {
+      if (!client.likeClaims) client.likeClaims = new Map();
+      if (client.likeClaims.size > 5000) client.likeClaims.clear();
+      let claims = client.likeClaims.get(claimKey);
+      if (!claims) { claims = new Set(); client.likeClaims.set(claimKey, claims); }
+      if (claims.has(userId)) {
+        return {
+          liked: true,
+          created: false,
+          likeCount: existing.likedBy.length,
+          dislikeCount: existing.dislikedBy.length,
+          score: existing.likedBy.length - existing.dislikedBy.length,
+          alreadyThisPlay: true,
+        };
+      }
+      claims.add(userId);
+    }
     const disIdx = existing.dislikedBy.indexOf(userId);
     if (disIdx !== -1) existing.dislikedBy.splice(disIdx, 1);
-    if (!existing.likedBy.includes(userId)) existing.likedBy.push(userId);
+    // Acumula cada 👍 que manda el dashboard (para que el total SUBA tanto en el
+    // dashboard como en el embed), con el tope por reproducción de arriba.
+    existing.likedBy.push(userId);
     all["Canciones Favoritas"] = list;
     await Promise.all([
       client.music.set(key, all),
@@ -321,19 +422,20 @@ module.exports = {
     };
   },
 
-  /** Add a dislike on a track by URL (accumulates across plays; each user can dislike once per play) */
+  /** Add a dislike on a track by URL (acumula sin tope: cada 👎 suma) */
   async dislikeTrackByUrl(client, guildId, userId, name, trackUrl) {
     const key = `${guildId}.playlists.${userId}`;
     const all = await this.getAll(client, guildId, userId);
     const list = all[name] || [];
-    const track = list.find((t) => t.url === trackUrl);
+    let track = this.findTrackByCanon(list, trackUrl);
+    if (!track) track = list.find((t) => t.url === trackUrl);
     if (!track) return null;
     if (!track.likedBy) track.likedBy = [];
     if (!track.dislikedBy) track.dislikedBy = [];
     // Remove a like for this user for this play if present
     const likedIdx = track.likedBy.indexOf(userId);
     if (likedIdx !== -1) track.likedBy.splice(likedIdx, 1);
-    // Accumulate a dislike
+    // Acumula cada 👎 (sin tope).
     track.dislikedBy.push(userId);
     all[name] = list;
     await Promise.all([
@@ -456,6 +558,26 @@ module.exports = {
       const favs = await this.getSortedFavorites(client, guildId, uid);
       const real = favs.filter((t) => this.isRealFavorite(t) && t.url);
       if (real.length) pools[uid] = real;
+    }
+    return pools;
+  },
+
+  /**
+   * Pool de RESGUARDE: las favoritas que NO son "reales" (sin 👍 ni ⭐ manual).
+   *
+   * Antes estas no entraban nunca al AutoDJ, y eso dejaba el pool real en 19
+   * canciones: cuando se habían visto todas, el bot empezaba a reciclar las
+   * mismas y se oía la misma canción cada poco. Ahora son el segundo escalón:
+   * solo se usan cuando ya no queda ninguna real sin ver, y nunca si alguien le
+   * puso 👎. Siguen sin ser la primera opción (eso no se pierde).
+   */
+  async getAutoDjFallbackPoolsByUser(client, guildId, userIds) {
+    const pools = {};
+    for (const uid of userIds) {
+      const all = (await client.music.get(`${guildId}.playlists.${uid}`).catch(() => null)) || {};
+      const { list } = this._favoritesListOf(all);
+      const rest = list.filter((t) => t?.url && !this.isRealFavorite(t) && (t.dislikedBy || []).length === 0);
+      if (rest.length) pools[uid] = rest;
     }
     return pools;
   },
@@ -586,6 +708,12 @@ module.exports = {
     if (!root || typeof root !== "object" || !root.playlists || typeof root.playlists !== "object") {
       return out;
     }
+    // Stats persistentes del gremio (guildStats): el bot acumula ahí los 👍/👎/▶️
+    // POR URL. Se cruzan por clave canónica (variantes `&list=` = misma canción)
+    // para que el dashboard muestre lo MISMO que el embed/cola, aunque en la
+    // Favorita el like no esté en `likedBy` (una escritura en carrera pudo
+    // dejarlo solo en el store de stats, y ese store es el que lleva la cuenta).
+    const gStat = await this.guildStats(client, guildId).catch(() => ({}));
     for (const userId of Object.keys(root.playlists)) {
       const pl = root.playlists[userId];
       if (!pl || typeof pl !== "object") continue;
@@ -594,24 +722,95 @@ module.exports = {
         const list = Array.isArray(pl[name]) ? pl[name] : [];
         for (const t of list) {
           if (!t || typeof t !== "object") continue;
+          const url = t.url || null;
+          const entryLikes = Array.isArray(t.likedBy) ? t.likedBy.length : 0;
+          const entryDislikes = Array.isArray(t.dislikedBy) ? t.dislikedBy.length : 0;
+          let likedGlobally = false;
+          let dislikedGlobally = false;
+          let gPlays = 0;
+          for (const k of Object.keys(gStat)) {
+            if (this.canonUrlKey(k) !== this.canonUrlKey(url)) continue;
+            const e = gStat[k] || {};
+            gPlays = Math.max(gPlays, Number(e.plays) || 0);
+            if ((e.likedBy || []).includes(userId)) likedGlobally = true;
+            if ((e.dislikedBy || []).includes(userId)) dislikedGlobally = true;
+          }
           out.push({
-            url: t.url || null,
+            url,
             name: t.name || t.title || "Sin título",
             thumbnail: t.thumbnail || null,
             uploader: (t.uploader && (t.uploader.name || t.uploader.url || t.uploader)) || null,
             duration: t.formattedDuration || t.duration || null,
-            likes: Array.isArray(t.likedBy) ? t.likedBy.length : 0,
-            dislikes: Array.isArray(t.dislikedBy) ? t.dislikedBy.length : 0,
-            plays: Number(t.playCount) || 0,
+            likes: Math.max(entryLikes, likedGlobally ? 1 : 0),
+            dislikes: Math.max(entryDislikes, dislikedGlobally ? 1 : 0),
+            plays: Math.max(Number(t.playCount) || 0, gPlays),
             manual: t.manual === true,
-            real: this.isRealFavorite(t),
+            real: this.isRealFavorite(t) || likedGlobally || dislikedGlobally,
             savedAt: t.savedAt || null,
             userId,
           });
         }
       }
     }
+    // Canciones con stats (reproducciones/likes) pero SIN entrada en Favoritas
+    // (purgadas como basura, autoguardado viejo o likes que quedaron solo en
+    // gStat antes de los locks): se listan igual como filas "virtuales" para que
+    // en el dashboard sean encontrables y se vea que la info existe.
+    const virtual = [];
+    for (const k of Object.keys(gStat)) {
+      const e = gStat[k] || {};
+      const likesArr = e.likedBy || [];
+      const dislikesArr = e.dislikedBy || [];
+      const plays = Number(e.plays) || 0;
+      if (!likesArr.length && !dislikesArr.length && !plays) continue;
+      const canon = this.canonUrlKey(k);
+      if (!k || out.some((o) => o.url && this.canonUrlKey(o.url) === canon)) continue;
+      if (virtual.some((o) => this.canonUrlKey(o.url) === canon)) continue;
+      virtual.push({
+        url: k,
+        name: k,
+        thumbnail: null,
+        uploader: null,
+        duration: null,
+        likes: likesArr.length,
+        dislikes: dislikesArr.length,
+        plays,
+        manual: false,
+        real: likesArr.length > 0,
+        savedAt: null,
+        userId: likesArr[0] || dislikesArr[0] || null,
+        virtual: true,
+      });
+    }
+    out.push(...virtual);
     return out.slice(0, cap);
+  },
+
+  /** Verifica dónde quedó el 👍/👎 de un usuario para una canción: cuántos likes
+   *  hay en la Favorita (`likedBy`) y cuántos en el store de stats del gremio.
+   *  Sirve para diagnosticar cuando el embed muestra 👍 pero la Favorita no. */
+  async verifyLike(client, guildId, userId, name, trackUrl) {
+    try {
+      const all = await this.getAll(client, guildId, userId);
+      const list = all[name] || [];
+      const track = this.findTrackByCanon(list, trackUrl) || list.find((t) => t.url === trackUrl);
+      const gStat = await this.guildStats(client, guildId);
+      let gStatLikes = 0;
+      let gStatDislikes = 0;
+      for (const k of Object.keys(gStat)) {
+        if (this.canonUrlKey(k) !== this.canonUrlKey(trackUrl)) continue;
+        gStatLikes += (gStat[k]?.likedBy || []).length;
+        gStatDislikes += (gStat[k]?.dislikedBy || []).length;
+      }
+      return {
+        favLikes: (track && Array.isArray(track.likedBy) ? track.likedBy.length : 0) || 0,
+        favDislikes: (track && Array.isArray(track.dislikedBy) ? track.dislikedBy.length : 0) || 0,
+        gStatLikes,
+        gStatDislikes,
+      };
+    } catch {
+      return null;
+    }
   },
 
   /**
@@ -724,8 +923,45 @@ module.exports = {
     return data?.skips || {};
   },
 
+  /**
+   * Registra que `userId` salteó una canción.
+   *
+   * NO es un veto ni un ban: es una señal de "no la repitas tanto". El AutoDJ
+   * usa el contador como PESO (a más skips, menos probabilidad de elegirla)
+   * y solo para quien la saltó. Se guarda por CLAVE CANÓNICA para que todas
+   * las variantes del mismo video (`watch?v=X`, `watch?v=X&list=Y`, `youtu.be/X`)
+   * cuenten como una sola canción en lugar de repartirse el contador.
+   *
+   * @param {MusicBot} client
+   * @param {String} guildId
+   * @param {String} userId  quién saltó (si falta, no se registra)
+   * @param {String|Object} track  la canción (o su URL)
+   * @returns {Promise<Number>} skips acumulados de ESE usuario para ESE tema
+   */
+  async recordTrackSkip(client, guildId, userId, track) {
+    const url = typeof track === "string" ? track : track?.url;
+    if (!userId || !url) return 0;
+    const key = this.canonUrlKey(url) || url;
+    const data = (await client.music.get(`${guildId}.autodj`).catch(() => null)) || {};
+    data.skips = data.skips || {};
+    // Una versión anterior guardaba la URL CRUDA como clave. Al sumar, se pesa
+    // también esa entrada y se borra: si no, el mismo skip quedaría partido en
+    // dos contadores y la canción nunca llegaría a weigh down del todo.
+    const legacy = typeof url === "string" ? url.trim() : "";
+    let base = 0;
+    if (legacy && legacy !== key && data.skips[legacy]) {
+      base = Number(data.skips[legacy][userId]) || 0;
+      delete data.skips[legacy];
+    }
+    data.skips[key] = data.skips[key] || {};
+    const cnt = base + (Number(data.skips[key][userId]) || 0) + 1;
+    data.skips[key][userId] = cnt;
+    await client.music.set(`${guildId}.autodj`, data);
+    return cnt;
+  },
+
   /** Get global stats (likes, dislikes, plays) for a track URL across all users in a guild */
-  async getGlobalTrackStats(client, guildId, trackUrl, allPlaylists) {
+  async getGlobalTrackStats(client, guildId, trackUrl, allPlaylists, guild = null) {
     if (!allPlaylists) allPlaylists = await client.music.get(`${guildId}.playlists`) || {};
     let plays = 0;
     const likedByIds = [];
@@ -740,7 +976,9 @@ module.exports = {
       const userPlaylists = allPlaylists[userId];
       const favs = userPlaylists?.["Canciones Favoritas"] || [];
       for (const t of favs) {
-        if (t.url === trackUrl) {
+        // Comparación CANÓNICA: las variantes (`&list=`) del mismo video suman
+        // sus likes/dislikes/plays como UNA sola canción.
+        if (this.canonUrlKey(t.url) === this.canonUrlKey(trackUrl)) {
           plays += (t.playCount || 0);
           // Solo una favorita REAL (con 👍 o guardada a mano ⭐) cuenta como
           // "dueña" del tema. Antes aparecía como 👤 cualquiera que tuviera la
@@ -748,33 +986,47 @@ module.exports = {
           // bot guardaba sola al reproducirse (faz pensaba que otros le dieron
           // like cuando era puro autoguardado).
           if (this.isRealFavorite(t)) {
-            for (const uid of (t.likedBy || [])) pushUnique(likedByIds, uid);
-            for (const uid of (t.dislikedBy || [])) pushUnique(dislikedByIds, uid);
+            // CONTEO ACUMULADO (por reproducción): se suman todos los 👍/👎,
+            // incluidos los repetidos del mismo usuario en distintas
+            // reproducciones (mismo criterio que el botón y listGuildFavorites).
+            for (const uid of (t.likedBy || [])) likedByIds.push(uid);
+            for (const uid of (t.dislikedBy || [])) dislikedByIds.push(uid);
             pushUnique(ownerIds, userId);
           }
           break;
         }
       }
     }
-    // Sum the persistent guild stats too (survive favorites removal), de-duplicating user IDs.
+    // Sum the persistent guild stats too (survive favorites removal). Los likes/
+    // dislikes del store de guild están DEDUPLICADOS (máx 1 por usuario) y las
+    // favoritas ya traen el conteo acumulado: NO sumarlos o se duplicarían.
     const gStat = (await this.guildStats(client, guildId))[trackUrl];
     if (gStat) {
       plays = Math.max(plays, gStat.plays || 0);
-      for (const uid of (gStat.likedBy || [])) pushUnique(likedByIds, uid);
-      for (const uid of (gStat.dislikedBy || [])) pushUnique(dislikedByIds, uid);
+      // El store global está DEDUPLICADO (1 por usuario) y las favoritas traen
+      // el acumulado, así que no se suman tal cual o se duplicarían. Pero antes
+      // solo se usaban si las favoritas no tenían NADA (`if (!likedByIds.length)`):
+      // un 👍 que quedó solo en gStat (escritura en carrera) se perdía en
+      // pantalla en cuanto la lista tenía un solo elemento, y el contador "daba
+      // un paso atrás" al primer click. Ahora se suman SOLO los usuarios que no
+      // estén ya representados en las favoritas.
+      const yaLiked = new Set(likedByIds);
+      for (const uid of gStat.likedBy || []) if (!yaLiked.has(uid)) likedByIds.push(uid);
+      const yaDisliked = new Set(dislikedByIds);
+      for (const uid of gStat.dislikedBy || []) if (!yaDisliked.has(uid)) dislikedByIds.push(uid);
     }
-    const resolveNames = (ids) => Promise.all(ids.map(async (id) => {
-      const member = await client.users.fetch(id).catch(() => null);
-      return member?.username || id;
-    }));
+    const resolveNames = (ids) => Promise.all(ids.map((id) => _resolveName(client, guild, id)));
     likedNames.push(...await resolveNames(likedByIds));
     dislikedNames.push(...await resolveNames(dislikedByIds));
+    // El CONTEO queda acumulado (todos los 👍/👎); los nombres se deduplican
+    // para no mostrar "dani_sas, dani_sas" cuando el mismo usuario likeó varias
+    // reproducciones de la misma canción.
     return {
       likes: likedByIds.length,
       dislikes: dislikedByIds.length,
       plays,
-      likedBy: likedNames,
-      dislikedBy: dislikedNames,
+      likedBy: [...new Set(likedNames)],
+      dislikedBy: [...new Set(dislikedNames)],
       owners: await resolveNames(ownerIds),
     };
   },
@@ -784,7 +1036,10 @@ module.exports = {
     const key = `${guildId}.playlists.${userId}`;
     const all = await this.getAll(client, guildId, userId);
     const list = all[name] || [];
-    const track = list.find((t) => t.url === trackUrl);
+    // Match por clave canónica: las reproducciones de las variantes del mismo
+    // video se suman a la MISMA entrada de favoritas.
+    let track = this.findTrackByCanon(list, trackUrl);
+    if (!track) track = list.find((t) => t.url === trackUrl);
     if (!track) return false;
     track.playCount = typeof track.playCount === "number" && track.playCount > 0 ? track.playCount + 1 : 1;
     all[name] = list;
@@ -792,6 +1047,9 @@ module.exports = {
       client.music.set(key, all),
       this.trackPlay(client, guildId, trackUrl),
     ]);
+    client.logger?.log(
+      `[Stats] 🎵 +1 reproducción "${track.name || trackUrl}" (G:${guildId}, user:${userId}) → total ${track.playCount}`
+    );
     return true;
   },
 
@@ -811,3 +1069,53 @@ module.exports = {
     };
   },
 };
+
+// ══ Serialización de mutaciones sobre el árbol de playlists del gremio ══
+// Se envuelven TODOS los métodos que leen→mutan→escriben el árbol de playlists
+// (+ los snapshots de lectura para que vean el estado confirmado) para que el
+// get y el set de cada operación queden dentro del MISMO turno del lock por
+// gremio. Sin esto, `countPlay` podía leer la lista antes del set del 👍 y su
+// set posterior pisaba el likedBy (el like quedaba solo en gStat, y el log de
+// diagnóstico mostraba `fav.likedBy=0` con `gStat.likedBy=1`).
+const _LOCKED_METHODS = new Set([
+  "create",
+  "addTracks",
+  "removeTrack",
+  "removeTracks",
+  "clearExcept",
+  "clearAll",
+  "clearGuildFavorites",
+  "likeTrackByUrl",
+  "likeForUser",
+  "dislikeTrackByUrl",
+  "sortFavorites",
+  "rename",
+  "delete",
+  "countUnlikedFavorites",
+  "verifyLike",
+  "listGuildFavorites",
+  "pruneUnlikedFavorites",
+  "pruneUnlikedFavoritesForUser",
+  "countPlay",
+  // ── Todo lo que escribe `${guildId}.autodj` ────────────────────────────────
+  // Cada uno hace get→mutar→set del documento ENTERO del guild. Sin el lock, un
+  // skip (o el refill escribiendo "seen") concurrente con otro writer se pisa y
+  // se pierden skips / historial / patrón. Son las funciones EXTERNAS: las
+  // primitivas getAutoDjState/saveAutoDjState quedan FUERA del lock a propósito
+  // (meterlas causaría deadlock, porque se llaman entre sí).
+  "recordTrackSkip",
+  "addAutodjExclude",
+  "addAutoDjPick",
+  "removeAutoDjPick",
+  "setAutoDjPattern",
+  "saveAutoDjSeen",
+]);
+for (const name of _LOCKED_METHODS) {
+  const orig = module.exports[name];
+  if (typeof orig !== "function") continue;
+  const bound = orig.bind(module.exports);
+  module.exports[name] = async function (...args) {
+    const guildId = args[1];
+    return _runGuildLocked(guildId, () => bound(...args));
+  };
+}

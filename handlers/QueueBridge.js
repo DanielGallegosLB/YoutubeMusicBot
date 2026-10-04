@@ -7,12 +7,14 @@ const PlaylistStore = require("./PlaylistStore");
 //   →  musicbot_queue.json : snapshot de todas las colas activas (escribe JUGNU)
 //   ←  musicbot_cmds.json  : comandos del dashboard (reordenar/control) que JUGNU aplica
 //   →  musicbot_favorites.json : lista de favoritas con estado de 👍/⭐ (para buscar/verificar likes)
+//   →  musicbot_channels.json  : política de borrado de mensajes por guild (lo que muestra el dashboard)
 //   ack musicbot_favclear_result.json : resultado del "quitar favoritas de todos"
 //   ack musicbot_autodj_result.json  : resultado de cambiar el patrón / purgar basura
 const DASH_DIR = "C:/Users/Dani/Downloads/Proyectos/34-ParadiseBot-Economy/dashboard";
 const QUEUE_FILE = path.join(DASH_DIR, "musicbot_queue.json");
 const CMDS_FILE = path.join(DASH_DIR, "musicbot_cmds.json");
 const FAVORITES_FILE = path.join(DASH_DIR, "musicbot_favorites.json");
+const CHANNELS_FILE = path.join(DASH_DIR, "musicbot_channels.json");
 const CLEAR_RESULT_FILE = path.join(DASH_DIR, "musicbot_favclear_result.json");
 const AUTODJ_RESULT_FILE = path.join(DASH_DIR, "musicbot_autodj_result.json");
 const LIKE_RESULT_FILE = path.join(DASH_DIR, "musicbot_like_result.json");
@@ -32,15 +34,23 @@ function queueWrite(file, data) {
 }
 
 // Serializa una canción de Distube a campos planos para el dashboard.
-function songView(song) {
+// `requestedBy` prefiere el usuario resuelto (tag/username). Si la canción solo
+// guarda el `id` (song.user = { id } en sesiones restauradas / canciones del
+// AutoDJ), se resuelve contra la caché del guild para NO mostrar un ID crudo.
+function songView(song, guild) {
   if (!song) return null;
+  let requester = song.user;
+  if (requester && !requester.tag && !requester.username && requester.id && guild?.members?.cache) {
+    const u = guild.members.cache.get(requester.id)?.user;
+    if (u) requester = u;
+  }
   return {
     url: song.url || null,
     name: song.name || song.title || "Sin título",
     uploader: (song.uploader && (song.uploader.name || song.uploader.url)) || "",
     duration: song.formattedDuration || song.duration || null,
     requestedBy:
-      (song.user && (song.user.tag || song.user.username || song.user.displayName || "desconocido")) ||
+      (requester && (requester.tag || requester.username || requester.displayName || "desconocido")) ||
       "desconocido",
     autoDj: !!song.autoDj,
   };
@@ -101,14 +111,14 @@ async function queueView(client, guild) {
     let favStats = null;
     try {
       autoDjPattern =
-        (await PlaylistStore.getAutoDjPattern(client, guild.id).catch(() => null)) ||
+        (await withDbBounded(PlaylistStore.getAutoDjPattern(client, guild.id), 1800).catch(() => null)) ||
         PlaylistStore.DEFAULT_AUTODJ_PATTERN.map((s) => ({ ...s }));
       const listeners = vc
         ? [...vc.members.values()].filter((m) => m && !m.user?.bot)
         : [];
       const ids = listeners.map((m) => m.id);
       const pools = ids.length
-        ? await PlaylistStore.getAutoDjPoolsByUser(client, guild.id, ids).catch(() => ({}))
+        ? (await withDbBounded(PlaylistStore.getAutoDjPoolsByUser(client, guild.id, ids), 2200).catch(() => ({}))) || {}
         : {};
       autoDjUsers = listeners.map((m) => ({
         id: m.id,
@@ -117,7 +127,7 @@ async function queueView(client, guild) {
         avatar: m.user?.displayAvatarURL?.() || null,
         liked: (pools[m.id] || []).length,
       }));
-      favStats = await PlaylistStore.countUnlikedFavorites(client, guild.id).catch(() => null);
+      favStats = await withDbBounded(PlaylistStore.countUnlikedFavorites(client, guild.id), 1800).catch(() => null);
     } catch {}
 
     return {
@@ -133,10 +143,10 @@ async function queueView(client, guild) {
       volume: typeof queue.volume === "number" ? queue.volume : null,
       currentTime: Math.floor(Number(queue.currentTime) || 0),
       duration: Number(queue.songs[0]?.duration) || 0,
-      actualPlaying: real ? songView({ ...real, name: real.name || real.title }) : null,
-      nowPlaying: songView(queue.songs[0]),
+      actualPlaying: real ? songView({ ...real, name: real.name || real.title }, guild) : null,
+      nowPlaying: songView(queue.songs[0], guild),
       mismatch: mismatch || undefined,
-      songs: queue.songs.slice(1).map((s) => songView(s)),
+      songs: queue.songs.slice(1).map((s) => songView(s, guild)),
     };
   } catch {
     return null;
@@ -184,17 +194,43 @@ async function writeSnapshot(client) {
 // estado de 👍/👎/⭐/plays. Se consulta en cada tick pero solo se escribe si
 // cambió (los likes son raros: no gastar I/O ni re-renders a cada rato).
 let _lastFavSig = "";
+// Acota un await de base de datos: si Mongo/josh se cuelga (reconexión, lock) un
+// .get()/set() puede no resolver NUNCA y eso congela los intervalos de snapshot
+// → el dashboard se queda "fijo" con datos viejos. Con tope, el tick siempre
+// termina y sigue con lo que ya tiene (la DB lenta resuelve sola en el fondo).
+const withDbBounded = (p, ms) =>
+  Promise.race([Promise.resolve(p), new Promise((r) => setTimeout(() => r(null), ms))]);
+
 async function writeFavoritesSnapshot(client) {
   try {
     if (!client.music) return;
     const guilds = [];
     for (const guild of client.guilds.cache.values()) {
-      const songs = await PlaylistStore.listGuildFavorites(client, guild.id).catch(() => []);
-      if (!songs || !songs.length) continue;
+      const songs = await withDbBounded(
+        PlaylistStore.listGuildFavorites(client, guild.id),
+        4500
+      ).catch(() => []);
+      if (!Array.isArray(songs) || !songs.length) continue;
       const users = {};
       const userIds = [...new Set(songs.map((s) => s.userId))];
+      if (!client._favUserName) client._favUserName = new Map();
+      if (!client._favUserFetching) client._favUserFetching = new Set();
       for (const uid of userIds) {
-        const u = client.users?.cache?.get(uid) || null;
+        let u = client.users?.cache?.get(uid) || guild.members?.cache?.get(uid)?.user || null;
+        if (!u && client._favUserName.has(uid)) {
+          u = { username: client._favUserName.get(uid), tag: client._favUserName.get(uid) };
+        } else if (!u && !client._favUserFetching.has(uid)) {
+          // Al arrancar el bot, client.users.cache está VACÍO: se resuelve el
+          // nombre en segundo plano y queda cacheado para el próximo tick.
+          client._favUserFetching.add(uid);
+          client.users
+            .fetch(uid)
+            .then((fu) => {
+              client._favUserName.set(uid, fu.username || fu.tag || uid);
+              client._favUserFetching.delete(uid);
+            })
+            .catch(() => client._favUserFetching.delete(uid));
+        }
         users[uid] = {
           id: uid,
           tag: u ? (u.tag || u.username || uid) : uid,
@@ -212,12 +248,56 @@ async function writeFavoritesSnapshot(client) {
   } catch {}
 }
 
+// ── Snapshot de la política de borrado de mensajes ──
+// Lo que el dashboard muestra en "Canales de mensajes" y sobre lo que escribe
+// al aplicar un cambio ({ action: "set_channels" }).
+let _lastChannelsSig = "";
+async function writeChannelsSnapshot(client) {
+  try {
+    if (!client.music) return;
+    const guilds = [];
+    for (const guild of client.guilds.cache.values()) {
+      try {
+        const policy = await withDbBounded(client.getChannelPolicy(guild.id), 3000).catch(() => null);
+        const meta = await withDbBounded(client.music.get(`${guild.id}.music`), 3000).catch(() => null);
+        if (!policy) continue;
+        guilds.push({
+          guildId: guild.id,
+          guildName: guild.name || guild.id,
+          cleanup: policy.cleanup,
+          noCleanup: policy.noCleanup,
+          // Canal del reproductor (data.channel): entra solo en la limpieza.
+          playerChannel: meta?.channel ? String(meta.channel) : null,
+          previewChannel: client.config?.channels?.preview || null,
+          ephemeralTTL: client.config?.options?.ephemeralTTL ?? 10000,
+          cleanupTTL: client.config?.options?.cleanupTTL ?? 10000,
+          custom: Array.isArray(meta?.cleanupChannels) || Array.isArray(meta?.noCleanupChannels),
+        });
+      } catch {}
+    }
+    const payload = {
+      updatedAt: new Date().toISOString(),
+      guilds,
+      defaults: {
+        cleanup: client.config?.channels?.cleanup ?? null,
+        noCleanup: client.config?.channels?.noCleanup ?? [],
+        preview: client.config?.channels?.preview ?? null,
+      },
+    };
+    const sig = JSON.stringify(payload);
+    if (sig === _lastChannelsSig) return;
+    _lastChannelsSig = sig;
+    queueWrite(CHANNELS_FILE, JSON.stringify(payload));
+  } catch {}
+}
+
 // Procesa los comandos que el dashboard dejó en musicbot_cmds.json.
 // Formato: array de comandos. Soportados:
 //   { action: "move", guildId, from, to }          → reordenar cola (índices 1-based)
 //   { action: "clear_guild_favorites", guildId, t } → vaciar favoritas de todos
 //   { action: "prune_unliked_favorites", guildId, t } → borrar SOLO la basura (DEFINITIVO)
 //   { action: "set_autodj_pattern", guildId, pattern, t } → patrón de intercalado
+//   { action: "set_channels", guildId, cleanup, noCleanup, t } → canales de borrado
 // Tras aplicar, reemplaza el archivo con [].
 async function processCommands(client) {
   let cmds = [];
@@ -236,9 +316,46 @@ async function processCommands(client) {
   for (const cmd of cmds) {
     if (!cmd || !cmd.guildId) continue;
 
+    // Canales de borrado de mensajes, editables desde el dashboard.
+    // { action: "set_channels", guildId, cleanup, noCleanup, t }
+    //   cleanup:   array de IDs (o "" para volver al default del config)
+    //   noCleanup: array de IDs intocables (gana sobre cleanup)
+    if (cmd.action === "set_channels") {
+      try {
+        const toList = (v) =>
+          (Array.isArray(v) ? v : v ? [v] : [])
+            .map((id) => String(id).trim())
+            .filter((id) => /^\d{15,25}$/.test(id));
+        const cleanup = toList(cmd.cleanup);
+        const noCleanup = toList(cmd.noCleanup);
+        // El canal del reproductor se limpia siempre, salvo que el admin lo
+        // marque como intocable.
+        const meta = await client.music?.get(`${cmd.guildId}.music`).catch(() => null);
+        const playerChannel = meta?.channel ? String(meta.channel) : null;
+
+        if (cleanup.length) await client.music.set(`${cmd.guildId}.music.cleanupChannels`, cleanup);
+        else await client.music.set(`${cmd.guildId}.music.cleanupChannels`, []);
+
+        if (noCleanup.length) await client.music.set(`${cmd.guildId}.music.noCleanupChannels`, noCleanup);
+        else await client.music.set(`${cmd.guildId}.music.noCleanupChannels`, []);
+
+        client._channelPolicyCache?.delete(String(cmd.guildId));
+        _lastChannelsSig = ""; // fuerza refresco del snapshot de canales
+        const effective = await client.getChannelPolicy(cmd.guildId).catch(() => null);
+        console.log(
+          `[Bridge] Canales G:${cmd.guildId}: limpieza=[${(effective?.cleanup || []).join(", ")}] ` +
+            `intocables=[${(effective?.noCleanup || []).join(", ")}] (panel=${playerChannel})`
+        );
+      } catch (e) {
+        console.warn("[Bridge] Error al guardar los canales:", e?.message || e);
+      }
+      continue;
+    }
+
     if (cmd.action === "clear_guild_favorites") {
       try {
-        const res = await PlaylistStore.clearGuildFavorites(client, cmd.guildId);
+        const res = (await withDbBounded(PlaylistStore.clearGuildFavorites(client, cmd.guildId), 12000).catch(() => null)) || { removed: 0, users: 0 };
+        client.invalidateQueueCaches?.(cmd.guildId);
         queueWrite(
           CLEAR_RESULT_FILE,
           JSON.stringify({
@@ -259,7 +376,8 @@ async function processCommands(client) {
     // que nadie tiene con like y que no se guardaron a mano (⭐). Es definitivo.
     if (cmd.action === "prune_unliked_favorites") {
       try {
-        const res = await PlaylistStore.pruneUnlikedFavorites(client, cmd.guildId);
+        const res = (await withDbBounded(PlaylistStore.pruneUnlikedFavorites(client, cmd.guildId), 12000).catch(() => null)) || { removed: 0, users: 0, kept: 0 };
+        client.invalidateQueueCaches?.(cmd.guildId);
         queueWrite(
           AUTODJ_RESULT_FILE,
           JSON.stringify({
@@ -335,9 +453,23 @@ async function processCommands(client) {
             case "resume":
               if (queue.paused) queue.resume();
               break;
-            case "skip":
+            case "skip": {
+              // El skip del dashboard también cuenta: se atribuye al admin de
+              // Discord que lo ordenó (cmd.userId) para que el AutoDJ le elija
+              // menos esa canción.
+              const cur = queue.songs?.[0];
+              if (cur?.url && cmd.userId) {
+                PlaylistStore.recordTrackSkip(client, cmd.guildId, cmd.userId, cur)
+                  .then((n) => {
+                    client.logger?.log(
+                      `[Skip] ${cmd.userId} saltó "${cur.name || cur.url}" desde el dashboard → ${n} skip(s) (G:${cmd.guildId})`
+                    );
+                  })
+                  .catch(() => {});
+              }
               await queue.skip().catch(() => {});
               break;
+            }
             case "previous":
               await queue.previous().catch(() => {});
               break;
@@ -395,7 +527,10 @@ async function processCommands(client) {
       if (gid && uid && /^https?:\/\//.test(url)) {
         try {
           const song = (cmd.song && typeof cmd.song === "object") ? cmd.song : {};
-          const res = await PlaylistStore.likeForUser(client, gid, uid, {
+          // El dashboard es acción manual del admin: cada 👍 SUMA, sin tope por
+          // reproducción. (El tope "1 por usuario por reproducción" es solo del
+          // botón del embed.) Por eso NO se pasa claimKey.
+          const res = await withDbBounded(PlaylistStore.likeForUser(client, gid, uid, {
             url,
             name: song.name || song.title || null,
             title: song.title || song.name || null,
@@ -403,7 +538,19 @@ async function processCommands(client) {
             uploader: song.uploader || null,
             duration: Number(song.duration) || 0,
             formattedDuration: song.formattedDuration ? String(song.formattedDuration) : null,
-          });
+          }), 15000);
+          if (res) {
+            _lastFavSig = "";       // refrescar snapshot de favoritas
+            _lastSnapshotSig = "";  // refrescar pool del AutoDJ en el queue snapshot
+            client.invalidateQueueCaches?.(gid);
+            // Escribir YA el snapshot de favoritas ANTES del ACK (no esperar al
+            // intervalo): el dashboard, al recibir el ACK y reabrir el panel, ya
+            // ve el 👍 actualizado (sin la carrera de 900ms vs 5s).
+            await writeFavoritesSnapshot(client).catch(() => {});
+            console.log(`[Bridge] 👍 Like manual para ${uid}: ${url} (creado=${!!res.created}, total=${res.likeCount}${res.alreadyThisPlay ? ", ya contado en esta reproducción" : ""})`);
+          } else {
+            console.warn("[Bridge] Like_for_user devolvió null:", url);
+          }
           queueWrite(
             LIKE_RESULT_FILE,
             JSON.stringify({
@@ -418,13 +565,6 @@ async function processCommands(client) {
               score: res?.score || 1,
             })
           );
-          if (res) {
-            _lastFavSig = "";       // refrescar snapshot de favoritas
-            _lastSnapshotSig = "";  // refrescar pool del AutoDJ en el queue snapshot
-            console.log(`[Bridge] 👍 Like manual para ${uid}: ${url} (creado=${!!res.created})`);
-          } else {
-            console.warn("[Bridge] Like_for_user devolvió null:", url);
-          }
         } catch (e) {
           console.warn("[Bridge] Error en like_for_user:", e?.message || e);
           queueWrite(
@@ -480,10 +620,16 @@ module.exports = (client) => {
     writeFavoritesSnapshot(client).catch((e) => console.warn("[Bridge] favorites:", e?.message || e));
   }, SNAPSHOT_INTERVAL);
   setInterval(() => {
+    writeChannelsSnapshot(client).catch((e) => console.warn("[Bridge] channels:", e?.message || e));
+  }, 10000);
+  setInterval(() => {
     processCommands(client).catch((e) => console.warn("[Bridge] processCommands:", e?.message || e));
   }, CMDS_INTERVAL);
   setTimeout(() => {
     writeSnapshot(client).catch(() => {});
     writeFavoritesSnapshot(client).catch(() => {});
   }, 1500); // primer snapshot apenas inicie
+  // El snapshot de canales espera un poco más: getChannelPolicy lee la DB de
+  // música y los canales no cambian seguido.
+  setTimeout(() => writeChannelsSnapshot(client).catch(() => {}), 4000);
 };

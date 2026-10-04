@@ -226,7 +226,7 @@ async function shufflePlay({ client, channel, urls, playOpts, onStatus }) {
       } catch (e) {
         log(client, guildId, `Video omitido en lista aleatoria (${e?.message || e}): ${unique[i]}`);
       }
-      if (onStatus && loaded % 25 === 0) {
+      if (onStatus && loaded > 0 && loaded % 25 === 0) {
         try { await onStatus(`⏳ Lista aleatoria: \`${loaded}\` canciones encoladas...`); } catch {}
       }
       await new Promise((r) => setTimeout(r, 60));

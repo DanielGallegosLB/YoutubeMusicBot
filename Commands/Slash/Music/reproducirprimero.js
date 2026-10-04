@@ -3,6 +3,7 @@ const {
   PermissionFlagsBits,
   ApplicationCommandType,
   ApplicationCommandOptionType,
+  MessageFlags,
 } = require("discord.js");
 const MusicBot = require("../../../handlers/Client");
 const { Queue } = require("distube");
@@ -183,7 +184,7 @@ module.exports = {
       try {
         await interaction.followUp({
           content: `⏳ Obteniendo playlist...`,
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
       } catch (e) {}
 
@@ -195,7 +196,7 @@ module.exports = {
         client.logger.error("[Playlist Top Error]", e);
         return interaction.followUp({
           content: `❌ No se pudo cargar la playlist: ${e.message}`,
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
       }
 
@@ -215,7 +216,7 @@ module.exports = {
         client.logger.error("[Playlist Top Track 1 Error]", e);
         return interaction.followUp({
           content: `❌ Error en el track: ${e.message}`,
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
       }
 
@@ -300,7 +301,7 @@ module.exports = {
           const resolved = await searchYoutube(song);
           if (resolved) {
             await client.distube.play(channel, resolved, playOpts);
-            interaction.followUp({ content: `✅ Añadiendo \`${song}\` al principio...`, ephemeral: true }).then((m) => client.scheduleDelete(m, interaction));
+            interaction.followUp({ content: `✅ Añadiendo \`${song}\` al principio...`, flags: MessageFlags.Ephemeral }).then((m) => client.scheduleDelete(m, interaction));
             return;
           }
         } catch (e2) {
@@ -309,13 +310,13 @@ module.exports = {
       }
       return interaction.followUp({
         content: `❌ Error: ${e.message}`,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     }
 
     interaction.followUp({
       content: `🔍 Buscando \`${song}\` y añadiendo al principio...`,
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     }).then((m) => client.scheduleDelete(m, interaction));
   },
 };

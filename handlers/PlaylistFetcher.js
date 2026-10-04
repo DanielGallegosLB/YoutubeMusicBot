@@ -9,8 +9,16 @@ const YTDLP_PATH = path.join(
 );
 
 function isPlaylistURL(url) {
-  return /youtube\.com\/playlist\?list=/.test(url) ||
-    (/[?&]list=/.test(url) && !/watch\?v=/.test(url));
+  if (typeof url !== "string" || !url) return false;
+  // Playlists de YouTube
+  if (/youtube\.com\/playlist\?list=/.test(url)) return true;
+  if (/[?&]list=/.test(url) && !/watch\?v=/.test(url)) return true;
+  // Sets de SoundCloud ("/sets/") y álbumes/sets de otros sitios: son LOTE,
+  // no singles. (*/#chud era un set que el pool tomaba como single y play()
+  // se colgaba resolviéndolo.)
+  if (/soundcloud\.com\/[^/]+\/sets\//i.test(url)) return true;
+  if (/\/(albums?|sets|playlists?)\//i.test(url) && !/watch\?v=/.test(url)) return true;
+  return false;
 }
 
 function buildArgs(playlistUrl, startItem, endItem, extraPrints = []) {
@@ -62,6 +70,17 @@ function runYtDlp(args, timeoutMs = 0) {
   });
 }
 
+// Las validaciones corren yt-dlp (un proceso por canción). Si se lanzan muchas
+// a la vez (NextValidator + refill + reconexión) se saturan la red/CPU y todas
+// se vuelven lentas -> timeouts masivos. Se SERIALIZAN en una cola: máximo 1
+// yt-dlp de validación a la vez.
+let _validationChain = Promise.resolve();
+const serializeValidation = (fn) => {
+  const run = _validationChain.then(fn);
+  _validationChain = run.then(() => {}, () => {});
+  return run;
+};
+
 /**
  * Fetch ONLY the first track URL of a playlist. Fast (~seconds), used to
  * start playback immediately while the rest is fetched in the background.
@@ -69,19 +88,21 @@ function runYtDlp(args, timeoutMs = 0) {
  * @returns {Promise<string|null>}
  */
 function fetchPlaylistFirstURL(playlistUrl, opts = {}) {
-  return new Promise(async (resolve) => {
-    try {
-      const timeoutMs = opts.timeoutMs || 0;
-      const { stdout, stderr } = await runYtDlp(buildArgs(playlistUrl, 1, 1), timeoutMs);
-      const url = stdout.trim().split("\n").find(Boolean);
-      if (!url) console.error(`[fetchPlaylistFirstURL] Empty result for ${playlistUrl}\n${stderr.trim().slice(0, 500)}`);
-      resolve(url || null);
-    } catch (e) {
-      if (/timeout/i.test(e?.message || "")) console.error(`[fetchPlaylistFirstURL] Timeout (${opts.timeoutMs}ms) for ${playlistUrl}`);
-      else console.error("[fetchPlaylistFirstURL] Error:", e);
-      resolve(null);
-    }
-  });
+  return serializeValidation(() =>
+    new Promise(async (resolve) => {
+      try {
+        const timeoutMs = opts.timeoutMs || 0;
+        const { stdout, stderr } = await runYtDlp(buildArgs(playlistUrl, 1, 1), timeoutMs);
+        const url = stdout.trim().split("\n").find(Boolean);
+        if (!url) console.error(`[fetchPlaylistFirstURL] Empty result for ${playlistUrl}\n${stderr.trim().slice(0, 500)}`);
+        resolve(url || null);
+      } catch (e) {
+        if (/timeout/i.test(e?.message || "")) console.error(`[fetchPlaylistFirstURL] Timeout (${opts.timeoutMs}ms) for ${playlistUrl}`);
+        else console.error("[fetchPlaylistFirstURL] Error:", e);
+        resolve(null);
+      }
+    })
+  );
 }
 
 /**
@@ -161,6 +182,55 @@ async function fetchPlaylistAllURLsFlat(playlistUrl, maxItems = 1000) {
 }
 
 /**
+ * Valida que una URL de video suelto sea reproducible por DisTube sin colgarse:
+ * corre yt-dlp con `--simulate` (trae metadata + formatos, que es justo lo que
+ * suele trabajar) y devuelve un VEREDICTO:
+ *   { status: "ok",     title }  -> yt-dlp resolvió el título: se puede usar
+ *   { status: "invalid", reason } -> YouTube confirmó que NO existe / fue
+ *                                    removido / privado / bloq. de edad
+ *                                    (SOLO esto autoriza a descartar la canción)
+ *   { status: "unknown", reason } -> timeout / error genérico: yt-dlp estaba
+ *                                    lento o se cortó la red, NO sabemos si la
+ *                                    canción es mala -> el llamador la CONSERVA
+ * Las validaciones se serializan (1 yt-dlp a la vez) para no saturar la red.
+ * @param {string} url
+ * @param {number} [timeoutMs]
+ * @returns {Promise<{status:string, title?:string, reason?:string}>}
+ */
+async function validateSinglePlayable(url, timeoutMs = 15000) {
+  return serializeValidation(async () => {
+    const cookiePath = path.join(process.cwd(), "yt-cookies.txt");
+    const args = [
+      "--no-playlist",
+      "--simulate",
+      "--print", "title",
+      "--no-warnings",
+      "--ignore-errors",
+      "--no-check-certificates",
+      "--js-runtimes", "node",
+      url,
+    ];
+    if (fs.existsSync(cookiePath)) args.push("--cookies", cookiePath);
+    try {
+      const { stdout, stderr } = await runYtDlp(args, timeoutMs);
+      const title = stdout.trim().split("\n").find(Boolean);
+      if (title) return { status: "ok", title };
+      const evidence = (stderr + "\n" + stdout).slice(0, 600);
+      if (/removed for violating|has been removed|removed|Private video|Video unavailable|not available|doesn't exist|does not exist|sign in to confirm|members-only|age.?restricted|this video is unavailable|forbidden|YouTube said|Extractor error/i.test(evidence)) {
+        return { status: "invalid", reason: evidence.replace(/\s+/g, " ").trim().slice(0, 220) || "indisponible en YouTube" };
+      }
+      return { status: "unknown", reason: evidence.replace(/\s+/g, " ").trim().slice(0, 220) || "salida vacía" };
+    } catch (e) {
+      if (/timeout/i.test(e?.message || "")) {
+        console.error(`[validateSinglePlayable] Timeout (${timeoutMs}ms) para ${url} → hay una cola de validaciones: yt-dlp está lento, se conserva la canción.`);
+        return { status: "unknown", reason: `timeout ${timeoutMs}ms` };
+      }
+      return { status: "unknown", reason: (e?.message || e).toString().slice(0, 220) };
+    }
+  });
+}
+
+/**
  * @param {string} playlistUrl
  * @returns {Promise<string[]>}
  */
@@ -201,4 +271,4 @@ function searchYoutube(query) {
   });
 }
 
-module.exports = { YTDLP_PATH, isPlaylistURL, fetchPlaylistURLs, fetchPlaylistAllURLsFlat, fetchPlaylistURLsIncrementally, fetchPlaylistFirstURL, searchYoutube };
+module.exports = { YTDLP_PATH, isPlaylistURL, fetchPlaylistURLs, fetchPlaylistAllURLsFlat, fetchPlaylistURLsIncrementally, fetchPlaylistFirstURL, validateSinglePlayable, searchYoutube };

@@ -3,6 +3,7 @@ const {
   PermissionFlagsBits,
   ApplicationCommandType,
   ApplicationCommandOptionType,
+  MessageFlags,
 } = require("discord.js");
 const MusicBot = require("../../../handlers/Client");
 const Store = require("../../../handlers/PlaylistStore");
@@ -121,7 +122,7 @@ module.exports = {
 
     try {
       if (!interaction.deferred && !interaction.replied) {
-        await interaction.reply({ content: `⏳ Procesando...`, ephemeral: true }).catch(() => {});
+        await interaction.reply({ content: `⏳ Procesando...`, flags: MessageFlags.Ephemeral }).catch(() => {});
       } else {
         await interaction.editReply({ content: `⏳ Procesando...` }).catch(() => {});
       }

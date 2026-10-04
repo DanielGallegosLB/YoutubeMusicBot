@@ -4,6 +4,7 @@ const {
   StringSelectMenuBuilder,
   EmbedBuilder,
   PermissionFlagsBits,
+  MessageFlags,
 } = require("discord.js");
 const MusicBot = require("../../../handlers/Client");
 const { Queue } = require("distube");
@@ -81,7 +82,7 @@ module.exports = {
           if (interaction.user.id !== message.author.id) {
             return interaction.followUp({
               content: `You are not author of this interaction`,
-              ephemeral: true,
+              flags: MessageFlags.Ephemeral,
             });
           }
           let filter = interaction.values[0];
@@ -89,7 +90,7 @@ module.exports = {
             queue.filters.clear();
             interaction.followUp({
               content: `${client.config.emoji.SUCCESS} Queue Filter Off !!`,
-              ephemeral: true,
+              flags: MessageFlags.Ephemeral,
             });
           } else {
             if (queue.filters.has(filter)) {
@@ -101,7 +102,7 @@ module.exports = {
               content: `${
                 client.config.emoji.SUCCESS
               } | Current Queue Filter: \`${queue.filters.names.join(", ")}\``,
-              ephemeral: true,
+              flags: MessageFlags.Ephemeral,
             });
           }
         }

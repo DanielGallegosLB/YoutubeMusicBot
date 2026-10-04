@@ -7,7 +7,7 @@ const {
   getPermissionName,
 } = require("../handlers/functions");
 const { emoji } = require("../settings/config");
-const { ApplicationCommandOptionType, Events } = require("discord.js");
+const { ApplicationCommandOptionType, Events, MessageFlags } = require("discord.js");
 
 client.on(Events.InteractionCreate, async (interaction) => {
   // Autocomplete Handling
@@ -107,9 +107,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
         } catch (error) {
           client.logger.error(`[Command Error] ${cmd.name}`, error);
           if (interaction.deferred || interaction.replied) {
-            await interaction.followUp({ content: `❌ Error: ${error.message}`, ephemeral: true }).catch(() => {});
+            await interaction.followUp({ content: `❌ Error: ${error.message}`, flags: MessageFlags.Ephemeral }).catch(() => {});
           } else {
-            await interaction.reply({ content: `❌ Error: ${error.message}`, ephemeral: true }).catch(() => {});
+            await interaction.reply({ content: `❌ Error: ${error.message}`, flags: MessageFlags.Ephemeral }).catch(() => {});
           }
         }
       }
@@ -118,7 +118,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
   // Context Menu Handling
   if (interaction.isContextMenuCommand()) {
-    await interaction.deferReply({ ephemeral: true }).catch((e) => {});
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch((e) => {});
     const command = client.commands.get(interaction.commandName);
     if (command) command.run(client, interaction);
   }

@@ -1,7 +1,7 @@
 const { Message, PermissionFlagsBits } = require("discord.js");
 const MusicBot = require("../../../handlers/Client");
 const { Queue } = require("distube");
-const { skip } = require("../../../handlers/functions");
+const { skip, recordSkipSignal } = require("../../../handlers/functions");
 
 module.exports = {
   name: "saltar",
@@ -26,6 +26,7 @@ module.exports = {
    */
   run: async (client, message, args, prefix, queue) => {
     // Code
+    recordSkipSignal(client, message.guildId, message.author?.id, queue);
     await skip(queue);
     client.embed(message, `${client.config.emoji.SUCCESS}  Song Skipped !!`);
   },

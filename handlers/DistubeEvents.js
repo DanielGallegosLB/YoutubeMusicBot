@@ -6,13 +6,31 @@ const UserHistory = require("./UserHistory");
 const MusicTracker = require("./MusicTracker");
 const PlaylistStore = require("./PlaylistStore");
 const AutoDjSource = require("./Autodjsource");
-const { fetchPlaylistFirstURL } = require("./PlaylistFetcher");
+const { fetchPlaylistFirstURL, validateSinglePlayable, isPlaylistURL } = require("./PlaylistFetcher");
 const { isAgeGateError, friendlyPlaybackError } = require("./PlaybackError");
 const { startMarqueeActivity, stopMarqueeActivity } = require("./ActivityManager");
 
 const MAX_SESSION_SONGS = 150;
 
 const isOtherRequester = (user, ownerId) => !!(ownerId && user?.id && user.id !== ownerId);
+
+// Clave canónica de una URL: así las exclusiones del AutoDJ atrapan la misma
+// canción aunque esté guardada con variantes (&list=, index, mayúsculas, etc.).
+// El botón 🚫 banea la url "limpia" que sonó, pero el pool de recomendación
+// puede tener la variante de su lista original → antes no coincidían y el tema
+// volvía a recomendarse a pesar del 🚫.
+const canonUrlKey = (u) => {
+  if (typeof u !== "string" || !u) return u;
+  try {
+    const nu = new URL(u.trim());
+    if (/youtube\.com|youtu\.be/i.test(nu.host || "")) {
+      const v = nu.searchParams.get("v");
+      if (v) return `yt:${v}`;
+      if (nu.pathname.startsWith("/shorts/")) return `yt:${nu.pathname.split("/")[2] || u}`;
+    }
+  } catch {}
+  return u.trim();
+};
 
 // Índice donde insertar las canciones de otros usuarios: justo después de la
 // canción actual y después de las peticiones ya en cola (orden de llegada).
@@ -158,7 +176,26 @@ module.exports = async (client) => {
    * cola) para que las favoritas vuelvan a entrar en rotación.
    */
   const REC_MIN_GAP = 5; // 🛸 no recomienda lo que va a sonar en los próximos ~5 temas
-const REC_HISTORY_MAX = 25; // máximo de canciones del historial de cada oyente que entran al pool de 🛸
+  const REC_HISTORY_MAX = 25; // máximo de canciones del historial de cada oyente que entran al pool de 🛸
+
+  // Umbrales del watchdog de cola (ms de player idle antes de actuar).
+  //
+  // El 1º escalón estaba en 20s y eso era MUY agresivo para este bot: yt-dlp
+  // tarda 22-47s en resolver (los timeouts de validateSinglePlayable son de
+  // 22s y los agregados del AutoDJ tardaron 39s y 47s). Una transición normal
+  // pero lenta se marcaba como "colgada", el watchdog reintentaba y terminaba
+  // saltando una canción que igual iba a sonar. 45s deja margen de sobra para
+  // una transición legítima sin dejar al bot mudo.
+  const STALL_1ST_MS = 45000;
+  const STALL_2ND_MS = 30000;
+
+  // Margen que se espera tras drenar la cola de tareas antes de decidir si hay
+  // que saltar. Drenar suelta la promesa de la operación de DisTube, pero esa
+  // continuación corre como microtask/tarea posterior: songs[0] todavía NO
+  // refleja el avance en el instante inmediato. Sin esta espera, la guarda
+  // vería la canción vieja, daría el salto y la transición liberada por el
+  // drenaje avanzaría la cola por su cuenta = salto doble (canción perdida).
+  const STALL_DRAIN_GRACE_MS = 3000;
 
   /**
    * Elige una favorita que aún no se haya puesto. Si ya se agotaron TODAS las
@@ -168,12 +205,106 @@ const REC_HISTORY_MAX = 25; // máximo de canciones del historial de cada oyente
    * sonar / la que está sonando). Las favoritas en `blocked` no se tocan; las
    * que están en la cola pero LEJOS se pueden usar: luego se "adelantan" al
    * hueco del AutoDJ sin duplicarse (el loader salta las usadas).
+   *
+   * `weightOf` (opcional) = peso de cada candidata; respeta los skips.
+   *
+   * IMPORTANTE: se.sortea de verdad. Antes devolvía `usable.find(...)` y, si no
+   * quedaba ninguna sin ver, `usable[0]`: ambos son el PRIMERO de la lista, así
+   * que el bot tendía a repetir siempre las mismas 2-3 canciones, por muy
+   * grande que fuera la lista. Con un pool chico (19 reales) se oía clarísimo.
    */
-  const pickUnseen = (pool, seen, excluded, blocked) => {
-    const usable = pool.filter((t) => t?.url && !excluded.has(t.url) && !blocked.has(t.url));
+  /**
+   * Streams que mueren nada mas arrancar (el oyente oye 2s y la cancion se
+   * salta sola). No son un problema del AutoDJ sino del stream: la pista se
+   * reintenta 2 veces y al fallar vuelve a colarse en el pool, con lo que el
+   * fallo se repite cada poco. Se marcan como "muertos" un buen rato para que
+   * no vuelvan a salir.
+   */
+  const STREAM_DEAD_TTL = 12 * 60 * 60 * 1000; // 12h
+  const deadKey = (url) => canonUrlKey(url);
+
+  const isStreamDead = (url) => {
+    if (!url) return false;
+    const map = client._streamDead;
+    if (!map) return false;
+    const until = map.get(deadKey(url));
+    if (!until) return false;
+    if (Date.now() > until) {
+      map.delete(deadKey(url));
+      return false;
+    }
+    return true;
+  };
+
+  // Suma un fallo al contador del stream y, si insiste, lo aparta un buen rato.
+  const noteStreamFailure = (url) => {
+    if (!url) return false;
+    if (!client._streamFails) client._streamFails = new Map();
+    if (!client._streamDead) client._streamDead = new Map();
+    const k = deadKey(url);
+    const prev = client._streamFails.get(k)?.ts || 0;
+    const n = (Date.now() - prev < 60 * 60 * 1000 ? (client._streamFails.get(k)?.n || 0) : 0) + 1;
+    client._streamFails.set(k, { n, ts: Date.now() });
+    if (n >= 3) {
+      client._streamDead.set(k, Date.now() + STREAM_DEAD_TTL);
+      client._streamFails.delete(k);
+      return true;
+    }
+    return false;
+  };
+
+  // Sorteo proporcional a los pesos (respeta los skips del grupo).
+  const weightedPick = (arr, weightOf) => {
+    if (!arr.length) return null;
+    if (!weightOf) return arr[Math.floor(Math.random() * arr.length)];
+    let total = 0;
+    const ws = arr.map((t) => { const w = Math.max(0.01, Number(weightOf(t)) || 0.01); total += w; return w; });
+    let r = Math.random() * total;
+    for (let i = 0; i < arr.length; i++) { r -= ws[i]; if (r <= 0) return arr[i]; }
+    return arr[arr.length - 1];
+  };
+
+  // Elige priorizando las que MENOS se han reproducido.
+  //
+  // El problema que había: el sorteo era uniforme sobre TODAS las candidatas,
+  // así que una canción con 40 reproducciones tenía la misma probabilidad que
+  // una que nunca sonó. Con pools chicos (mediana de 37 en los logs, y 83 de
+  // 175 selecciones con pool <=20) eso se traducía en la misma canción cada
+  // rato: el peor caso del log seleccionó el mismo video 20 veces seguidas con
+  // pool=12 y 10 de 12 ya descartadas por historia.
+  //
+  // Ahora se ordena por `playCount` y se sortea SOLO dentro del escalón más
+  // bajo. El escalón cubre un 25% de las candidatas para que no sea un ciclo
+  // determinista y se mantenga la variedad. Dentro del escalón se sigue pesando
+  // por skips, así una canción que la gente salta sigue bajando.
+  const playsOf = (t) => Math.max(0, Number(t?.playCount) || 0);
+  const pickLeastPlayed = (arr, weightOf, playsOfFn = playsOf) => {
+    if (!arr?.length) return null;
+    const plays = arr.map(playsOfFn);
+    const min = Math.min(...plays);
+    const max = Math.max(...plays);
+    // Todas igual de reproducidas: el escalón no aporta nada, no lo limito.
+    if (max === min) return weightedPick(arr, weightOf);
+    const sorted = arr.slice().sort((a, b) => playsOfFn(a) - playsOfFn(b));
+    const tier = sorted.slice(0, Math.max(1, Math.ceil(sorted.length * 0.25)));
+    return weightedPick(tier, weightOf);
+  };
+
+  const pickUnseen = (pool, seen, excluded, blocked, weightOf = null) => {
+    const usable = pool.filter((t) => {
+      if (!t?.url) return false;
+      if (excluded && excluded.size && excluded.has(canonUrlKey(t.url))) return false;
+      if (blocked?.has?.(t.url)) return false;
+      // Stream muerto al arrancar: no se vuelve a sortear (evita el ciclo
+      // "suena 2s y se salta" que se repetia cada poco).
+      if (isStreamDead(t.url)) return false;
+      return true;
+    });
     if (!usable.length) return null;
-    const fresh = usable.find((t) => !seen.has(t.url));
-    if (fresh) return fresh;
+    const pickFrom = (arr) => pickLeastPlayed(arr, weightOf);
+    const fresh = usable.filter((t) => !seen.has(t.url));
+    if (fresh.length) return pickFrom(fresh);
+    // Todo visto: se olvida la mitad MÁS VIEJA de lo visto y se recicla de ahí.
     let drop = Math.max(1, Math.floor(seen.size / 2));
     for (const k of [...seen.keys()]) {
       if (drop <= 0) break;
@@ -181,7 +312,8 @@ const REC_HISTORY_MAX = 25; // máximo de canciones del historial de cada oyente
       seen.delete(k);
       drop--;
     }
-    return usable.find((t) => !seen.has(t.url)) || usable[0];
+    const recycled = usable.filter((t) => !seen.has(t.url));
+    return pickFrom(recycled.length ? recycled : usable);
   };
 
   client.autoDjRefillInner = async (queue, { channel, force = false } = {}) => {
@@ -213,6 +345,162 @@ const REC_HISTORY_MAX = 25; // máximo de canciones del historial de cada oyente
         (e) => { clearTimeout(t); reject(e); }
       );
     });
+
+  // ---- Validador de la siguiente canción ----
+  // DisTube resuelve la canción siguiente con SU extractor al terminar la
+  // actual; si esa resolución se cuelga (YouTube/throttle/age-gate), la
+  // transición queda bloqueada y DisTube se serializa entero (el skip del
+  // watchdog tampoco entra). Prevenirlo: mientras suena la actual, validamos
+  // songs[1] con yt-dlp (con tope, matando el proceso si cuelga). Si no
+  // valida, se SACA de la cola y se prueba la siguiente (máx 3). Así la
+  // transición natural siempre cae en una canción ya comprobada.
+  const _nextValidated = new Map(); // `${guild}|${url}` -> at
+  const NEXT_VALIDATE_TTL = 10 * 60 * 1000;
+  const scheduleNextValidation = (client, queue) => {
+    try {
+      const guildId = queue.textChannel?.guildId || queue.guildId;
+      if (!guildId || !queue.songs?.length) return;
+      if (queue._valNextBusy) return;
+      const next = queue.songs[1];
+      if (!next?.url) return;
+      const key = `${guildId}|${next.url}`;
+      const cache = _nextValidated.get(key);
+      if (cache && Date.now() - cache < NEXT_VALIDATE_TTL) return;
+      if (queue._valNextChecked === next.url) return;
+      queue._valNextChecked = next.url;
+      queue._valNextBusy = true;
+      setTimeout(() => {
+        (async () => {
+          try {
+            const lq = client.distube.getQueue(guildId) || queue;
+            if (!lq || !lq.songs?.length) return;
+            const removed = [];
+            let probes = 0;
+            while (probes < 3 && lq.songs.length > 1) {
+              const target = lq.songs[1];
+              if (!target?.url) break;
+              // Canciones cortas no merecen gastar yt-dlp (hoy lento): se dejan pasar.
+              if (target.duration && target.duration < 35) break;
+              const currentUrl = lq.songs[0]?.url;
+              const keptKey = `${guildId}|${target.url}`;
+              // Veredicto, NO booleano: un timeout de yt-dlp (que hoy se demora
+              // 20-45s por llamada) NO significa "canción inválida". Solo se
+              // descarta si YouTube confirma remoto/privado/inexistente;
+              // si quedó "unknown", la canción se CONSERVA (el bucle de antes
+              // descartaba todas las válidas con el tope de 12s).
+              const verdict = await validateSinglePlayable(target.url, 22000);
+              if (lq.songs[0]?.url !== currentUrl) break; // la cola avanzó mientras tanto
+              if (verdict?.status === "ok") { _nextValidated.set(keptKey, Date.now()); break; }
+              if (verdict?.status === "invalid") {
+                client.logger.warn(
+                  `[NextValidator ${guildId}] "${target.name || target.url}" INVÁLIDA (${verdict.reason}). Se descarta para evitar que la transición se cuelgue.`
+                );
+                lq.songs.splice(1, 1);
+                removed.push(target.url);
+                probes++;
+                continue;
+              }
+              // unknown: yt-dlp lento/cortado. No descartar y no seguir
+              // martillando: la próxima canción se reintentará sola.
+              client.logger.warn(
+                `[NextValidator ${guildId}] "${target.name || target.url}" sin confirmar (${verdict?.reason || "sin veredicto"}): se MANTIENE en la cola.`
+              );
+              break;
+            }
+            if (removed.length) {
+              // Que el refill del AutoDJ no la vuelva a meter en la sesión.
+              if (!lq._autoDjExcludedSession) lq._autoDjExcludedSession = new Set();
+              for (const u of removed) lq._autoDjExcludedSession.add(u);
+              if (lq._autoDjSeen instanceof Map) {
+                for (const u of removed) lq._autoDjSeen.set(u, Date.now());
+              }
+              client.updatequeue(lq).catch(() => {});
+              client.updateplayer(lq).catch(() => {});
+            }
+          } catch (e) {
+          } finally {
+            queue._valNextBusy = false;
+          }
+        })();
+      }, 1200);
+    } catch (e) {}
+  };
+
+  // Restaura el resto de la cola en una cola nueva (el play() de la reconexión
+  // crea una cola de 1 SOLA canción: sin esto se perdían las ~91 restantes).
+  // Se re-encolan los objetos Song YA resueltos (sin re-extraer cada url).
+  const restoreQueueSongs = async (guildId, savedSongs, excludedUrl) => {
+    const nq = client.distube.getQueue(guildId);
+    if (!nq || !savedSongs?.length) return 0;
+    let restored = 0;
+    for (const s of savedSongs) {
+      if (!s?.url || s.url === excludedUrl) continue;
+      if (nq.songs?.some((x) => x?.url === s.url)) continue;
+      try { await nq.add(s); restored++; }
+      catch {
+        try { await nq.add(s.url); restored++; } catch {}
+      }
+    }
+    return restored;
+  };
+
+  // Reconexión automática tras el escalón de 90s del watchdog: el destroy
+  // corta el bloqueo del play() colgado y esto vuelve a unir el bot y a seguir
+  // con una canción VALIDADA (yt-dlp). El usuario no se queda sin música.
+  const resumeAfterUnstick = async (guildId, queue) => {
+    try {
+      await new Promise((r) => setTimeout(r, 2500));
+      const lq = client.distube.getQueue(guildId) || queue;
+      if (!lq || !lq.songs?.length) return;
+      const guild = client.guilds.cache.get(guildId);
+      if (!guild) return;
+      const vc = lq.voice?.channel || guild.members?.me?.voice?.channel;
+      if (!vc || !vc.members) return;
+      // Elegir de la parte delantera la 1ª canción que pase la validación
+      // (máx 6 candidatas / 10s cada una; tope total ~60s, con proceso saneado).
+      let pick = null;
+      for (let idx = 1; idx <= Math.min(6, lq.songs.length - 1); idx++) {
+        const s = lq.songs[idx];
+        if (!s?.url) continue;
+        const cache = _nextValidated.get(`${guildId}|${s.url}`);
+        const ok = (cache && Date.now() - cache < NEXT_VALIDATE_TTL)
+          ? true
+          : (await validateSinglePlayable(s.url, 15000))?.status === "ok";
+        if (ok) { pick = s; break; }
+        client.logger.warn(`[QueueWatchdog ${guildId}] "${s.name || s.url}" no valida al reconectar: se omite.`);
+      }
+      if (!pick) pick = lq.songs[1] || lq.songs[0];
+      if (!pick?.url) return;
+      // Guardar el RESTO de la cola ANTES de reconectar: el play() crea una
+      // cola NUEVA de 1 canción y sin esto se perdían las ~91 restantes.
+      const restSongs = (lq.songs || []).filter((s) => s?.url && s.url !== pick.url);
+      await client.distube.voices.join(vc).catch(() => {});
+      const liveQ = client.distube.getQueue(guildId) || lq;
+      if (liveQ?.voice?.connection && liveQ !== lq) {
+        try { await liveQ.leave().catch(() => {}); } catch (e) {}
+      }
+      await withTimeout(
+        client.distube.play(vc, pick.url, {
+          member: pick.user || null,
+          textChannel: lq.textChannel,
+          skip: true,
+        }),
+        45000,
+        "reconexión tras PEG"
+      ).catch(() => {});
+      const restored = await restoreQueueSongs(guildId, restSongs, pick.url);
+      if (restored > 0) {
+        client.logger.log(
+          `[QueueWatchdog ${guildId}] restauradas ${restored} de ${restSongs.length} canciones de la cola tras la reconexión.`
+        );
+      }
+      client.logger.log(
+        `[QueueWatchdog ${guildId}] reconectado automáticamente: reproduciendo "${pick.name || pick.url}".`
+      );
+    } catch (e) {
+      client.logger.error(`[QueueWatchdog ${guildId}] error al reconectar: ${e.message}`);
+    }
+  };
 
   // DisTube resuelve como PLAYLIST cualquier URL con `list=` (incluso un
   // watch?v=X&list=Y) y espera por TODOS sus videos antes de tocar nada: es lo
@@ -297,12 +585,64 @@ const REC_HISTORY_MAX = 25; // máximo de canciones del historial de cada oyente
     // (botón "🚫 No AutoDJ" / 2+ skips).
     const excludeData = await PlaylistStore.getAutodjExcludes(client, guildId).catch(() => ({}));
     const excludedUrls = new Set(Object.values(excludeData || {}).flat());
+    // Exclusiones de ESTA sesión (botón 🚫): viven en la cola, no en la DB, y
+    // NO se reciclan (a diferencia de _autoDjSeen). Hasta apagar/parar el bot,
+    // esas canciones no vuelven a elegirse para nadie.
+    if (queue._autoDjExcludedSession && queue._autoDjExcludedSession.size) {
+      for (const u of queue._autoDjExcludedSession) if (u) excludedUrls.add(u);
+    }
+    // Se comparan por CLAVE CANÓNICA (mismo video aunque la URL del pool tenga
+    // &list=index v: así el 🚫 de "Psalm 135" atrapa su variante de otra lista).
+    const excludedCanon = new Set([...excludedUrls].map((u) => canonUrlKey(u)).filter(Boolean));
+    client.logger.log(
+      `[AutoDjBan] G:${guildId} exclusiones activas: ${excludedCanon.size} canciones (DB + sesión) filtradas por clave canónica.`
+    );
+
+    // ── Señal de SKIP: "esa canción no la repitas tanto" (NO es un veto) ─────
+    // Un skip NO saca la canción del AutoDJ (eso era el 🚫 o el ban de 2 skips):
+    // solo le baja el PESO, así que entra al final de la bolsa y se sorte con
+    // menos chances. El contador es POR USUARIO (quién la saltó), de modo que el
+    // paso 🛸 de A no penaliza lo que se le recomienda a B. Para los pasos
+    // compartidos (🎲 y 🛸 "cualquiera") no hay destinatario único: se usa el
+    // MÁXIMO entre los oyentes de la llamada, así si alguno presente la saltó no
+    // se la volvemos a poner como primera opción. Con AUTODJ_SKIP_WEIGHT=0 los
+    // skips se ignoran por completo (comportamiento de antes).
+    const SKIP_WEIGHT = Math.max(0, Number(process.env.AUTODJ_SKIP_WEIGHT) || 2);
+    const skipsData = SKIP_WEIGHT > 0
+      ? await PlaylistStore.getAutodjSkips(client, guildId).catch(() => ({}))
+      : {};
+    // OJO: `skips` se empezó a guardar con la URL CRUDA y después se pasó a la
+    // clave canónica "yt:ID". Conviven las dos formas en la misma DB, así que se
+    // consultan AMBAS (y se suman): si no, los skips viejos quedaban invisibles.
+    const skipCountOf = (url, userId) => {
+      if (!url) return 0;
+      const byUser = skipsData[canonUrlKey(url)] || skipsData[url.trim()] || skipsData[url];
+      if (!byUser) return 0;
+      if (userId && userId !== "*") return Number(byUser[userId]) || 0;
+      let mx = 0;
+      for (const uid of listeners) { const n = Number(byUser[uid]) || 0; if (n > mx) mx = n; }
+      return mx;
+    };
+    // Peso de una candidata: 1 sin skips, ~0.5 con 1, ~0.33 con 2, ~0.25 con 3…
+    const skipWeight = (url, userId) => 1 / (1 + SKIP_WEIGHT * skipCountOf(url, userId));
+    if (SKIP_WEIGHT > 0) {
+      let sk = 0;
+      for (const byUser of Object.values(skipsData)) sk += Object.keys(byUser || {}).length;
+      if (sk) client.logger.log(`[AutoDjSkip] G:${guildId} ${sk} señal(es) de skip cargadas (peso=${SKIP_WEIGHT}).`);
+    }
 
     // Pool POR USUARIO con solo favoritas reales (con 👍 o guardadas a mano ⭐).
     // Antes se usaba la lista entera: una versión vieja del bot guardaba ahí
     // automáticamente cada canción que sonaba y el AutoDJ metía temas que el
     // usuario nunca pidió.
     const poolsByUser = await PlaylistStore.getAutoDjPoolsByUser(client, guildId, listeners);
+    // Segundo escalón (rescate): las Favoritas sin 👍/⭐. NUNCA son la primera
+    // opción; solo entran cuando ya se vio TODO el pool real, que es lo que
+    // provocaba el reciclado (con 19 Pool reales el bot repetía cada poco).
+    const ALLOW_UNLIKED = process.env.AUTODJ_ALLOW_UNLIKED !== "0";
+    const fallbackPools = ALLOW_UNLIKED
+      ? await PlaylistStore.getAutoDjFallbackPoolsByUser(client, guildId, listeners).catch(() => ({}))
+      : {};
     // Canciones que cada oyente DE LA LLAMADA pidió reproducir (historial real de
     // lo que pidió, aunque no tenga 👍). Siempre hay temas fuera de la lista
     // actual: se incluyen como candidatas de 🛸.
@@ -339,9 +679,27 @@ const REC_HISTORY_MAX = 25; // máximo de canciones del historial de cada oyente
     }
     seenTrim(seen, new Set(queue.songs.map((s) => s?.url).filter(Boolean)));
 
-    const shuffleAny = (arr) => { for (let i = arr.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [arr[i], arr[j]] = [arr[j], arr[i]]; } return arr; };
+    // Baraja ponderada (Efraimidis-Spirakis): el peso define la probabilidad de
+    // salir antes. Un peso chico (muchos skips) la manda hacia el fondo, pero NO
+    // la elimina: si es lo único que hay, igual suena.
+    const shuffleWeighted = (arr, weightOf) => arr
+      .map((t, i) => ({ t, k: Math.random() ** (1 / Math.max(0.01, Number(weightOf(t)) || 0.01)), i }))
+      .sort((a, b) => (b.k - a.k) || (a.i - b.i))
+      .map((x) => x.t);
 
     const allPool = Object.values(poolsByUser).flat().filter((t) => t?.url);
+
+    // playCount por URL para el paso 🎲, que maneja URLs sueltas y no objetos
+    // con playCount. Se arma con las favoritas de la llamada (las que sí lo
+    // traen); lo que no esté, se trata como no reproducido (0).
+    const playsByUrl = new Map();
+    for (const t of allPool) {
+      if (!t?.url) continue;
+      const k = canonUrlKey(t.url);
+      if (!k) continue;
+      playsByUrl.set(k, Math.max(playsByUrl.get(k) || 0, playsOf(t)));
+    }
+    const playsOfUrl = (u) => playsByUrl.get(canonUrlKey(u)) || 0;
 
     /**
      * Elige al AZAR (barajado real) la candidata para un paso del patrón.
@@ -366,32 +724,55 @@ const REC_HISTORY_MAX = 25; // máximo de canciones del historial de cada oyente
           excluded: excludedUrls,
           taken,
           currentUrl: queue.songs[0]?.url,
-        });
+        }).filter((u) => !excludedCanon.has(canonUrlKey(u)));
         if (cand.length) {
-          const url = cand[Math.floor(Math.random() * cand.length)];
+          const url = pickLeastPlayed(cand, (u) => skipWeight(u, "*"), playsOfUrl);
           taken.add(url);
-          dbgLine(`🎲 random: candidatas=${cand.length} -> ${url}`);
+          dbgLine(`🎲 random: candidatas=${cand.length} -> ${url} (skips oyentes=${skipCountOf(url, "*")})`);
           return { url, name: null, existing: inQueue.has(url), fromList: true };
         }
         dbgLine(`🎲 random: candidatas=${cand.length} -> SIN (lista agotada, cae a favoritas)`);
       }
+      // Una PLAYLIST no puede ser candidata de rec (el pool trae URLs de listas
+      // del historial: recomendarlas = "revivir otra lista", y la 1ª canción
+      // aislada de esa lista es la que el usuario ve reaparecer como "no
+      // relacionada"). Además SOLO entran candidatas que resuelven RÁPIDO como
+      // single (isSafeSingle): los sets de SoundCloud hicieron que un play()
+      // colgara 45-60s por candidata.
+      const isSafeCand = (t) => t?.url && !isPlaylistURL(t.url) && isSafeSingle(t.url);
       let pool;
       if (step.type === "rec" && step.userId && step.userId !== "*") {
-        const own = (poolsByUser[step.userId] || []).filter((t) => t?.url);
+        const own = (poolsByUser[step.userId] || []).filter((t) => isSafeCand(t));
         const ownUrls = new Set(own.map((t) => t.url));
-        const ownHist = (historyByUser.get(step.userId) || []).filter((t) => t?.url && !ownUrls.has(t.url));
-        pool = shuffleAny([...own, ...ownHist, ...allPool.filter((t) => !ownUrls.has(t.url))]);
+        const scratch = (historyByUser.get(step.userId) || []).filter((t) => isSafeCand(t) && !ownUrls.has(t.url));
+        const ownHist = scratch.slice(0, REC_HISTORY_MAX).filter((t) => t?.url);
+        // REC PARA UN USUARIO = SOLO lo que le gusta escuchar: sus favoritas
+        // ordenadas por score (likes×10 + reproducciones) y su historial.
+        // NO se meten "picks" (1ras canciones de listas ajenas) ni historial de
+        // otros: por eso "Psalm 135" (primera de OTRA lista, sin un solo like) no
+        // debe volver a recomendarse.
+        // El score además descuenta los SKIPS de ESE usuario: no desaparece del
+        // pool (si es su única favorita sigue sonando), pero cae en la lista.
+        const score = (t) => ((t.likedBy || []).length - (t.dislikedBy || []).length) * 10 + (t.playCount || 0) - SKIP_WEIGHT * skipCountOf(t.url, step.userId);
+        pool = [
+          ...own.slice().sort((a, b) => score(b) - score(a)),
+          ...ownHist.slice().sort((a, b) => score(b) - score(a)),
+        ];
+        const inPoolUser = new Set(pool.map((t) => t?.url));
+        const third = allPool.filter((t) => isSafeCand(t) && !ownUrls.has(t.url) && !inPoolUser.has(t.url));
+        if (third.length) pool = pool.concat(shuffleWeighted(third, (t) => skipWeight(t.url, "*")));
       } else {
-        pool = shuffleAny(allPool);
+        pool = shuffleWeighted(allPool.filter((t) => isSafeCand(t)), (t) => skipWeight(t.url, "*"));
+        // Historias de TODOS los oyentes de la llamada (lo que pidieron reproducir,
+        // aunque sea de otras listas que ya no están en esta cola). NO se incluyen
+        // las URLs de playlist (recomendarlas = meter otra lista entera).
+        if (allHistory.length) {
+          const inPool = new Set(pool.map((t) => t?.url));
+          const extra = allHistory.filter((t) => isSafeCand(t) && !inPool.has(t.url));
+          if (extra.length) pool = pool.concat(shuffleWeighted(extra, (t) => skipWeight(t.url, "*")));
+        }
+        if (picks.length) pool = pool.concat(shuffleWeighted(picks.filter((t) => isSafeCand(t)), (t) => skipWeight(t.url, "*")));
       }
-      // Historias de TODOS los oyentes de la llamada (lo que pidieron reproducir,
-      // aunque sea de otras listas que ya no están en esta cola).
-      if (allHistory.length) {
-        const inPool = new Set(pool.map((t) => t?.url));
-        const extra = allHistory.filter((t) => t?.url && !inPool.has(t.url));
-        if (extra.length) pool = pool.concat(shuffleAny(extra));
-      }
-      if (picks.length) pool = pool.concat(shuffleAny(picks));
 
       // No recomendar lo que ya está en la cola y PRÓXIMO a sonar (ni la canción
       // que está sonando): se descartan los primeros ~REC_MIN_GAP de la lista.
@@ -402,20 +783,44 @@ const REC_HISTORY_MAX = 25; // máximo de canciones del historial de cada oyente
       for (const [i, s] of queue.songs.entries()) {
         if (s?.url && (i === 0 || i <= REC_MIN_GAP)) nearQueue.add(s.url);
       }
-      const found = pickUnseen(pool, seen, excludedUrls, nearQueue);
+      const tag = `pool=${pool.length} (favs=${allPool.length} hist=${allHistory.length} picks=${picks.length}) near=${nearQueue.size}`;
+      const weightOf = (t) => skipWeight(t.url, step.userId);
+      const isUsableNow = (t) => t?.url && !excludedCanon.has(canonUrlKey(t.url)) && !nearQueue.has(t.url);
+      const freshOf = (arr) => arr.filter((t) => isUsableNow(t) && !seen.has(t.url) && !taken.has(t.url));
+      // Tres escalones, en orden. Antes el paso 3 (reciclar) saltaba siempre al
+      // final porque pickUnseen nunca devolvía null, y encima elegía SIEMPRE la
+      // primera de la lista: por eso se repetían las mismas 2-3 canciones.
+      let found = null;
+      let usedFallback = false;
+      // 1) Alguna favorita REAL sin ver → la normal, nunca se repite.
+      const freshReal = freshOf(pool);
+      if (freshReal.length) {
+        found = pickLeastPlayed(freshReal, weightOf);
+      } else if (ALLOW_UNLIKED) {
+        // 2) El pool REAL ya se vio entero → Favoritas SIN 👍 (nunca con 👎).
+        //    Con un pool real chico esto es lo que evita el reciclado constante:
+        //    las candidatas pasan de 24 a 84.
+        const fbFresh = freshOf(Object.values(fallbackPools).flat().filter(isSafeCand));
+        if (fbFresh.length) {
+          found = pickLeastPlayed(fbFresh, weightOf);
+          usedFallback = true;
+        }
+      }
+      // 3) No queda nada sin ver: se recyclinga (olvida la mitad más vieja).
+      if (!found) found = pickUnseen(pool, seen, excludedCanon, nearQueue, weightOf);
       if (found && !taken.has(found.url)) {
         taken.add(found.url);
         found.existing = inQueue.has(found.url);
         dbgLine(
-          `🛸 rec: pool=${pool.length} (favs=${allPool.length} hist=${allHistory.length} picks=${picks.length})` +
-          ` near=${nearQueue.size} -> ${found.url}${found.fromList ? " (lista)" : ""}${found.existing ? " [ya en cola→se adelanta]" : " [nueva→play()]"}`
+          `🛸 rec: ${tag}` +
+          ` skips=${skipCountOf(found.url, step.userId)}` +
+          ` -> ${found.url}${found.fromList ? " (lista)" : ""}` +
+          `${usedFallback ? " [sin 👍 → rescate]" : ""}` +
+          `${found.existing ? " [ya en cola→se adelanta]" : " [nueva→play()]"}`
         );
         return found;
       }
-      dbgLine(
-        `🛸 rec: pool=${pool.length} (favs=${allPool.length} hist=${allHistory.length} picks=${picks.length})` +
-        ` near=${nearQueue.size} -> SIN (descartadas por seen/excl/taken/near)`
-      );
+      dbgLine(`🛸 rec: ${tag} -> SIN (descartadas por seen/excl/taken/near)`);
       return null;
     };
 
@@ -527,6 +932,14 @@ const REC_HISTORY_MAX = 25; // máximo de canciones del historial de cada oyente
           const first = await fetchPlaylistFirstURL(cleanUrl, { timeoutMs: 20000 });
           if (first && isSafeSingle(first)) {
             const single = cleanYtUrl(first);
+            // La 1ª canción de la lista puede estar BANEADA con 🚫 (aunque la
+            // URL de la lista no lo esté): no reintroducirla.
+            if (excludedCanon.has(canonUrlKey(single))) {
+              seenMark(seen, url);
+              AutoDjSource.markUsed(client, guildId, url);
+              client.logger.warn(`[AutoDJ] G:${guildId} ${single} (1ª de la lista ${url}) está baneada con 🚫: se descarta`);
+              continue;
+            }
             item.playUrl = single;
             const t0 = Date.now();
             await withTimeout(
@@ -544,13 +957,33 @@ const REC_HISTORY_MAX = 25; // máximo de canciones del historial de cada oyente
           continue;
         }
         const t0 = Date.now();
+        // Pre-validar con yt-dlp (rápido y con tope: mata el proceso si se cuelga)
+        // ANTES de meterle el URL a DisTube. Un play() de DisTube con una
+        // extracción lenta/colgada queda SERIALIZADO y congela la transición y
+        // la siguiente (y eso es lo que hacía que el bot se "saliera" al activar
+        // el AutoDJ: watchdog 90s -> destruir conexión). Si yt-dlp no lo verifica
+        // en 20s, la candidata se descarta y JAMÁS llega a distube.play().
+        const probe = await fetchPlaylistFirstURL(cleanUrl, { timeoutMs: 20000 });
+        const single = probe && isSafeSingle(probe) ? cleanYtUrl(probe) : null;
+        if (single && excludedCanon.has(canonUrlKey(single))) {
+          seenMark(seen, url);
+          AutoDjSource.markUsed(client, guildId, url);
+          client.logger.warn(`[AutoDJ] G:${guildId} ${single} (resuelto de ${url}) está baneada con 🚫: se descarta`);
+          continue;
+        }
+        if (!single) {
+          seenMark(seen, url);
+          AutoDjSource.markUsed(client, guildId, url);
+          client.logger.warn(`[AutoDJ] G:${guildId} ${url} no se pudo pre-validar (yt-dlp / no es single): se descarta`);
+          continue;
+        }
         await withTimeout(
-          client.distube.play(vc, cleanUrl, { member, textChannel: queue.textChannel, selfDeaf: true, skip: false }),
-          60000,
+          client.distube.play(vc, single, { member, textChannel: queue.textChannel, selfDeaf: true, skip: false }),
+          45000,
           url
         );
-        client.logger.log(`[AutoDJ] G:${guildId} añadida ${cleanUrl} (${Date.now() - t0}ms)`);
-        addedMeta.set(cleanUrl, meta);
+        client.logger.log(`[AutoDJ] G:${guildId} añadida ${single} (${Date.now() - t0}ms)`);
+        addedMeta.set(single, meta);
       } catch (e) {
         if (/timeout/i.test(e?.message || "")) {
           // Se marca como usada para que el próximo refill NO vuelva a elegir la
@@ -671,6 +1104,8 @@ const REC_HISTORY_MAX = 25; // máximo de canciones del historial de cada oyente
       duration: Number(song.duration) || 0,
       formattedDuration: song.formattedDuration || null,
     });
+    // Canción nueva: descartar la última posición capturada de la anterior.
+    client._voiceLastPos?.delete(gid);
 
     instrumentVoice(queue);
 
@@ -751,10 +1186,53 @@ const REC_HISTORY_MAX = 25; // máximo de canciones del historial de cada oyente
       queue._sessionSaved = true;
     }
 
+    // Realinear la cola SIEMPRE que DisTube emite una canción distinta a songs[0].
+    // Un skip() ejecutado durante una transición (idle) adelanta el índice interno
+    // de DisTube SIN colapsar songs[], dejando canciones "fantasma" adelante y el
+    // embed/dashboard mostrando una canción que NO suena. Aquí movemos la canción
+    // REAL al frente para que todo (embeds, cola, dashboard, siguientes transiciones)
+    // quede consistente de inmediato.
+    if (song && song.url && queue.songs?.length > 1) {
+      const cur0 = queue.songs[0];
+      if (cur0?.url && cur0.url !== song.url) {
+        const realIdx = queue.songs.findIndex((s, i) => i > 0 && s?.url === song.url);
+        if (realIdx > 0) {
+          const [realSong] = queue.songs.splice(realIdx, 1);
+          queue.songs.unshift(realSong);
+          client.logger.log(
+            `[QueueSync ${queue.textChannel.guildId}] songs[0]=${cur0.name} != ${song.name}; realineado ${realIdx}->0.`
+          );
+        }
+      }
+    }
+
     // Fire-and-forget the request-channel/player updates so they never delay
-    // the start of the next song.
+    // the start of the next song. updateplayer recibe `song` (el real) para no
+    // depender de songs[0] si quedó desfasado.
     client.updatequeue(queue).catch(() => {});
-    client.updateplayer(queue).catch(() => {});
+    client.updateplayer(queue, song).catch(() => {});
+    // Validar la SIGUIENTE canción mientras suena (evita transiciones que
+    // cuelgan a DisTube con canciones que su extractor no puede resolver).
+    scheduleNextValidation(client, queue);
+
+    // Los edits del embed fijo corren en paralelo (updatequeue/updateplayer +
+    // el refill del AutoDJ) y, al llegar a Discord fuera de orden, pueden dejar
+    // el panel con la canción ANTERIOR. Este re-render diferido (~1.5s) hace de
+    // "latest wins": garantiza que el embed muestre SIEMPRE la canción actual y
+    // deja en el log la confirmación ([EmbedSync]) para poder verificarlo.
+    setTimeout(() => {
+      (async () => {
+        try {
+          const lq = client.distube.getQueue(gid) || queue;
+          if (!lq || !lq.songs?.length) return;
+          const actual = client.actualPlaying?.get(gid) || song;
+          await client.updateplayer(lq, actual);
+          client.logger.log(
+            `[EmbedSync ${gid}] panel sincronizado a "${actual?.name || actual?.url}".`
+          );
+        } catch (e) {}
+      })();
+    }, 1500);
 
     let data = await client.music.get(`${queue.textChannel.guildId}.music`);
     if (data && data.channel === queue.textChannel.id) return;
@@ -848,6 +1326,9 @@ const REC_HISTORY_MAX = 25; // máximo de canciones del historial de cada oyente
     // Update persistent request channel if it exists
     client.updatequeue(queue).catch(() => {});
     client.updateplayer(queue).catch(() => {});
+    // Si lo recién agregado quedó como songs[1], validarlo ya (evita que una
+    // adición a mitad de canción deje una "siguiente" que cuelgue la transición).
+    scheduleNextValidation(client, queue);
 
     const _head = queue.songs.slice(0, 3).map((s) => s?.name || "?").join(" | ");
     client.logger.log(`[addSong] "${song.name}" -> head: ${_head} (len ${queue.songs.length})`);
@@ -941,8 +1422,8 @@ const REC_HISTORY_MAX = 25; // máximo de canciones del historial de cada oyente
             `> The bot has been disconnected from the voice channel.`
           );
 
-        const msg = await queue.textChannel.send({ embeds: [embed] });
-        setTimeout(() => msg.delete().catch(() => {}), 3000);
+        // Sin timer propio: lo borra el auto-borrado global a los 10s.
+        await queue.textChannel.send({ embeds: [embed] });
       } else if (db?.enable) {
         // If auto-joining is enabled, rejoin the voice channel
         client.logger.log(`[Disconnect] Guild ${guildId}: 24/7 activo, reconectando...`);
@@ -994,10 +1475,16 @@ const REC_HISTORY_MAX = 25; // máximo de canciones del historial de cada oyente
         }
       }
 
+      // Contador de fallos del stream. Si insiste (varios reintentos en la
+      // misma hora), el stream se aparta 12h del AutoDJ: asi deja de colarse
+      // y de hacer saltar "2s y siguiente" de forma repetida.
+      const murio = noteStreamFailure(url);
+
       client.logger.error(
         `[FFMPEG_EXITED] La reproducción de la canción ${trackName} se interrumpió tras varios intentos. ` +
-        `Causa probable: el stream de YouTube fue throttled/cortado (cookies viejas) o el proceso de ffmpeg falló. ` +
-        `Regenerá las cookies frescas con "npm run export-cookies" en la PC del bot. ` +
+        (morio
+          ? `El stream de esta canción está muerto repetidamente: se aparta del AutoDJ por 12h. `
+          : `Causa probable: el stream fue throttled/cortado o el proceso de ffmpeg falló. `) +
         `Saltando a la siguiente canción si existe para continuar la reproducción.`
       );
       // Try to skip to the next song so playback continues instead of dying silently
@@ -1016,6 +1503,9 @@ const REC_HISTORY_MAX = 25; // máximo de canciones del historial de cada oyente
 
     client.logger.error(`[DisTube Error]`, error);
     if (!queue?.textChannel) return;
+    // Sin catch: si el send falla (permisos, canal borrado) el rechazo terminaba
+    // como UnhandledRejection. El borrado lo hace el auto-borrado global
+    // (options.ephemeralTTL, 10s); acá no se manda un timer propio.
     queue.textChannel
       .send({
         embeds: [
@@ -1029,27 +1519,22 @@ const REC_HISTORY_MAX = 25; // máximo de canciones del historial de cada oyente
             ),
         ],
       })
-      .then((msg) => {
-        setTimeout(() => {
-          msg.delete().catch((e) => null);
-        }, 5000);
-      });
+      .catch(() => {});
   });
 
   client.distube.on("noRelated", async (queue) => {
+    // songs[0] puede no existir (la cola se vació justo antes del evento):
+    // `queue?.songs[0].name` reventaba con TypeError.
+    if (!queue?.textChannel) return;
     queue.textChannel
       .send({
         embeds: [
           new EmbedBuilder()
             .setColor(client.config.embed.color)
-            .setTitle(`No Related Song Found for \`${queue?.songs[0].name}\``),
+            .setTitle(`No Related Song Found for \`${queue.songs?.[0]?.name || "?"}\``),
         ],
       })
-      .then((msg) => {
-        setTimeout(() => {
-          msg.delete().catch((e) => null);
-        }, 5000);
-      });
+      .catch(() => {});
   });
 
   client.distube.on("finishSong", async (queue, song) => {
@@ -1094,11 +1579,7 @@ const REC_HISTORY_MAX = 25; // máximo de canciones del historial de cada oyente
             .setDescription(`Queue has ended! No more music to play`),
         ],
       })
-      .then((msg) => {
-        setTimeout(() => {
-          msg.delete().catch((e) => null);
-        }, 5000);
-      });
+      .catch(() => {});
   });
 
   // ---- Voice / DAVE / player diagnostics (one-time per guild) ----
@@ -1135,50 +1616,285 @@ const REC_HISTORY_MAX = 25; // máximo de canciones del historial de cada oyente
               (resMeta && oldState.status !== status ? ` :: meta=${String(resMeta.name || resMeta.title || (typeof resMeta === 'string' ? resMeta : JSON.stringify(Object.keys(resMeta))))}` : "")
             );
             if (status === "idle") {
-              // Watchdog anti-PEG: si el player quedó idle con canciones por sonar
-              // (transición colgada p.ej. por un play() lento), el siguiente
-              // playSong desarma este timer; si NO llega en 45s, se fuerza skip.
-              // Si el skip TAMPOCO basta (play() colgado serializa todos los
-              // comandos de DisTube; skip incluido), hay un 2º escalón a los 90s
-              // que destruye la conexión de voz: lo único que corta ese bloqueo.
+              // Watchdog anti-PEG: si el player quedó idle con canciones por sonar,
+              // el siguiente playSong desarma estos timers. Escalones RÁPIDOS para
+              // no dejar cortado al usuario, SIN saltar la canción que estaba
+              // sonando:
+              //   20s  → si se cortó A MITAD: reintenta LA MISMA con seek(0)
+              //          (NO se pierde la cola); si ya terminó (transición
+              //          colgada) o ya se reintentó y volvió a caer: skip()
+              //   +30s → si sigue idle: otro seek(0); si no alcanza, skip().
+              //          NUNCA se destruye la conexión: no debe desconectar.
               if (!client._voiceStallTimers) client._voiceStallTimers = new Map();
               if (!client._voiceIdleAt) client._voiceIdleAt = new Map();
               if (!client._voiceUnstickTimers) client._voiceUnstickTimers = new Map();
               client._voiceIdleAt.set(guildId, Date.now());
+              // Guardar la posición REAL al momento de caer: `oldState.resource`
+              // venía reproduciendo y trae `playbackDuration` en ms. Es la única
+              // pista fiable para saber si la canción TERMINÓ (transición
+              // colgada) o se CORTÓ a mitad, porque después del idle el resource
+              // se borra y `lq.currentTime` vuelve a 0.
+              try {
+                const posMs = oldState?.resource?.playbackDuration;
+                if (Number.isFinite(posMs)) {
+                  if (!client._voiceLastPos) client._voiceLastPos = new Map();
+                  const curUrl = client.distube.getQueue(guildId)?.songs?.[0]?.url
+                    || client.actualPlaying?.get(guildId)?.url || null;
+                  const prev = client._voiceLastPos.get(guildId);
+                  if (!prev || prev.url !== curUrl || posMs > (Number(prev.ms) || 0)) {
+                    client._voiceLastPos.set(guildId, { url: curUrl, ms: posMs });
+                  }
+                }
+              } catch {}
               const prevStall = client._voiceStallTimers.get(guildId);
               if (prevStall) clearTimeout(prevStall);
               const prevUnstick = client._voiceUnstickTimers.get(guildId);
               if (prevUnstick) { clearTimeout(prevUnstick); client._voiceUnstickTimers.delete(guildId); }
+              // Detecta si la canción actual se cortó A MITAD (stream muerto:
+              // el usuario la estaba escuchando y NO quiere que se la salten)
+              // o si terminó de verdad (transición colgada a la siguiente).
+              // ----------------------------------------------------------------
+              //  Rescate de una cola COLGADA (esto era lo que mataba el audio).
+              //
+              //  DisTube serializa skip/seek/jump/play detrás de `_taskQueue`:
+              //  cada operación espera la promesa de la anterior (ver
+              //  TaskQueue.queuing en node_modules/distube). Si una tarea se
+              //  cuelga —típico en playSong, que hace `await attachStreamInfo`
+              //  y se queda esperando a yt-dlp— esa promesa NO resuelve nunca,
+              //  `remaining` queda en 1 para siempre y TODO lo que se pida
+              //  después espera indefinidamente.
+              //
+              //  Por eso el watchdog podía loguear "Saltando" y no pasar nada:
+              //  el skip esperaba la promesa colgada, songs[0] seguía siendo la
+              //  misma canción y el bot se quedaba mudo hasta el escalón de
+              //  90s (que sí lo arreglaba, pero tras un silencio larguísimo).
+              // ----------------------------------------------------------------
+
+              // resolve() es público y saca UNA tarea por llamada, así que
+              // drenar la cola colgada es seguro y no toca node_modules.
+              const drainTaskQueue = (lq) => {
+                let n = 0;
+                try {
+                  const tq = lq?._taskQueue;
+                  const pend = Number(tq?.remaining) || 0;
+                  for (let i = 0; i < pend; i++) {
+                    tq.resolve();
+                    n++;
+                  }
+                } catch {}
+                return n;
+              };
+
+              // Mata el stream colgado para no dejar ffmpeg huérfano.
+              const killStuckStream = (lq) => {
+                try { lq?.voice?.stream?.kill?.(); } catch {}
+              };
+
+              // Drena + fuerza la reproducción de songs[0]. Se usa cuando la misma pista
+              // ya se reintentó y no hay forma de "saltar" porque el skip también
+              // cuelga.
+              const forcePlay = async (lq) => {
+                const drenadas = drainTaskQueue(lq);
+                killStuckStream(lq);
+                if (!lq?.songs?.length) return { drenadas, ok: false };
+                try {
+                  if (lq.stopped === true) return { drenadas, ok: false };
+                  lq.playing = true;
+                  await Promise.race([
+                    lq.play(),
+                    new Promise((r) => setTimeout(() => r(null), 10000)),
+                  ]);
+                  return { drenadas, ok: true };
+                } catch {
+                  return { drenadas, ok: false };
+                }
+              };
+
+              const stallStatus = (lq) => {
+                const cur = lq.songs[0];
+                const dur = cur && Number(cur.duration) > 0 ? Number(cur.duration) : 0;
+                // `lq.currentTime` VIENE EN SEGUNDOS (Distube Voice#playbackTime,
+                // index.js:887) → acá se pasa a ms. Antes se usaba como ms: el
+                // umbral `dur*1000` nunca se alcanzaba, `ended` SIEMPRE daba
+                // false y el log mostraba "sonó 0s" → el watchdog reiniciaba
+                // canciones que ya habían terminado. Además, al caer a idle el
+                // resource se borra y currentTime queda en 0, así que se usa la
+                // última posición real capturada (_voiceLastPos).
+                const last = client._voiceLastPos?.get(guildId);
+                const lastMs = last && last.url === cur?.url ? Number(last.ms) || 0 : 0;
+                const nowMs = Math.max(
+                  Number.isFinite(lq.currentTime) ? Math.max(0, lq.currentTime) * 1000 : 0,
+                  lastMs
+                );
+                const ended = dur > 0 && nowMs >= dur * 1000 * 0.92;
+                return { cur, next: lq.songs[1], dur, nowMs, ended };
+              };
+              // Reintenta reproducir la canción ACTUAL sin recrear la cola:
+              // seek(0) reusa la cola existente (songs[0]) y solo reinicia el
+              // stream. NO se usa stop(): Queue.stop() llama a remove() y BORRA
+              // toda la cola (index.js:1155-1176) → eso era lo que la colapsaba
+              // a "len 1" y disparaba la desconexión.
+              const replayTrack = async (lq, target, phase) => {
+                const vc = lq.voice?.channel;
+                if (!vc || !target?.url || !lq.voice?.connection) return false;
+                const cur = lq.songs?.[0];
+                // seek() solo reproduce songs[0]; si el target no es la actual
+                // no forzamos nada (evita saltos raros).
+                if (!cur || cur.url !== target.url) return false;
+                try {
+                  client.logger.warn(
+                    `[QueueWatchdog ${guildId}] ${phase}: reintentando "${target.name || target.url}" SIN desconectar (seek 0, la cola se conserva).`
+                  );
+                  await withTimeout(lq.seek(0), 15000, "seek 0 watchdog");
+                  // seek() no emite playSong: refrescamos la fuente de verdad y
+                  // el panel a mano para no quedar desincronizados.
+                  if (!client.actualPlaying) client.actualPlaying = new Map();
+                  client.actualPlaying.set(guildId, {
+                    name: cur.name,
+                    url: cur.url,
+                    elapsed: Date.now(),
+                    autodj: !!cur.autoDj,
+                    requestedBy: cur.user?.id || null,
+                    thumbnail: cur.thumbnail || null,
+                    uploader: cur.uploader?.name || null,
+                    duration: Number(cur.duration) || 0,
+                    formattedDuration: cur.formattedDuration || null,
+                  });
+                  // Nuevo intento en curso: la posición previa ya no aplica.
+                  client._voiceLastPos?.delete(guildId);
+                  client.updateplayer?.(lq, lq.songs[0]).catch(() => {});
+                  client.updatequeue?.(lq).catch(() => {});
+                  client._voiceIdleAt?.delete(guildId);
+                  client._voiceUnstickTimers.delete(guildId);
+                  client._voiceStallTimers?.delete(guildId);
+                  client.logger.log(
+                    `[QueueWatchdog ${guildId}] recuperado: reproduciendo "${target.name || target.url}" (cola intacta, ${lq.songs.length} canciones).`
+                  );
+                  return true;
+                } catch (e) {
+                  client.logger.warn(`[QueueWatchdog ${guildId}] ${phase}: seek 0 no alcanzó (${e?.message || e}); queda el siguiente escalón.`);
+                  return false;
+                }
+              };
               const forceUnstick = () => {
                 if (!client._voiceUnstickTimers?.has(guildId)) return;
                 const lq = client.distube.getQueue(guildId);
                 if (!lq || !lq.songs?.length) return;
-                const idleSince = client._voiceIdleAt?.get(guildId);
-                if (!idleSince) return;
-                client.logger.warn(
-                  `[QueueWatchdog ${guildId}] PEG 90s: el skip no alcanzó (play() colgado en DisTube). ` +
-                  `Destruyendo la conexión de voz para destrabar (el AutoDJ/autoresume recolocará la cola).`
-                );
-                if (lq.voice?.connection) {
-                  try { lq.voice.connection.destroy(); } catch (e) { client.logger.error(`[QueueWatchdog ${guildId}] destroy error: ${e.message}`); }
-                }
-                client._voiceUnstickTimers.delete(guildId);
+                // Solo la canción ACTUAL (seek reproduce songs[0]): así nunca se
+                // salta nada ni se recrea la cola.
+                const target = lq.songs[0];
+                replayTrack(lq, target, "PEG 50s").then(async (ok) => {
+                  if (ok) return;
+                  // Último recurso: saltar a la siguiente. JAMÁS se destruye la
+                  // conexión (el bot no debe desconectarse de voz).
+                  client.logger.warn(
+                    `[QueueWatchdog ${guildId}] PEG 50s: seek 0 no alcanzó; forzando la cola (drenar + play, sin desconectar).`
+                  );
+                  client._voiceIdleAt?.delete(guildId);
+                  client._voiceUnstickTimers.delete(guildId);
+                  if (!lq.songs?.length) return;
+                  // Antes acá se hacía un skip más: con la cola de tareas
+                  // colgada ese skip también esperaba para siempre y el bot
+                  // quedaba mudo hasta el corte de 90s. Ahora se drena y se
+                  // fuerza la reproducción de verdad.
+                  forcePlay(lq).then((r) => {
+                    if (r.ok) {
+                      client.logger.warn(
+                        `[QueueWatchdog ${guildId}] recuperada: sonando "${lq.songs[0]?.name || "?"}" (${r.drenadas} tarea(s) drenadas).`
+                      );
+                    } else {
+                      client.logger.error(
+                        `[QueueWatchdog ${guildId}] no se pudo forzar la cola (${r.drenadas} drenadas); queda el escalón de corte.`
+                      );
+                    }
+                  });
+                });
               };
-              const t = setTimeout(() => {
+              const t = setTimeout(async () => {
                 if (!client._voiceStallTimers?.has(guildId)) return;
                 const lq = client.distube.getQueue(guildId);
                 if (!lq || !lq.songs?.length) return;
                 const idleSince = client._voiceIdleAt?.get(guildId);
                 if (!idleSince) return;
-                client.logger.warn(
-                  `[QueueWatchdog ${guildId}] PEG: player idle ${Math.round((Date.now() - idleSince) / 1000)}s con ${lq.songs.length} canción(es). ` +
-                  `Siguiente: "${lq.songs[0]?.name || lq.songs[0]?.url}". Forzando skip para reactivar.`
-                );
-                lq.skip().catch(() => {});
-                // 2º escalón: si en 45s más sigue idle, cortar la conexión.
-                const t2 = setTimeout(forceUnstick, 45000);
+                client._voiceStallTimers.delete(guildId);
+                const idleFor = Date.now() - idleSince;
+                const { cur, next, dur, nowMs, ended } = stallStatus(lq);
+                if (!cur?.url) return;
+                // Reset del marcador de reintento si ya cambió la canción.
+                if (lq._stallReplayUrl && lq._stallReplayUrl !== cur.url) lq._stallReplayUrl = null;
+                if (ended) {
+                  // La canción TERMINÓ: JAMÁS se reintenta (sería repetirla).
+                  // Si hay siguiente, forzamos la transición que quedó colgada;
+                  // si no, se deja terminar (autoplay / fin de cola).
+                  lq._stallReplayUrl = null;
+                  if (next?.url) {
+                    // La transición quedó colgada. Un skip a secas puede quedar
+                    // esperando la promesa de la tarea que se colgó, así que
+                    // primero se drena la cola de tareas: recién ahí el skip
+                    // avanza de verdad. Sin esto el log decía "Saltando",
+                    // songs[0] no cambiaba y sonaba el mismo tema una y otra vez.
+                    const objetivo = cur.url;
+                    const drenadas = drainTaskQueue(lq);
+                    if (drenadas > 0) {
+                      client.logger.warn(
+                        `[QueueWatchdog ${guildId}] la cola de tareas de DisTube tenía ${drenadas} operación(es) colgada(s); drenadas para poder avanzar.`
+                      );
+                    }
+                    // Drenar DESBLOQUEA la transición que DisTube tenía a medias, y
+                    // esa transición ya avanza la cola por su cuenta. Si nos saltamos
+                    // encima, la canción se saltaba sola: se perdía la que iba a
+                    // sonar. Por eso se espera un margen (para que la continuación de
+                    // DisTube corra de verdad) y se re-valida DESPUÉS del drenaje:
+                    // solo se salta si songs[0] sigue siendo la misma.
+                    await new Promise((r) => setTimeout(r, STALL_DRAIN_GRACE_MS));
+                    const ahora = lq.songs?.[0];
+                    if (ahora?.url !== objetivo) {
+                      client.logger.log(
+                        `[QueueWatchdog ${guildId}] el drenaje dejó avanzar la cola sola a "${ahora?.name || ahora?.url || "?"}"; no se salta de más.`
+                      );
+                      return;
+                    }
+                    client.logger.warn(
+                      `[QueueWatchdog ${guildId}] PEG ${Math.round(idleFor / 1000)}s: "${cur.name || cur.url}" terminó y la transición a la siguiente quedó colgada. Saltando (no se pierde nada).`
+                    );
+                    lq.skip().catch(() => {});
+                  } else {
+                    client.logger.log(
+                      `[QueueWatchdog ${guildId}] PEG ${Math.round(idleFor / 1000)}s: "${cur.name || cur.url}" terminó (sin siguiente en cola); no se reintenta.`
+                    );
+                  }
+                } else if (!lq._stallReplayUrl) {
+                  // La canción se CORTÓ a mitad (el usuario la estaba
+                  // escuchando): se REINTENTA la misma, no se la salta.
+                  client.logger.warn(
+                    dur > 0
+                      ? `[QueueWatchdog ${guildId}] PEG ${Math.round(idleFor / 1000)}s: "${cur.name || cur.url}" se cortó a mitad (sonó ${Math.round(nowMs / 1000)}s de ${Math.round(dur)}s). Reintentando la MISMA canción sin saltarla.`
+                      : `[QueueWatchdog ${guildId}] PEG ${Math.round(idleFor / 1000)}s: "${cur.name || cur.url}" quedó en silencio. Reintentando la MISMA canción sin saltarla.`
+                  );
+                  lq._stallReplayUrl = cur.url;
+                  replayTrack(lq, cur, "PEG 20s").catch(() => {});
+                } else {
+                  // Ya se reintentó esta canción y volvió a cortarse: recién
+                  // acá se la salta (no quedarse en loop si la URL está rota).
+                  lq._stallReplayUrl = null;
+                  // Misma guarda que en el caso "terminó": si la cola ya avanzó
+                  // sola mientras tanto, saltar ahora perdería la canción actual.
+                  if (lq.songs?.[0]?.url !== cur.url) {
+                    client.logger.log(
+                      `[QueueWatchdog ${guildId}] la cola ya avanzó a "${lq.songs?.[0]?.name || "?"}"; no se salta de más.`
+                    );
+                    return;
+                  }
+                  client.logger.warn(
+                    `[QueueWatchdog ${guildId}] PEG ${Math.round(idleFor / 1000)}s: "${cur.name || cur.url}" volvió a cortarse tras el reintento. Saltando para no quedarse en silencio.`
+                  );
+                  lq.skip().catch(() => {});
+                }
+                // 2º escalón: si en 30s más sigue idle, recuperación (mismo
+                // canal; si DisTube está serializado, corte + reconexión).
+                const t2 = setTimeout(forceUnstick, STALL_2ND_MS);
                 client._voiceUnstickTimers.set(guildId, t2);
-              }, 45000);
+              }, STALL_1ST_MS);
               client._voiceStallTimers.set(guildId, t);
             }
           }
@@ -1228,11 +1944,7 @@ const REC_HISTORY_MAX = 25; // máximo de canciones del historial de cada oyente
             .setDescription(`I cant search \`${quary}\``),
         ],
       })
-      .then((msg) => {
-        setTimeout(() => {
-          msg.delete().catch((e) => null);
-        }, 5000);
-      });
+      .catch(() => {});
   });
 
   client.distube.on("searchNoResult", async (message, quary) => {
@@ -1246,10 +1958,6 @@ const REC_HISTORY_MAX = 25; // máximo de canciones del historial de cada oyente
             ),
         ],
       })
-      .then((msg) => {
-        setTimeout(() => {
-          msg.delete().catch((e) => null);
-        }, 5000);
-      });
+      .catch(() => {});
   });
 };

@@ -1,5 +1,6 @@
 const { ApplicationCommandType, PermissionFlagsBits } = require("discord.js");
 const UserHistory = require("../../../handlers/UserHistory");
+const { respondToInteraction } = require("../../../handlers/functions");
 
 module.exports = {
   name: "misfavoritos",
@@ -18,11 +19,14 @@ module.exports = {
   cooldown: 3,
   type: ApplicationCommandType.ChatInput,
   run: async (client, interaction) => {
-    await interaction.deferReply().catch(() => {});
+    // El defer inicial ya lo hace `events/interactionCreate.js` (ver mislistas.js).
     const embed = await UserHistory.buildFavoritesEmbed(client, interaction.guildId, interaction.user.id, 0);
-    if (!embed) return interaction.editReply(`${client.config.emoji.ERROR} No tienes canciones favoritas aún.`);
+    if (!embed) {
+      return respondToInteraction(interaction, `${client.config.emoji.ERROR} No tienes canciones favoritas aún.`);
+    }
     const components = await UserHistory.buildFavoritesComponents(client, interaction.guildId, interaction.user.id, 0);
-    const msg = await interaction.editReply({ embeds: [embed], components });
+    const msg = await respondToInteraction(interaction, { embeds: [embed], components });
+    if (!msg?.id) return;
     if (!client.favPages) client.favPages = new Map();
     client.favPages.set(msg.id, 0);
   },

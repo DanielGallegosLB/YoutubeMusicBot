@@ -3,6 +3,7 @@ const {
   PermissionFlagsBits,
   ApplicationCommandType,
   ApplicationCommandOptionType,
+  MessageFlags,
 } = require("discord.js");
 const MusicBot = require("../../../handlers/Client");
 const { spawn } = require("child_process");
@@ -173,7 +174,7 @@ module.exports = {
 
     try {
       if (!interaction.deferred && !interaction.replied) {
-        await interaction.reply({ content: `🔍 Procesando \`${song.slice(0, 50)}\`...`, ephemeral: true }).catch(() => {});
+        await interaction.reply({ content: `🔍 Procesando \`${song.slice(0, 50)}\`...`, flags: MessageFlags.Ephemeral }).catch(() => {});
       } else {
         await interaction.editReply({ content: `🔍 Procesando \`${song.slice(0, 50)}\`...` }).catch(() => {});
       }
@@ -184,7 +185,7 @@ module.exports = {
       try {
         await interaction.followUp({
           content: `⏳ Obteniendo playlist...`,
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         }).then((m) => client.scheduleDelete(m, interaction)).catch(() => {});
       } catch (e) {}
 
@@ -212,7 +213,7 @@ module.exports = {
         try {
           const errMsg = await interaction.followUp({
             content: `❌ Ninguna canción de la lista se pudo reproducir.`,
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
           });
           client.scheduleDelete(errMsg, interaction);
         } catch (err) {}
@@ -283,7 +284,7 @@ module.exports = {
       try {
         await interaction.followUp({
           content: `✅ Reproduciendo \`${song.slice(0, 70)}\``,
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         }).then((m) => client.scheduleDelete(m, interaction)).catch(() => {});
       } catch (err) {}
       // Limpiar el efímero "🔍 Procesando..." ya confirmada la reproducción.
@@ -300,7 +301,7 @@ module.exports = {
             await client.distube.play(channel, resolved, playOpts);
             client.logger.log(`[Slash Play] yt-dlp fallback OK: ${resolved}`);
             try {
-              if (interaction.deferred || interaction.replied) await interaction.followUp({ content: `✅ Reproduciendo \`${song.slice(0, 70)}\``, ephemeral: true }).then((m) => client.scheduleDelete(m, interaction)).catch(() => {});
+              if (interaction.deferred || interaction.replied) await interaction.followUp({ content: `✅ Reproduciendo \`${song.slice(0, 70)}\``, flags: MessageFlags.Ephemeral }).then((m) => client.scheduleDelete(m, interaction)).catch(() => {});
               client.scheduleDelete(interaction);
             } catch (err) {}
             return;
@@ -311,7 +312,7 @@ module.exports = {
       }
       const errorMsg = { 
         content: isAgeGateError(e) ? friendlyPlaybackError(e) : `❌ No se pudo reproducir: ${e.message.slice(0, 100)}`,
-        ephemeral: true 
+        flags: MessageFlags.Ephemeral 
       };
       try {
         if (interaction.deferred || interaction.replied) {

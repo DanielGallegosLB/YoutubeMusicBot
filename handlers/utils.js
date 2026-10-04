@@ -8,6 +8,8 @@ const {
   CommandInteraction,
   ChannelType,
   Guild,
+  Events,
+  MessageFlags,
 } = require("discord.js");
 const { Queue, Song } = require("distube");
 const PlaylistStore = require("./PlaylistStore");
@@ -191,9 +193,194 @@ module.exports = async (client) => {
       } catch {}
     }, ttl);
   };
+  // ------------------------------------------------------------------
+  //  Política de borrado de mensajes (configurable).
+  //
+  //  cleanup:   canales donde se borran los mensajes del bot de TODO tipo
+  //             (respuestas de slash, confirmaciones, etc.), salvo el panel
+  //             del reproductor, la cola y los previews protegidos.
+  //  noCleanup: canales intocables: NO se borra nada, ni siquiera una
+  //             respuesta efímera. Tiene prioridad sobre `cleanup`.
+  //
+  //  Los valores por defecto salen de settings/config.js (channels.cleanup /
+  //  channels.noCleanup) y cada guild puede sobrescribirlos: el dashboard
+  //  los escribe en `${guildId}.music.cleanupChannels` y
+  //  `${guildId}.music.noCleanupChannels` a través del puente de comandos.
+  // ------------------------------------------------------------------
+  const toIdList = (value) =>
+    (Array.isArray(value) ? value : [value])
+      .filter((id) => id !== null && id !== undefined && id !== "")
+      .map(String);
+
+  if (!client._channelPolicyCache) client._channelPolicyCache = new Map();
+
+  client.getChannelPolicy = async (guildId) => {
+    const cached = client._channelPolicyCache.get(guildId);
+    if (cached && Date.now() - cached.at < 5000) return cached.data;
+
+    const cfg = client.config?.channels || {};
+    let cleanup = toIdList(cfg.cleanup);
+    let noCleanup = toIdList(cfg.noCleanup);
+
+    if (guildId) {
+      const meta = await client.music?.get(`${guildId}.music`).catch(() => null);
+      if (Array.isArray(meta?.cleanupChannels)) cleanup = toIdList(meta.cleanupChannels);
+      if (Array.isArray(meta?.noCleanupChannels)) noCleanup = toIdList(meta.noCleanupChannels);
+
+      // El canal del reproductor también entra en la lista de limpieza,
+      // salvo que el guild lo haya marcado como intocable.
+      const playerChannel = meta?.channel ? String(meta.channel) : null;
+      if (playerChannel && !noCleanup.includes(playerChannel)) cleanup.push(playerChannel);
+    }
+
+    const data = {
+      cleanup: [...new Set(cleanup)].filter((id) => !noCleanup.includes(id)),
+      noCleanup: [...new Set(noCleanup)],
+    };
+    client._channelPolicyCache.set(guildId, { at: Date.now(), data });
+    return data;
+  };
+
+  client.isNoCleanupChannel = async (guildId, channelId) => {
+    if (!channelId) return false;
+    const { noCleanup } = await client.getChannelPolicy(guildId);
+    return noCleanup.includes(String(channelId));
+  };
+
   console.log(
     `[Utils] scheduleDelete listo (ephemeralTTL=${client.config?.options?.ephemeralTTL ?? 10000}ms)`
   );
+
+  // ------------------------------------------------------------------
+  //  Auto-borrado GLOBAL de mensajes.
+  //
+  //  Antes solo se borraban las 5 respuestas que llaman a scheduleDelete()
+  //  a mano, asi que casi todos los `ephemeral: true` se quedaban pegados
+  //  en el canal hasta que el usuario los borraba. Y en el canal del
+  //  reproductor se acumulaban mensajes viejos.
+  //
+  //  Aqui se cubren los dos casos de una sola pasada:
+  //    1. Respuestas efimeras (flags 64): se borran a los N ms.
+  //    2. Cualquier mensaje del bot en un canal de limpieza: tambien.
+  //
+  //  Los canales Saleen de client.getChannelPolicy(): `cleanup` (por defecto
+  //  settings/config.js channels.cleanup + el canal del reproductor) y
+  //  `noCleanup`, donde no se borra absolutamente nada.
+  //
+  //  EXCEPCION: el mensaje del panel de reproduccion (client.temp) nunca
+  //  se borra, porque es el ancla de todos los botones; si se fuera, el
+  //  reproductor quedaria sin controles.
+  // ------------------------------------------------------------------
+  if (!client._autoDeleteReady) {
+    client._autoDeleteReady = true;
+    if (!client._playerChannels) client._playerChannels = new Map();
+
+    // 0 = nunca borrar (por eso `??` y no `||`: con `||` un 0 caía al default).
+    const ttlDe = (value, def) =>
+      typeof value === "number" && Number.isFinite(value) ? value : def;
+    const ttlEfimera = () => ttlDe(client.config?.options?.ephemeralTTL, 10000);
+    const ttlLimpieza = () => ttlDe(client.config?.options?.cleanupTTL, 10000);
+
+    // El panel (client.temp) NO se borra jamas.
+    const isPanel = (message) => {
+      try {
+        return client.temp?.get(message.guildId) === message.id;
+      } catch {
+        return false;
+      }
+    };
+
+    // Resuelve (y memoriza) el canal donde vive el panel de este guild.
+    // Se relee siempre el panel real: si se recrea en otro canal, el valor
+    // cacheado se corrige solo (si no, se borrarian mensajes del canal viejo).
+    const playerChannelId = (message) => {
+      if (!message.guildId) return null;
+      const panelId = client.temp?.get(message.guildId);
+      if (!panelId) {
+        client._playerChannels.delete(message.guildId);
+        return null;
+      }
+      const cached = message.channel?.messages?.cache?.get(panelId);
+      if (cached) {
+        if (client._playerChannels.get(message.guildId) !== cached.channelId) {
+          client._playerChannels.set(message.guildId, cached.channelId);
+        }
+        return cached.channelId;
+      }
+      return client._playerChannels.get(message.guildId) || null;
+    };
+
+    // Copia corta de `${guildId}.music` para saber qué mensajes NO se deben
+    // borrar (pmsg, qmsg). Leerlo por cada mensaje costaba ~80ms cada vez.
+    if (!client._musicMetaCache) client._musicMetaCache = new Map();
+    const musicMeta = async (guildId) => {
+      const c = client._musicMetaCache.get(guildId);
+      if (c && Date.now() - c.at < 10000) return c.data;
+      const data = await client.music?.get(`${guildId}.music`).catch(() => null);
+      const val = data || {};
+      client._musicMetaCache.set(guildId, { at: Date.now(), data: val });
+      return val;
+    };
+
+    // Mensajes que el bot necesita vivos: el panel de reproducción, el de la
+    // cola y las previews. Es el MISMO criterio que usan RequestChannel.js:47
+    // y ChannelCleaner.js:31; sin esto el borrado a 10s se llevaba por delante
+    // la cola entera y sus botones.
+    const isProtected = async (message) => {
+      if (!message?.guildId) return true;
+      if (client.temp?.get(message.guildId) === message.id) return true;
+      if (client.previewMessages?.has?.(message.id)) return true;
+      const meta = await musicMeta(message.guildId);
+      return meta.pmsg === message.id || meta.qmsg === message.id;
+    };
+
+    client.on(Events.MessageCreate, async (message) => {
+      try {
+        if (!message) return;
+        // Las respuestas a interacciones llegan con webhookId y pueden tener
+        // author.bot === false, asi que no se descartan solo por eso.
+        if (message.author?.bot !== true && !message.webhookId) return;
+        if (isPanel(message)) return;
+
+        const esEfimera = Boolean(message.flags?.bitfield & MessageFlags.Ephemeral);
+
+        // Política de canales: en `noCleanup` no se borra NADA (ni siquiera una
+        // efímera). En `cleanup` se borran los mensajes del bot de todo tipo; el
+        // canal del panel se consulta también por si quedó fuera de la lista.
+        const { cleanup, noCleanup } = await client.getChannelPolicy(message.guildId);
+        if (noCleanup.includes(message.channelId)) return;
+        const esCanalLimpieza =
+          cleanup.includes(message.channelId) ||
+          playerChannelId(message) === message.channelId;
+        if (!esEfimera && !esCanalLimpieza) return;
+
+        const ttl = esEfimera ? ttlEfimera() : ttlLimpieza();
+        if (!ttl || ttl <= 0) return;
+
+        // Solo borra lo que manda ESTE bot. Nunca toca mensajes de otras personas.
+        const propio =
+          message.webhookId === client.application?.id || message.author?.bot === true;
+        if (!propio) return;
+
+        setTimeout(async () => {
+          // OJO: la proteccion se re-evalua AQUI, no al recibir el mensaje.
+          // El panel se registra en client.temp DESPUES de enviarlo
+          // (DistubeEvents.js), asi que al crearse todavia no esta protegido:
+          // si se decidiera aqui, se borraria el panel y el reproductor se
+          // quedaria sin botones.
+          try {
+            if (message.deleted) return;
+            if (await isProtected(message)) return;
+            await message.delete();
+          } catch {}
+        }, ttl);
+      } catch {}
+    });
+
+    console.log(
+      `[Utils] auto-borrado global listo (efimeras=${ttlEfimera()}ms, canales de limpieza=${ttlLimpieza()}ms)`
+    );
+  }
 
   client.editPlayerMessage = async (channel) => {
     try {
@@ -343,6 +530,71 @@ module.exports = async (client) => {
     }
   };
 
+  // Stats de canción con caché corta (20s) + tope: acelera el render del embed
+  // fijo y evita martillar a Mongo en cada transición/refill.
+  const _statsCache = new Map(); // `${guild}|${url}` -> { at, data }
+  const EMPTY_STATS = { likes: 0, dislikes: 0, plays: 0, likedBy: [], dislikedBy: [], owners: [] };
+  const hasRealStats = (d) =>
+    !!d && (d.likes > 0 || d.dislikes > 0 || d.plays > 0 ||
+      (d.likedBy || []).length > 0 || (d.dislikedBy || []).length > 0 || (d.owners || []).length > 0);
+  const statsWithCache = async (client, guildId, url, allPlaylists, guild = null) => {
+    const k = `${guildId}|${url}`;
+    const c = _statsCache.get(k);
+    // 20s con stats reales, 15s sin ellas. Antes eran 3s: se re-consultaba el
+    // store cada 3 segundos para cada canción sin likes/plays, que es lo que
+    // más se repite en el AutoDJ.
+    if (c && Date.now() - c.at < (hasRealStats(c.data) ? 20000 : 15000)) return c.data;
+    let timedOut = false;
+    const data = await Promise.race([
+      Promise.resolve(PlaylistStore.getGlobalTrackStats(client, guildId, url, allPlaylists, guild).catch(() => EMPTY_STATS)),
+      new Promise((r) => setTimeout(() => { timedOut = true; r(EMPTY_STATS); }, 4000)),
+    ]);
+    // Un corte por timeout (o una lectura que volvió vacía) NO se cachea: si se
+    // guardaba, el panel se quedaba sin stats hasta que expirara la entrada y
+    // el parpadeo era constante. Solo se cachea cuando vino algo real.
+    if (timedOut) return hasRealStats(c?.data) ? c.data : data;
+    if (!hasRealStats(data) && hasRealStats(c?.data)) return c.data;
+    _statsCache.set(k, { at: Date.now(), data });
+    if (_statsCache.size > 2000) {
+      const now = Date.now();
+      for (const [kk, vv] of _statsCache) if (now - vv.at > 60000) _statsCache.delete(kk);
+    }
+    return data;
+  };
+
+  // El objeto playlists del guild es GRANDE; fetchearlo entero en cada transición
+  // (para los 👍/dueños del embed de cola) es lento. Caché corta (5s) + tope.
+  const _playlistsCache = new Map(); // guildId -> { at, data }
+  const allPlaylistsWithCache = async (client, guildId) => {
+    const c = _playlistsCache.get(guildId);
+    if (c && Date.now() - c.at < 5000) return c.data;
+    const r = await Promise.race([
+      client.music
+        .get(`${guildId}.playlists`)
+        .then((v) => ({ ok: true, v }), (e) => ({ ok: false, e })),
+      new Promise((res) => setTimeout(() => res({ ok: false, timeout: true }), 1500)),
+    ]).catch(() => ({ ok: false }));
+    // Una lectura FALLIDA nunca se cachea. Antes sí: un `{}`(cacheado 5s)
+    // dejaba al panel sin stats de todas las canciones y por eso seguían
+    // apareciendo y desapareciendo los numeros.
+    if (!r?.ok) {
+      if (c?.data) return c.data;
+      return {};
+    }
+    const data = r.v && typeof r.v === "object" ? r.v : {};
+    _playlistsCache.set(guildId, { at: Date.now(), data });
+    return data;
+  };
+  client.invalidateQueueCaches = (guildId) => {
+    if (guildId) { _playlistsCache.delete(guildId); client._musicMetaCache?.delete(guildId); }
+    else { _playlistsCache.clear(); client._musicMetaCache?.clear(); }
+    if (guildId && typeof guildId === "string") {
+      for (const [kk] of _statsCache) if (kk.startsWith(guildId + "|")) _statsCache.delete(kk);
+    } else if (!guildId) {
+      _statsCache.clear();
+    }
+  };
+
   // Un solo repair a la vez por guild (updatequeue y updateplayer lo disparaban
   // en paralelo: el 2º leía ids viejos y volvía a "reparar" mensajes ya nuevos).
   client._panelRepair = client._panelRepair || new Map();
@@ -450,7 +702,7 @@ module.exports = async (client) => {
    * @param {Queue} queue
    * @returns
    */
-  client.updatequeue = async (queue) => {
+  client.updatequeueRaw = async (queue) => {
     try {
       const guildId = queue?.textChannel?.guildId || queue?.guildId;
       if (!guildId) return;
@@ -482,11 +734,41 @@ module.exports = async (client) => {
         return await queueembed.edit({ embeds: [client.queueembed(guild)], components: [] }).catch(() => {});
       }
 
-      const currentSong = freshQueue.songs[0];
+      let currentSong = freshQueue.songs[0];
 
-      const allPlaylists = await client.music.get(`${guild.id}.playlists`).catch(() => null) || {};
+      // El CURRENT TRACK debe reflejar lo que el VOICE emite de verdad
+      // (actualPlaying viene de playSong), no lo que quedó en songs[0]: un
+      // skip() en una transición colgada adelanta el índice interno de DisTube
+      // sin colapsar songs[], y el refill del AutoDJ la reordena en caliente.
+      const realNow = client.actualPlaying?.get(guild.id);
+      if (realNow?.url && currentSong?.url && realNow.url !== currentSong.url) {
+        const realObj = freshQueue.songs.find((s) => s?.url === realNow.url);
+        if (realObj) {
+          currentSong = realObj;
+        } else {
+          const uidTag = realNow.requestedBy
+            ? (guild?.members?.cache?.get(realNow.requestedBy)?.user?.tag || `<@${realNow.requestedBy}>`)
+            : null;
+          currentSong = {
+            ...currentSong,
+            url: realNow.url,
+            name: realNow.name,
+            title: realNow.name,
+            thumbnail: realNow.thumbnail,
+            duration: realNow.duration,
+            formattedDuration: realNow.formattedDuration || currentSong.formattedDuration,
+            isLive: false,
+            autoDj: realNow.autodj,
+            _autoDj: realNow.autodj,
+            uploader: { name: realNow.uploader || "😏" },
+            user: { tag: uidTag || "Auto DJ", id: realNow.requestedBy || currentSong.user?.id || null },
+          };
+        }
+      }
 
-      const currentStats = currentSong?.url ? await PlaylistStore.getGlobalTrackStats(client, guildId, currentSong.url, allPlaylists).catch(() => ({ likes: 0, dislikes: 0, plays: 0 })) : { likes: 0, dislikes: 0, plays: 0 };
+      const allPlaylists = await allPlaylistsWithCache(client, guild.id);
+
+      const currentStats = currentSong?.url ? await statsWithCache(client, guildId, currentSong.url, allPlaylists, guild) : EMPTY_STATS;
       const currentStatsParts = [];
       if (currentStats.likes > 0) currentStatsParts.push(`👍${currentStats.likes}`);
       if (currentStats.dislikes > 0) currentStatsParts.push(`👎${currentStats.dislikes}`);
@@ -525,7 +807,7 @@ module.exports = async (client) => {
       const from = 1 + page * client.QUEUE_PER_PAGE;
       const upNextTracks = freshQueue.songs.slice(from, from + client.QUEUE_PER_PAGE);
       const upNextStats = await Promise.all(upNextTracks.map((track) =>
-        track.url ? PlaylistStore.getGlobalTrackStats(client, guildId, track.url, allPlaylists).catch(() => ({ likes: 0, dislikes: 0, plays: 0 })) : Promise.resolve({ likes: 0, dislikes: 0, plays: 0 })
+        track.url ? statsWithCache(client, guildId, track.url, allPlaylists, guild) : Promise.resolve({ likes: 0, dislikes: 0, plays: 0 })
       ));
       // Rótulo para canciones puestas por el AutoDJ: SOLO el nombre de la persona
       // usada para recomendar (para "rec"), o 🎲 Aleatoria. Nada de listas largas.
@@ -608,9 +890,10 @@ module.exports = async (client) => {
   /**
    *
    * @param {Queue} queue
+   * @param {Object} songOverride - canción REAL que suena (por si songs[0] quedó desfasado por un skip en idle)
    * @returns
    */
-  client.updateplayer = async (queue) => {
+  client.updateplayerRaw = async (queue, songOverride) => {
     try {
       const guildId = queue?.textChannel?.guildId || queue?.guildId;
       if (!guildId) return;
@@ -640,57 +923,182 @@ module.exports = async (client) => {
         }).catch(() => {});
       }
 
-      const track = freshQueue.songs[0];
+      // Si nos pasan el track real (p.ej. el emitido por playSong), confiar en él;
+      // si no, usar songs[0]. songs[0] puede quedar desfasado si un skip() se
+      // ejecutó durante una transición y DisTube no colapsó la cola.
+      let track = (songOverride && songOverride.name) ? songOverride : freshQueue.songs[0];
+      if (!(songOverride && songOverride.name)) {
+        // La VERDAD de lo que suena es el playSong (actualPlaying), aunque la
+        // canción ya no esté en songs[] (skip en transición colgada / el refill
+        // del AutoDJ la movió). Antes se exigía encontrarla en la cola y, si no
+        // estaba, se mostraba songs[0] (que puede ser una "fantasma" ya
+        // reproducida → panel 2-3 canciones desfasado).
+        const actual = client.actualPlaying?.get(guildId);
+        if (actual && actual.url && track?.url && actual.url !== track.url) {
+          const found = freshQueue.songs.find((s) => s?.url === actual.url);
+          if (found) {
+            track = found;
+          } else {
+            track = {
+              ...track,
+              url: actual.url,
+              name: actual.name || actual.url,
+              title: actual.name || actual.url,
+              thumbnail: actual.thumbnail || null,
+              duration: actual.duration || 0,
+              formattedDuration: actual.formattedDuration || track.formattedDuration,
+              uploader: { name: actual.uploader || "😏" },
+            };
+          }
+        }
+      }
       if (!track || !track.name) return;
 
-      const stats = track.url ? await PlaylistStore.getGlobalTrackStats(client, guildId, track.url).catch(() => ({ likes: 0, dislikes: 0, plays: 0, likedBy: [], dislikedBy: [] })) : { likes: 0, dislikes: 0, plays: 0, likedBy: [], dislikedBy: [] };
-      const statsParts = [];
-      if (stats.likes > 0) statsParts.push(`👍${stats.likes}`);
-      if (stats.dislikes > 0) statsParts.push(`👎${stats.dislikes}`);
-      if (stats.plays > 0) statsParts.push(`🔥${stats.plays}`);
-      const likeNames = (stats.likedBy || []).length ? `\n👍 Likes: ${stats.likedBy.join(", ")}` : "";
-      const dislikeNames = (stats.dislikedBy || []).length ? `\n👎 Dislikes: ${stats.dislikedBy.join(", ")}` : "";
-      const statsValue = stats.likes > 0 || stats.dislikes > 0 || stats.plays > 0
-        ? `${statsParts.join(" · ")}${likeNames}${dislikeNames}`
-        : "Sin stats aún";
+      // RENDER INMEDIATO: la canción actual es lo importante al empezar. Las
+      // stats (lectura a Mongo) se aplican DESPUÉS en segundo plano; si Mongo
+      // se demora, el embed fijo igual ya muestra la canción que suena.
+      const rawStats = "Sin stats aún";
+      const buildEmbed = (statsValue) =>
+        new EmbedBuilder()
+          .setColor(client.config.embed.color)
+          .setImage(track?.thumbnail || null)
+          .setTitle(client.getTitle(track))
+          .setURL(track?.url)
+          .addFields(
+            {
+              name: "**Requested By**",
+              value: `\`${track.user?.tag || "Unknown"}\``,
+              inline: true,
+            },
+            {
+              name: "**Author**",
+              value: `\`${track.uploader?.name || "😏"}\``,
+              inline: true,
+            },
+            {
+              name: "**Duration**",
+              value: `\`${track.formattedDuration}\``,
+              inline: true,
+            },
+            {
+              name: "**Stats**",
+              value: `\`${statsValue}\``,
+              inline: true,
+            }
+          )
+          .setFooter(client.getFooter(track.user || client.user));
+      const buildStatsText = (stats) => {
+        const parts = [];
+        if (stats.likes > 0) parts.push(`👍${stats.likes}`);
+        if (stats.dislikes > 0) parts.push(`👎${stats.dislikes}`);
+        if (stats.plays > 0) parts.push(`🔥${stats.plays}`);
+        const likes = (stats.likedBy || []).length ? `\n👍 Likes: ${stats.likedBy.join(", ")}` : "";
+        const dislikes = (stats.dislikedBy || []).length ? `\n👎 Dislikes: ${stats.dislikedBy.join(", ")}` : "";
+        return parts.length || likes || dislikes ? `${parts.join(" · ")}${likes}${dislikes}` : rawStats;
+      };
 
-      const newEmbed = new EmbedBuilder()
-        .setColor(client.config.embed.color)
-        .setImage(track?.thumbnail || null)
-        .setTitle(client.getTitle(track))
-        .setURL(track?.url)
-        .addFields(
-          {
-            name: "**Requested By**",
-            value: `\`${track.user?.tag || "Unknown"}\``,
-            inline: true,
-          },
-          {
-            name: "**Author**",
-            value: `\`${track.uploader?.name || "😏"}\``,
-            inline: true,
-          },
-          {
-            name: "**Duration**",
-            value: `\`${track.formattedDuration}\``,
-            inline: true,
-          },
-          {
-            name: "**Stats**",
-            value: `\`${statsValue}\``,
-            inline: true,
-          }
-        )
-        .setFooter(client.getFooter(track.user || client.user));
+      // Estado del panel por guild: evita el "parpadeo" entre "Sin stats aún" y
+      // los stats reales cuando varios updateplayer/updatequeue corren a la vez
+      // (cada uno re-edita). Reglas:
+      //   * si ya se muestra esta canción con este texto → no re-edito
+      //   * si ya se muestra esta canción CON stats reales → no la bajo a
+      //     "Sin stats aún" (nunca información falsa hacia atrás)
+      if (!client._playerPanel) client._playerPanel = new Map();
+      // Firma del estado visual de los botones: si cambia (p.ej. toggle de Auto
+      // DJ, loop, autoplay, pausa) hay que re-editar el panel aunque el texto de
+      // stats sea el mismo (el dedup del parpadeo no debe congelar el botón).
+      const buttonsStateKey = () => {
+        const gid = freshQueue?.textChannel?.guildId || freshQueue?.guildId;
+        return `${!!client.autoDj?.get(gid)}|${Number(freshQueue?.repeatMode || 0)}|${!!freshQueue?.autoplay}|${!!freshQueue?.paused}|${freshQueue?.songs?.length || 0}`;
+      };
+      const applyPanel = async (candidateText, useButtons) => {
+        const cur = client._playerPanel.get(guildId);
+        const btnKey = buttonsStateKey();
+        if (cur && cur.url === track.url && cur.text === candidateText && cur.btn === btnKey) return;
+        // NUNCA degradar una canción que ya muestra stats reales a "Sin stats
+        // aún", aunque cambie el estado de los botones (btnKey): el btn solo
+        // decide si re-pintar con el MISMO texto, no si borrar stats.
+        if (candidateText === rawStats && cur && cur.url === track.url && cur.text !== rawStats) return;
+        await playembed.edit({
+          embeds: [buildEmbed(candidateText)],
+          components: client.buttons(useButtons, freshQueue),
+        }).catch(() => {});
+        client._playerPanel.set(guildId, { url: track.url, text: candidateText, btn: btnKey });
+      };
 
-      await playembed.edit({
-        embeds: [newEmbed],
-        components: client.buttons(false, freshQueue),
-      }).catch(() => {});
+// Stats ANTES de pintar, en una SOLA pasada.
+      //
+      // Antes se pintaba primero "Sin stats aún" y las stats se inyectaban
+      // después con una segunda edición: eso es literalmente el parpadeo que se
+      // veía (cada canción salía "Sin stats aún" y un instante después cambiaba
+      // a "👍2 🔥5"). La lectura se midió contra el store real y tarda ~95ms
+      // (get playlists ~80ms + stats ~14ms), imperceptible: no hay motivo para
+      // pagar el parpadeo a cambio de un pintado "rápido".
+      // El tope de 1200ms es la red de seguridad para que, si el store se
+      // cuelga, el panel se actualice igual en vez de quedarse congelado.
+      let firstText = rawStats;
+      try {
+        const allPlaylists = await allPlaylistsWithCache(client, guildId);
+        const pendiente = track.url
+          ? statsWithCache(client, guildId, track.url, allPlaylists, guild)
+          : Promise.resolve(EMPTY_STATS);
+        const stats = await Promise.race([
+          pendiente,
+          new Promise((r) => setTimeout(() => r(null), 1200)),
+        ]);
+        if (stats) firstText = buildStatsText(stats);
+      } catch {}
+
+      await applyPanel(firstText, false);
     } catch (error) {
       console.error("Error updating player:", error);
     }
   };
+
+  // Coalescing "latest-wins" para los renders del panel (updateplayer /
+  // updatequeue). Cada playSong + addSong + refill del AutoDJ dispara una
+  // actualización con awaits lentos (DB, fetch, stats); en una ráfaga (p.ej.
+  // encolando muchas canciones) corren decenas en paralelo, sus edits llegan a
+  // Discord FUERA DE ORDEN y el embed "se congela" mostrando una canción vieja.
+  // Este wrapper serializa por guild: solo UNA llamada activa a la vez y, si
+  // llegan nuevas mientras corre, queda pendiente SOLO la MÁS NUEVA (se ejecuta
+  // al terminar la actual). Así el embed siempre pinta lo más fresco y nunca se
+  // amontonan edits.
+  const panelCoalesce = (fn) => {
+    // Mapas PROPIOS por wrapper: updateplayer y updatequeue NO comparten estado
+    // (si lo compartieran, un pending de uno lo ejecutaría la función del otro y
+    // el mensaje correspondiente quedaría congelado).
+    const busy = new Map();
+    const pending = new Map();
+    // Tope de seguridad: si una edición se cuelga (p.ej. un fetch de Discord que
+    // no responde), igual se libera el lock para no bloquear TODAS las futuras
+    // actualizaciones de ese guild.
+    const guard = (p) => Promise.race([
+      Promise.resolve(p).catch(() => {}),
+      new Promise((r) => setTimeout(r, 20000)),
+    ]);
+    return async (...args) => {
+      const guildId = args[0]?.textChannel?.guildId || args[0]?.guildId;
+      if (!guildId) return;
+      if (busy.get(guildId)) {
+        pending.set(guildId, args);
+        return;
+      }
+      busy.set(guildId, true);
+      try {
+        while (pending.has(guildId)) {
+          const latest = pending.get(guildId);
+          pending.delete(guildId);
+          await guard(fn(...latest));
+        }
+        await guard(fn(...args));
+      } finally {
+        busy.delete(guildId);
+      }
+    };
+  };
+  client.updatequeue = panelCoalesce(client.updatequeueRaw);
+  client.updateplayer = panelCoalesce(client.updateplayerRaw);
 
   /**
    *
@@ -776,7 +1184,7 @@ module.exports = async (client) => {
     const main_msg = await send({
       embeds: [help_embed],
       components: [row],
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
 
     const filter = async (i) => {

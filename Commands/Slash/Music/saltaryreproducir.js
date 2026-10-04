@@ -3,9 +3,11 @@ const {
   PermissionFlagsBits,
   ApplicationCommandType,
   ApplicationCommandOptionType,
+  MessageFlags,
 } = require("discord.js");
 const MusicBot = require("../../../handlers/Client");
 const { Queue } = require("distube");
+const { recordSkipSignal } = require("../../../handlers/functions");
 const { spawn } = require("child_process");
 const path = require("path");
 const fs = require("fs");
@@ -165,6 +167,9 @@ module.exports = {
   run: async (client, interaction, args, queue) => {
     let song = interaction.options.getString("cancion");
     let { channel } = interaction.member.voice;
+    // Reemplazar la canción actual es un skip: el AutoDJ la elegirá menos para
+    // quien la está salteando.
+    recordSkipSignal(client, interaction.guildId, interaction.user.id, queue);
     if (/^https?:\/\//i.test(song)) song = sanitizeYouTubeUrl(song);
     const hqStored = await client.music.get(`${interaction.guildId}.hqmode`);
     const hqMode =
@@ -183,7 +188,7 @@ module.exports = {
       try {
         await interaction.followUp({
           content: `⏳ Obteniendo playlist...`,
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
       } catch (e) {}
 
@@ -195,7 +200,7 @@ module.exports = {
         client.logger.error("[Playlist Skip Error]", e);
         return interaction.followUp({
           content: `❌ No se pudo cargar la playlist: ${e.message}`,
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
       }
 
@@ -211,7 +216,7 @@ module.exports = {
         client.logger.error("[Playlist Skip Track 1 Error]", e);
         return interaction.followUp({
           content: `❌ Error en el primer track: ${e.message}`,
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
       }
 
@@ -295,7 +300,7 @@ module.exports = {
           const resolved = await searchYoutube(song);
           if (resolved) {
             await client.distube.play(channel, resolved, playOpts);
-            interaction.followUp({ content: `✅ Saltando a \`${song}\`...`, ephemeral: true }).then((m) => client.scheduleDelete(m, interaction));
+            interaction.followUp({ content: `✅ Saltando a \`${song}\`...`, flags: MessageFlags.Ephemeral }).then((m) => client.scheduleDelete(m, interaction));
             return;
           }
         } catch (e2) {
@@ -304,13 +309,13 @@ module.exports = {
       }
       return interaction.followUp({
         content: `❌ Error: ${e.message}`,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     }
 
     interaction.followUp({
       content: `🔍 Buscando \`${song}\` y saltando la actual...`,
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     }).then((m) => client.scheduleDelete(m, interaction));
   },
 };

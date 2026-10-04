@@ -58,9 +58,12 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
           guildId,
           newState.member.id
         );
-        if (embed) {
+if (embed) {
+          // Canal de previews configurable (settings/config.js channels.preview).
+          const previewChannelId =
+            client.config?.channels?.preview || "432435342738456590";
           const textChannel = await newState.guild.channels
-            .fetch("432435342738456590")
+            .fetch(previewChannelId)
             .catch(() => null);
           if (textChannel) {
             const components = await UserHistory.buildPreviewComponents(
