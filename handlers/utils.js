@@ -181,16 +181,27 @@ module.exports = async (client) => {
     const isInteraction = typeof target?.deleteReply === "function";
     const msgId = isInteraction ? null : target?.id;
     const hook = !isInteraction ? interaction?.webhook : null;
+    // Canal del mensaje: en canales intocables no se borra NADA, tampoco una
+    // efímera (si no se puede resolver el canal, se borra como antes).
+    const guildId = target?.guildId || interaction?.guildId || target?.channel?.guild?.id || null;
+    const channelId = target?.channelId || target?.channel_id || target?.channel?.id || null;
     setTimeout(() => {
-      try {
-        if (!isInteraction && msgId && hook) {
-          hook.deleteMessage(msgId).catch(() => {});
-        } else if (!isInteraction && typeof target.delete === "function") {
-          target.delete().catch(() => {});
-        } else if (isInteraction) {
-          target.deleteReply().catch(() => {});
-        }
-      } catch {}
+      Promise.resolve(
+        channelId && client.isNoCleanupChannel
+          ? client.isNoCleanupChannel(guildId, channelId).catch(() => false)
+          : false
+      ).then((skip) => {
+        if (skip) return;
+        try {
+          if (!isInteraction && msgId && hook) {
+            hook.deleteMessage(msgId).catch(() => {});
+          } else if (!isInteraction && typeof target.delete === "function") {
+            target.delete().catch(() => {});
+          } else if (isInteraction) {
+            target.deleteReply().catch(() => {});
+          }
+        } catch {}
+      });
     }, ttl);
   };
   // ------------------------------------------------------------------
@@ -224,8 +235,11 @@ module.exports = async (client) => {
 
     if (guildId) {
       const meta = await client.music?.get(`${guildId}.music`).catch(() => null);
-      if (Array.isArray(meta?.cleanupChannels)) cleanup = toIdList(meta.cleanupChannels);
-      if (Array.isArray(meta?.noCleanupChannels)) noCleanup = toIdList(meta.noCleanupChannels);
+      // Una lista vacía NO pisa los valores de config.js: significa "usar los
+      // defaults". Para vaciarla de verdad hay que tocar settings/config.js.
+      const override = (v) => Array.isArray(v) && v.length > 0;
+      if (override(meta?.cleanupChannels)) cleanup = toIdList(meta.cleanupChannels);
+      if (override(meta?.noCleanupChannels)) noCleanup = toIdList(meta.noCleanupChannels);
 
       // El canal del reproductor también entra en la lista de limpieza,
       // salvo que el guild lo haya marcado como intocable.

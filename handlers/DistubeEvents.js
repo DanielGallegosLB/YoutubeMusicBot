@@ -1,4 +1,5 @@
 const { EmbedBuilder, Events } = require("discord.js");
+const { entersState, VoiceConnectionStatus } = require("@discordjs/voice");
 const MusicBot = require("./Client");
 const AutoresumeHandler = require("./AutoresumeHandler");
 const InitAutoResume = require("./InitAutoresume");
@@ -502,6 +503,127 @@ module.exports = async (client) => {
     }
   };
 
+  // ---- Watchdog de CONEXIÓN de voz -----------------------------------------
+  // Si la conexión no vuelve a "ready", el audioPlayer se queda en `autopaused`
+  // PARA SIEMPRE: nadie lo saca de ahí. DisTube solo reconecta desde el estado
+  // `disconnected`, así que una conexión atascada en connecting/signalling
+  // (típico tras un ShardResume, cuando se cae el WS de voz) no dispara nada y
+  // el bot queda mudo indefinidamente, con la cola intacta y sin un solo log.
+  // @discordjs/voice vuelve a `playing` solo cuando la conexión queda `ready`
+  // (el player necesita una conexión "playable"), así que el arreglo es forzar
+  // el rejoin y, si no alcanza, la reconexión completa (recoverVoice).
+  const CONN_STALL_MS = 25000;
+  const clearConnWatchdog = (guildId) => {
+    if (!client._voiceConnTimers) return;
+    const t = client._voiceConnTimers.get(guildId);
+    if (t) clearTimeout(t);
+    client._voiceConnTimers.delete(guildId);
+  };
+  const armConnWatchdog = (guildId, conn, queue) => {
+    try {
+      if (!conn || conn.state?.status === "ready") return;
+      if (!client._voiceConnTimers) client._voiceConnTimers = new Map();
+      clearConnWatchdog(guildId);
+      // Backoff: si los rescates siguen fallando se insiste cada vez más
+      // espaciado (pero NUNCA se deja de vigilar: sin esto el PEG es eterno).
+      const fails = Math.min(6, Number(client._voiceRecoverFails?.get(guildId)) || 0);
+      const t = setTimeout(() => {
+        client._voiceConnTimers?.delete(guildId);
+        if (conn.state?.status === "ready") return;
+        recoverVoice(guildId, queue, `conexión de voz caída (${Math.round(CONN_STALL_MS / 1000)}s sin "ready")`);
+      }, CONN_STALL_MS * (1 + fails));
+      if (typeof t.unref === "function") t.unref();
+      client._voiceConnTimers.set(guildId, t);
+    } catch (e) {}
+  };
+
+  // Espera (con tope) a que la conexión de voz vuelva a "ready".
+  const waitVoiceReady = async (conn, ms) => {
+    if (!conn) return false;
+    if (conn.state?.status === "ready") return true;
+    try {
+      await withTimeout(
+        entersState(conn, VoiceConnectionStatus.Ready, ms),
+        ms + 3000,
+        "voice ready"
+      );
+    } catch {}
+    return conn.state?.status === "ready";
+  };
+
+  // ---- Rescate de una conexión de voz MUERTA (el "pegado" infinito) --------
+  // El player solo vuelve a `playing` si tiene una conexión "playable", y una
+  // conexión que quedó atascada en connecting/signalling (típico tras un
+  // ShardResume, cuando se cae el WS de voz) NO vuelve sola: DisTube solo
+  // reconecta desde el estado `disconnected`, así que antes el bot se quedaba
+  // mudo para siempre, con la cola intacta y sin un solo log. Escalera:
+  //   1) esperar a que termine el handshake (muchas veces se recupera sola)
+  //   2) connection.rejoin() → nuevo handshake con el mismo adapter
+  //   3) resumeAfterUnstick(): destroy + rejoin completo, restaurando la cola
+  const recoverVoice = async (guildId, queue, reason) => {
+    if (!client._voiceRecovering) client._voiceRecovering = new Map();
+    if (client._voiceRecovering.get(guildId)) return; // ya hay un rescate en curso
+    client._voiceRecovering.set(guildId, Date.now());
+    try {
+      const lq = client.distube.getQueue(guildId) || queue;
+      if (!lq || !lq.songs?.length) return;
+      const guild = lq.textChannel?.guild || client.guilds.cache.get(guildId);
+      const vc = lq.voice?.channel || guild?.members?.me?.voice?.channel;
+      if (!vc) return;
+      const conn = lq.voice?.connection;
+      const cur = lq.songs[0];
+      const st = () => conn?.state?.status || "sin conexión";
+      client.logger.warn(
+        `[VoiceWatchdog ${guildId}] ${reason}. Cola viva: ${lq.songs.length} canciones, ` +
+        `sonando "${cur?.name || cur?.url || "?"}". Estado de la conexión: "${st()}".`
+      );
+
+      if (await waitVoiceReady(conn, 15000)) {
+        client.logger.log(`[VoiceWatchdog ${guildId}] la conexión de voz se recuperó sola; el audio sigue con "${cur?.name || "?"}".`);
+        return;
+      }
+      client.logger.warn(`[VoiceWatchdog ${guildId}] sigue en "${st()}": forzando rejoin de la conexión de voz.`);
+      if (conn && conn.state?.status !== "destroyed") {
+        try { conn.rejoin(); } catch (e) {
+          client.logger.warn(`[VoiceWatchdog ${guildId}] rejoin falló: ${e?.message || e}`);
+        }
+      }
+      if (await waitVoiceReady(conn, 20000)) {
+        client.logger.log(`[VoiceWatchdog ${guildId}] reconectado con rejoin; retomando "${cur?.name || "?"}".`);
+        return;
+      }
+      client.logger.error(
+        `[VoiceWatchdog ${guildId}] el rejoin no alcanzó: la conexión quedó en "${st()}". ` +
+        `Rehaciendo la conexión de voz y restaurando la cola.`
+      );
+      // Hay que DESTRUIR la conexión atascada: `voices.join` sobre la misma no
+      // serviría, porque `Voice#channel` corta antes de recrearla (mismo
+      // channelId) y `entersState` nunca llega a ver "ready". Al destruirla,
+      // DisTube libera el Voice y el rejoin de abajo crea una conexión nueva.
+      try { if (conn && conn.state?.status !== "destroyed") conn.destroy(); } catch {}
+      await new Promise((r) => setTimeout(r, 1500));
+      await resumeAfterUnstick(guildId, lq);
+    } catch (e) {
+      client.logger.error(`[VoiceWatchdog ${guildId}] error en el rescate de voz: ${e?.message || e}`);
+    } finally {
+      client._voiceRecovering.delete(guildId);
+      const lq2 = client.distube.getQueue(guildId) || queue;
+      const c2 = lq2?.voice?.connection;
+      const st2 = c2?.state?.status;
+      if (lq2?.songs?.length && st2 && st2 !== "ready" && st2 !== "destroyed") {
+        // El rescate no funcionó: se cuenta el intento (para el backoff del
+        // watchdog) y se vuelve a armar la vigilancia. Sin esto, un rescate
+        // fallido dejaba la cola sin ningún watchdog armed y el "pegado"
+        // volvía a ser infinito.
+        if (!client._voiceRecoverFails) client._voiceRecoverFails = new Map();
+        client._voiceRecoverFails.set(guildId, (Number(client._voiceRecoverFails.get(guildId)) || 0) + 1);
+        armConnWatchdog(guildId, c2, lq2);
+      } else if (client._voiceRecoverFails) {
+        client._voiceRecoverFails.delete(guildId);
+      }
+    }
+  };
+
   // DisTube resuelve como PLAYLIST cualquier URL con `list=` (incluso un
   // watch?v=X&list=Y) y espera por TODOS sus videos antes de tocar nada: es lo
   // que dejó el bot "pegado" minutos enteros con el AutoDJ activo. A los VIDEOS
@@ -962,8 +1084,17 @@ module.exports = async (client) => {
         // extracción lenta/colgada queda SERIALIZADO y congela la transición y
         // la siguiente (y eso es lo que hacía que el bot se "saliera" al activar
         // el AutoDJ: watchdog 90s -> destruir conexión). Si yt-dlp no lo verifica
-        // en 20s, la candidata se descarta y JAMÁS llega a distube.play().
-        const probe = await fetchPlaylistFirstURL(cleanUrl, { timeoutMs: 20000 });
+        // en 12s, la candidata se descarta y JAMÁS llega a distube.play().
+        //
+        // Las validaciones están SERIALIZADAS (una de yt-dlp a la vez), así que
+        // esta esperita turno detrás del NextValidator, que es el que protege la
+        // canción que REALMENTE va a sonar. Por eso el tope es corto y se
+        // reutiliza el veredicto cacheado cuando la URL ya salió "ok".
+        const cachedOk = _nextValidated.get(`${guildId}|${cleanUrl}`);
+        const probe =
+          cachedOk && Date.now() - cachedOk < NEXT_VALIDATE_TTL
+            ? cleanUrl
+            : await fetchPlaylistFirstURL(cleanUrl, { timeoutMs: 12000 });
         const single = probe && isSafeSingle(probe) ? cleanYtUrl(probe) : null;
         if (single && excludedCanon.has(canonUrlKey(single))) {
           seenMark(seen, url);
@@ -1410,6 +1541,16 @@ module.exports = async (client) => {
         return;
       }
 
+      // Desconexión PROGRAMADA del watchdog de voz (conexión atascada): no es
+      // algo que el usuario haya hecho, así que no se le avisa ni se manda el
+      // rejoin automático por acá (el rescate ya va a reconectar solo).
+      if (client._voiceRecovering?.get(guildId)) {
+        client.logger.log(
+          `[Disconnect] Guild ${guildId}: desconexión del watchdog de voz; la restores el rescate en curso.`
+        );
+        return;
+      }
+
       // Check if auto-joining is enabled in the database
       const db = await client.music?.get(`${guildId}.vc`);
       const data = await client.music.get(`${guildId}.music`);
@@ -1555,6 +1696,7 @@ module.exports = async (client) => {
     const fgid = queue.textChannel?.guildId || queue.id;
     if (client._voiceStallTimers) { const st = client._voiceStallTimers.get(fgid); if (st) { clearTimeout(st); client._voiceStallTimers.delete(fgid); } }
     if (client._voiceUnstickTimers) { const ut = client._voiceUnstickTimers.get(fgid); if (ut) { clearTimeout(ut); client._voiceUnstickTimers.delete(fgid); } }
+    if (client._voiceConnTimers) { const ct = client._voiceConnTimers.get(fgid); if (ct) { clearTimeout(ct); client._voiceConnTimers.delete(fgid); } }
     if (client._voiceIdleAt) client._voiceIdleAt.delete(fgid);
     await client.updateembed(client, queue.textChannel.guild);
     await client.editPlayerMessage(queue.textChannel);
@@ -1586,19 +1728,34 @@ module.exports = async (client) => {
     const instrumentVoice = (queue) => {
       const guildId = queue.textChannel?.guildId || queue.guildId;
       const voice = queue.voice;
-      if (!voice || voice._jvdDiag) return;
-      voice._jvdDiag = true;
+      if (!voice) return;
       const conn = voice.connection;
-      if (conn) {
+
+      // Se engancha por CONEXIÓN (no por Voice): si el bot cambia de canal de
+      // voz o DisTube reemplaza la conexión, esa es la que hay que vigilar. Este
+      // bloque va ANTES del guard de audioPlayer para que una conexión nueva
+      // quede vigilada aunque el Voice ya esté instrumentado.
+      if (conn && voice._jvdConn !== conn) {
+        voice._jvdConn = conn;
         conn.on("stateChange", (oldState, newState) => {
           client.logger.log(`[VoiceDiag ${guildId}] conn ${oldState.status} -> ${newState.status}`);
+          const st = newState?.status;
+          if (st === "connecting" || st === "signalling" || st === "disconnected") armConnWatchdog(guildId, conn, queue);
+          else {
+            // ready = todo bien (se limpia el backoff); destroyed = la cola se
+            // está cerrando y no hay nada que vigilar.
+            clearConnWatchdog(guildId);
+            if (st === "ready") client._voiceRecoverFails?.delete(guildId);
+          }
         });
         conn.on("debug", (msg) => client.logger.log(`[VoiceDiag ${guildId}] DBG ${String(msg).slice(0, 400)}`));
       }
+      if (voice._jvdDiag) return;
+      voice._jvdDiag = true;
       if (voice.audioPlayer) {
         voice.audioPlayer.on("stateChange", (oldState, newState) => {
           const status = newState.status;
-          if (status === "idle" || status === "playing" || status === "buffering") {
+          if (status === "idle" || status === "playing" || status === "buffering" || status === "autopaused") {
             // La canción que el voice está emitiendo DE VERDAD (del resource
             // real del audioPlayer), para cruzarla con queue.songs[0].
             let resName = null;
@@ -1615,7 +1772,11 @@ module.exports = async (client) => {
               (resName ? ` :: ${resName}` : "") +
               (resMeta && oldState.status !== status ? ` :: meta=${String(resMeta.name || resMeta.title || (typeof resMeta === 'string' ? resMeta : JSON.stringify(Object.keys(resMeta))))}` : "")
             );
-            if (status === "idle") {
+            // `autopaused` = el player NO tiene ninguna conexión "playable" (la de
+            // voz se cayó). El watchdog también tiene que cubrirlo: si solo mira
+            // `idle`, una conexión muerta deja al bot mudo indefinidamente sin
+            // logs ni ningún intento de recuperación.
+            if (status === "idle" || status === "autopaused") {
               // Watchdog anti-PEG: si el player quedó idle con canciones por sonar,
               // el siguiente playSong desarma estos timers. Escalones RÁPIDOS para
               // no dejar cortado al usuario, SIN saltar la canción que estaba
@@ -1780,6 +1941,15 @@ module.exports = async (client) => {
                 if (!client._voiceUnstickTimers?.has(guildId)) return;
                 const lq = client.distube.getQueue(guildId);
                 if (!lq || !lq.songs?.length) return;
+                // Conexión de voz caída: reconectar (seek/arranque no pueden
+                // hacer nada si no hay por dónde emitir audio).
+                const connStatus = lq.voice?.connection?.state?.status;
+                if (connStatus && connStatus !== "ready" && connStatus !== "destroyed") {
+                  client._voiceUnstickTimers.delete(guildId);
+                  client._voiceIdleAt?.delete(guildId);
+                  recoverVoice(guildId, lq, `PEG: la conexión de voz quedó en "${connStatus}"`);
+                  return;
+                }
                 // Solo la canción ACTUAL (seek reproduce songs[0]): así nunca se
                 // salta nada ni se recrea la cola.
                 const target = lq.songs[0];
@@ -1820,6 +1990,14 @@ module.exports = async (client) => {
                 const idleFor = Date.now() - idleSince;
                 const { cur, next, dur, nowMs, ended } = stallStatus(lq);
                 if (!cur?.url) return;
+                // Si la CONEXIÓN de voz es la que está caída, el problema no es la
+                // cola: ni seek(0) ni skip() sirven (no hay por dónde sonar). Se
+                // reconecta; al volver a "ready" el player retoma solo.
+                const connStatus = lq.voice?.connection?.state?.status;
+                if (connStatus && connStatus !== "ready" && connStatus !== "destroyed") {
+                  recoverVoice(guildId, lq, `player en "${status}" con la conexión en "${connStatus}"`);
+                  return;
+                }
                 // Reset del marcador de reintento si ya cambió la canción.
                 if (lq._stallReplayUrl && lq._stallReplayUrl !== cur.url) lq._stallReplayUrl = null;
                 if (ended) {
@@ -1904,12 +2082,27 @@ module.exports = async (client) => {
       }
     };
 
+    // ffmpeg escupe una línea por evento y DisTube las reenvía como
+    // `[<guildId>] [ffmpeg] log: <linea>`. El filtro anterior buscaba el patrón
+    // de progreso ANCLADO al principio (`^size=`), así que NUNCA casaba con el
+    // prefijo real: se loguearon 229.722 líneas (33 MB de logs.txt) y cada una
+    // abría/escribía/cerraba el archivo en el event loop. Ahora se busca el
+    // patrón dentro de la línea y, además, se limita a 1 línea cada 5s por guild.
+    const FFMPEG_NOISE =
+      /size=\s*\d|time=\s*-?[\d:]|bitrate=|speed=|fps=\s*[\d.]|frame=\s*\d|out_time=|dropping |dup_frames|config=|built with|Stream mapping|lib(av|swscale|postproc)|^\s*$/i;
+    const FFMPEG_SPAWN = /spawn ffmpeg|ffmpeg-static|path\]/i;
+    const FFMPEG_LOG_MIN_GAP_MS = 5000;
     client.distube.on("ffmpegDebug", (guildId, data) => {
-      // el progress de ffmpeg (size=… time=… bitrate=…) es spam: NO se loguea.
-      const line = String(data ?? "").trim();
+      const line = String(data ?? "").replace(/\s*\r?\n\s*/g, " ").trim();
       if (!line) return;
-      if (/^size=\s*\d|^time=\s*\d|^frame=\s*\d|^fps=/i.test(line)) return;
-      client.logger.log(`[FFMPEG ${guildId}] ${line.slice(0, 400)}`);
+      if (FFMPEG_SPAWN.test(line)) return;
+      if (FFMPEG_NOISE.test(line)) return;
+      if (!client._ffmpegLogAt) client._ffmpegLogAt = new Map();
+      const last = client._ffmpegLogAt.get(guildId) || 0;
+      const now = Date.now();
+      if (now - last < FFMPEG_LOG_MIN_GAP_MS) return;
+      client._ffmpegLogAt.set(guildId, now);
+      client.logger.log(`[FFMPEG ${guildId}] ${line.slice(0, 300)}`);
     });
 
     client.distube.on("initQueue", async (queue) => {
