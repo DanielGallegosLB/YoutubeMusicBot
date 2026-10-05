@@ -2,9 +2,6 @@
 title Bot de musica - JUGNU-MUSIC
 cd /d "%~dp0"
 
-REM  Etiqueta del reinicio automatico: vuelve aca para relanzar el bot.
-:start
-
 REM ===================================================================
 REM  Cierra cualquier instancia anterior de ESTE bot antes de arrancar.
 REM  Solo mata procesos cuya linea de comandos apunte a esta carpeta
@@ -20,7 +17,3 @@ echo.
 
 node "%~dp0index.js"
 
-echo.
-echo [start.bat] El bot se detuvo. Reiniciando en 5 segundos ^(Ctrl+C para salir^)...
-timeout /t 5 /nobreak >nul
-goto start

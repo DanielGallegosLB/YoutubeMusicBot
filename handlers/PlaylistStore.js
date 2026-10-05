@@ -267,7 +267,10 @@ module.exports = {
     const e = st[trackUrl] || { plays: 0, likedBy: [], dislikedBy: [] };
     e.likedBy = e.likedBy || [];
     e.dislikedBy = e.dislikedBy || [];
-    if (!e.likedBy.includes(userId)) e.likedBy.push(userId);
+    
+    // Permitir acumulación de volumen por cada clic
+    e.likedBy.push(userId); 
+    
     const di = e.dislikedBy.indexOf(userId);
     if (di !== -1) e.dislikedBy.splice(di, 1);
     st[trackUrl] = e;
@@ -281,7 +284,10 @@ module.exports = {
     const e = st[trackUrl] || { plays: 0, likedBy: [], dislikedBy: [] };
     e.likedBy = e.likedBy || [];
     e.dislikedBy = e.dislikedBy || [];
-    if (!e.dislikedBy.includes(userId)) e.dislikedBy.push(userId);
+    
+    // Permitir acumulación de volumen por cada dislike
+    e.dislikedBy.push(userId); 
+    
     const li = e.likedBy.indexOf(userId);
     if (li !== -1) e.likedBy.splice(li, 1);
     st[trackUrl] = e;
@@ -1032,24 +1038,39 @@ module.exports = {
   },
 
   /** Increment play count for a track by URL (called when it actually starts playing). Returns true if found */
-  async countPlay(client, guildId, userId, name, trackUrl) {
+  async countPlay(client, guildId, userIdOrUrl, nameOrUrl, trackUrlArg) {
+    // Detectar si el tercer argumento es en realidad una URL (por si se llamó con el orden alterado)
+    let userId = userIdOrUrl;
+    let name = nameOrUrl;
+    let trackUrl = trackUrlArg;
+
+    if (userIdOrUrl && userIdOrUrl.startsWith("http")) {
+      trackUrl = userIdOrUrl;
+      userId = "autodj"; // O un identificador por defecto
+      name = "AutoDJ Track";
+    }
+
     const key = `${guildId}.playlists.${userId}`;
     const all = await this.getAll(client, guildId, userId);
     const list = all[name] || [];
-    // Match por clave canónica: las reproducciones de las variantes del mismo
-    // video se suman a la MISMA entrada de favoritas.
+    
     let track = this.findTrackByCanon(list, trackUrl);
     if (!track) track = list.find((t) => t.url === trackUrl);
-    if (!track) return false;
-    track.playCount = typeof track.playCount === "number" && track.playCount > 0 ? track.playCount + 1 : 1;
-    all[name] = list;
-    await Promise.all([
-      client.music.set(key, all),
-      this.trackPlay(client, guildId, trackUrl),
-    ]);
+
+    if (track) {
+      track.playCount = typeof track.playCount === "number" && track.playCount > 0 ? track.playCount + 1 : 1;
+      all[name] = list;
+      await client.music.set(key, all);
+    }
+
+    // Registro global de la reproducción
+    await this.trackPlay(client, guildId, trackUrl);
+
+    const trackName = track?.name || name || trackUrl;
     client.logger?.log(
-      `[Stats] 🎵 +1 reproducción "${track.name || trackUrl}" (G:${guildId}, user:${userId}) → total ${track.playCount}`
+      `[Stats] 🎵 +1 reproducción "${trackName}" (G:${guildId}) → total actualizado`
     );
+    
     return true;
   },
 
@@ -1115,7 +1136,24 @@ for (const name of _LOCKED_METHODS) {
   if (typeof orig !== "function") continue;
   const bound = orig.bind(module.exports);
   module.exports[name] = async function (...args) {
+    const client = args[0];
     const guildId = args[1];
-    return _runGuildLocked(guildId, () => bound(...args));
+    return _runGuildLocked(guildId, async () => {
+      try {
+        return await bound(...args);
+      } catch (error) {
+        // Registra el error detallado en la consola/archivo mediante el logger del cliente o console.error por defecto
+        const errorMsg = `[PlaylistStore Error] Método: "${name}" | Guild: ${guildId} | Error: ${error?.message || error}`;
+        if (client?.logger?.error) {
+          client.logger.error(errorMsg);
+          if (error?.stack) client.logger.error(error.stack);
+        } else {
+          console.error(errorMsg, error);
+        }
+        // Opcional: puedes relanzar el error si quieres que la acción falle explícitamente, 
+        // o retornar null/false para que la app no colapse.
+        throw error;
+      }
+    });
   };
 }

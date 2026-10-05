@@ -1218,12 +1218,27 @@ module.exports = async (client) => {
 
   // events
   client.distube.on("playSong", async (queue, song) => {
-    console.log(`[DisTube] Playing: ${song.name} in ${queue.textChannel.guild.name}`);
+    console.log(`[DisTube] Playing: ${song.name} in${queue.textChannel.guild.name}`);
+
+    // Identificador del gremio unificado
+    const gid = queue.textChannel?.guildId || queue.guildId || queue.textChannel?.guild?.id || queue.guild?.id;
+
+    // Conteo único y seguro de la reproducción
+    if (gid && song?.url) {
+      try {
+        await PlaylistStore.countPlay(client, gid, song.url);
+      } catch (err) {
+        if (client?.logger?.error) {
+          client.logger.error(`[PlaySong Stats Error] No se pudo contar reproducción para "${song.name}": ${err.message}`);
+        } else {
+          console.error(`[PlaySong Stats Error]`, err);
+        }
+      }
+    }
 
     // Qué está SONANDO de verdad (lo emite DisTube en el voice). Se usa para
     // detectar desfases con queue.songs[0] (que el autodj / reorden tocan a mano).
     if (!client.actualPlaying) client.actualPlaying = new Map();
-    const gid = queue.textChannel?.guildId || queue.guildId;
     client.actualPlaying.set(gid, {
       name: song.name,
       url: song.url,
@@ -1256,7 +1271,7 @@ module.exports = async (client) => {
         const gapMs = Date.now() - idleAt;
         if (gapMs > 15000) {
           client.logger.warn(
-            `[Transition ${gid}] ${queue.textChannel.guild.name}: ${Math.round(gapMs / 1000)}s de silencio antes de "${song.name}". ` +
+            `[Transition ${gid}] ${queue.textChannel.guild.name}:${Math.round(gapMs / 1000)}s de silencio antes de "${song.name}". ` +
             (client.autoDj?.get(gid)
               ? "(AutoDJ activo: un play() colgado/resolución lenta pudo bloquear la transición)"
               : "(causa a investigar)")
@@ -1274,8 +1289,8 @@ module.exports = async (client) => {
 
     // DJ constante: a cada canción que empieza, la cola se reabastece sola en
     // el fondo mientras Auto DJ siga activo (según el patrón configurado).
-    if (client.autoDj?.get(queue.textChannel.guildId)) {
-      const qLive = client.distube.getQueue(queue.textChannel.guildId) || queue;
+    if (client.autoDj?.get(gid)) {
+      const qLive = client.distube.getQueue(gid) || queue;
       client.autoDjRefill(qLive).catch(() => {});
     }
 
@@ -1295,25 +1310,18 @@ module.exports = async (client) => {
       }
     })();
 
-    MusicTracker.logPlay(queue.textChannel.guildId, song.user.id, song);
-
-    // Count the play only when the song actually starts playing (not when queued)
-    if (song.user?.id && song.url) {
-      try {
-        await PlaylistStore.countPlay(client, queue.textChannel.guildId, song.user.id, "Canciones Favoritas", song.url);
-      } catch (e) {
-        client.logger.error(`[CountPlay] Error:`, e);
-      }
+    if (song.user?.id) {
+      MusicTracker.logPlay(gid, song.user.id, song);
     }
 
     const activityText = song.uploader?.name
-      ? `${song.name} - ${song.uploader.name}`
+      ? `${song.name} -${song.uploader.name}`
       : song.name;
     startMarqueeActivity(client, activityText, queue.textChannel.guild);
 
     if (!queue._sessionSaved && queue.songs.length === 1 && !queue._sessionSourcePlaylist) {
       const session = createSession(queue, "song", song.name, song.url, song.user, [song]);
-      await saveSession(client, queue.textChannel.guildId, session);
+      await saveSession(client, gid, session);
       queue._sessionSaved = true;
     }
 
@@ -1331,7 +1339,7 @@ module.exports = async (client) => {
           const [realSong] = queue.songs.splice(realIdx, 1);
           queue.songs.unshift(realSong);
           client.logger.log(
-            `[QueueSync ${queue.textChannel.guildId}] songs[0]=${cur0.name} != ${song.name}; realineado ${realIdx}->0.`
+            `[QueueSync ${gid}] songs[0]=${cur0.name} != ${song.name}; realineado${realIdx}->0.`
           );
         }
       }
@@ -1365,11 +1373,11 @@ module.exports = async (client) => {
       })();
     }, 1500);
 
-    let data = await client.music.get(`${queue.textChannel.guildId}.music`);
+    let data = await client.music.get(`${gid}.music`);
     if (data && data.channel === queue.textChannel.id) return;
 
     // Delete the previous "now playing" message before sending a fresh one
-    const prevId = client.temp.get(queue.textChannel.guildId);
+    const prevId = client.temp.get(gid);
     if (prevId) {
       try {
         const prevMsg = await queue.textChannel.messages.fetch(prevId).catch(() => null);
@@ -1380,7 +1388,7 @@ module.exports = async (client) => {
     let statsValue = null;
     if (song.url) {
       try {
-        const stats = await PlaylistStore.getGlobalTrackStats(client, queue.textChannel.guildId, song.url)
+        const stats = await PlaylistStore.getGlobalTrackStats(client, gid, song.url)
           .catch(() => ({ likes: 0, dislikes: 0, plays: 0, likedBy: [], dislikedBy: [] }));
         const statsParts = [];
         if (stats.likes > 0) statsParts.push(`👍${stats.likes}`);
@@ -1431,7 +1439,7 @@ module.exports = async (client) => {
         components: client.buttons(false, queue),
       })
       .then((msg) => {
-        client.temp.set(queue.textChannel.guildId, msg.id);
+        client.temp.set(gid, msg.id);
       });
   });
 
