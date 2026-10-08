@@ -7,7 +7,7 @@ const UserHistory = require("./UserHistory");
 const MusicTracker = require("./MusicTracker");
 const PlaylistStore = require("./PlaylistStore");
 const AutoDjSource = require("./Autodjsource");
-const { fetchPlaylistFirstURL, validateSinglePlayable, isPlaylistURL } = require("./PlaylistFetcher");
+const { fetchPlaylistFirstURL, validateSinglePlayable, probeSingleURL, isPlaylistURL } = require("./PlaylistFetcher");
 const { isAgeGateError, friendlyPlaybackError } = require("./PlaybackError");
 const { startMarqueeActivity, stopMarqueeActivity } = require("./ActivityManager");
 
@@ -1094,7 +1094,7 @@ module.exports = async (client) => {
         const probe =
           cachedOk && Date.now() - cachedOk < NEXT_VALIDATE_TTL
             ? cleanUrl
-            : await fetchPlaylistFirstURL(cleanUrl, { timeoutMs: 12000 });
+            : await probeSingleURL(cleanUrl, 12000);
         const single = probe && isSafeSingle(probe) ? cleanYtUrl(probe) : null;
         if (single && excludedCanon.has(canonUrlKey(single))) {
           seenMark(seen, url);
@@ -1253,6 +1253,10 @@ module.exports = async (client) => {
     // Canción nueva: descartar la última posición capturada de la anterior.
     client._voiceLastPos?.delete(gid);
 
+    // Reloj corregido para esta guild + reinicia el desfase (tema nuevo).
+patchClock(queue, gid);
+    resetClockDrift(gid);
+    applyNormalizeDefault(queue, gid);
     instrumentVoice(queue);
 
     // Diagnóstico de transición: cuánto silencio hubo entre el player idle
@@ -1626,16 +1630,19 @@ if (song.user?.id) {
                 `[FFMPEG_EXITED] Reintentando (${st.n}/2) la canción ${trackName} con un stream nuevo... ` +
                 `(si persiste, regenera las cookies del navegador: npm run export-cookies)`
               );
-              // Reconstruye el stream del MISMO tema desde el principio.
+              // Reconstruye el stream del MISMO tema, reanudando donde se cortó
+              // (posición oída guardada) en vez de desde 0.
               //
               // Antes usaba `distube.play(vc, url, { skip: true })`: eso mete la
               // canción en la posición 1 de la cola y ejecuta `queue.skip()`, así
               // que el reintento no reproducía la canción rota sino la SIGUIENTE
               // de la cola (en logs.txt: se anunciaba el reintento de "Ojalá nos
               // perdonen" y empezó "Soda Stereo" 60 ms después).
-              // `queue.seek(0)` vuelve a resolver el stream (yt-dlp) y reproduce
+              // `queue.seek()` vuelve a resolver el stream (yt-dlp) y reproduce
               // la canción que YA está en cabeza, sin tocar el resto de la cola.
-              await withTimeout(queue.seek(0), 15000, "reintento ffmpeg");
+              const fgid = queue?.textChannel?.guildId || queue?.id;
+              const ffResume = resumeSecondsFor(fgid, url, 2);
+              await withTimeout(queue.seek(ffResume), 15000, "reintento ffmpeg");
               return;
             } catch (e) {
               client.logger.error(`[FFMPEG_EXITED] El reintento de ${trackName} también falló:`, e?.message || e);
@@ -1780,53 +1787,148 @@ if (song.user?.id) {
     }
   };
 
-  // ---- Sonda de deriva del reloj de posición -------------------------------
+  // ---- Reloj de posición corregido ----------------------------------------
   //
-  // @discordjs/voice mete un frame de SILENCIO cuando el stream no entrega audio
-  // (underrun) y suma `playbackDuration += 20` igual que si fuera música real
-  // (`@discordjs/voice/dist/index.js:652` + `:677`). O sea que `queue.currentTime`
-  // mide TIEMPO EMITIDO, no tiempo ESCUCHADO, y se va adelantando con cada corte.
-  // Todo `seek()` que use ese reloj (autoresume, botones del dashboard) reanuda
-  // más adelante de donde realmente se cortó: es el "se adelanta 1-2 segundos".
-  // Esta sonda mide la diferencia entre el reloj y el reloj de pared para
-  // confirmarlo con datos en vez de conjecture.
+  // El `playbackDuration` de @discordjs/voice cuenta PAQUETES PREPARADOS, no
+  // audio ESCUCHADO: cuando el stream no entrega a tiempo el player inserta
+  // SILENCIO y suma igual, y cuando el event loop va cargado el ciclo global de
+  // audio se auto-recupera leyendo paquetes de golpe. Resultado: el reloj se
+  // adelanta al oído (el audio queda en el buffer de Discord) y `currentTime`
+  // va 1-2s por DELANTE del audio real. Todo `seek()` que use ese reloj
+  // (autoresume, botones del dashboard, watchdog) reanuda más adelante de donde
+  // realmente se oye.
+  //
+  // Acá se mide esa deriva y se corrige el reloj: `client._clockDrift` guarda,
+  // por guild, cuántos segundos va adelantado el reloj crudo. El getter
+  // `currentTime` de cada queue se parchea a nivel de instancia para devolver el
+  // reloj MENOS esa deriva, así TODOS los consumidores usan la posición real sin
+  // tocar cada llamada. Se resetea al empezar cada tema y en cada seek (un
+  // stream nuevo arranca con el reloj ya correcto).
+  if (!client._clockDrift) client._clockDrift = new Map();
+
+  const driftEntry = (gid) => {
+    let e = client._clockDrift.get(gid);
+    if (!e) { e = { offset: 0, pos: null, at: 0 }; client._clockDrift.set(gid, e); }
+    return e;
+  };
+  const resetClockDrift = (gid) => {
+    if (!gid) return;
+    client._clockDrift.set(gid, { offset: 0, pos: null, at: 0 });
+  };
+  const clockOffset = (gid) => Number(client._clockDrift.get(gid)?.offset) || 0;
+
+  // Parchea la instancia del queue: `currentTime` resta la deriva y `seek`
+  // reinicia el desfase (el stream nuevo arranca con reloj limpio).
+  const patchClock = (queue, gid) => {
+    if (!queue || !gid || queue._jvdClockPatched) return;
+    const proto = Object.getPrototypeOf(queue);
+    const desc = proto && Object.getOwnPropertyDescriptor(proto, "currentTime");
+    if (!desc || typeof desc.get !== "function") return;
+    queue._jvdClockPatched = true;
+    Object.defineProperty(queue, "currentTime", {
+      configurable: true,
+      get() {
+        const raw = Number(desc.get.call(this)) || 0;
+        const dur = Number(this.songs?.[0]?.duration) || 0;
+        let v = raw - clockOffset(gid);
+        if (v < 0) v = 0;
+        if (dur > 0 && v > dur) v = dur;
+        return v;
+      },
+    });
+    if (typeof queue.seek === "function" && !queue._jvdSeekPatched) {
+      const origSeek = queue.seek;
+      queue._jvdSeekPatched = true;
+      queue.seek = function (time) {
+        resetClockDrift(gid);
+        return origSeek.call(this, time);
+      };
+    }
+    // `play(false)` también reinicia el stream (FilterManager#apply setea
+    // `_beginTime = currentTime` y llama `play(false)`): hay que limpiar la
+    // deriva ahí también o el reloj quedaría restando dos veces.
+    if (typeof queue.play === "function" && !queue._jvdPlayPatched) {
+      const origPlay = queue.play;
+      queue._jvdPlayPatched = true;
+      queue.play = function (...args) {
+        resetClockDrift(gid);
+        return origPlay.apply(this, args);
+      };
+    }
+  };
+
+  // Segundos donde reanudar un tema cortado, según la última posición OÍDA
+  // guardada. Retrocede `backstep` segundos para no re-enganchar justo en el
+  // frame muerto que causó el corte.
+  const resumeSecondsFor = (gid, url, backstep = 2) => {
+    const last = client._voiceLastPos?.get(gid);
+    if (!last || !url || last.url !== url) return 0;
+    const sec = (Number(last.ms) || 0) / 1000;
+    if (!(sec > 5)) return 0;
+    return Math.max(0, sec - backstep);
+  };
+
+  // Asegura que el filtro de normalización de volumen coincida con la
+  // preferencia del guild (`${guildId}.volumenormalize`, por defecto ON). Se
+  // llama en cada playSong; solo actúa cuando el estado no coincide (add/remove
+  // dispara un reinicio de stream, por eso no se toca si ya está bien).
+  const applyNormalizeDefault = async (queue, gid) => {
+    if (!queue || !gid || !queue.filters) return;
+    try {
+      let enabled = await client.music?.get(`${gid}.volumenormalize`);
+      if (enabled === undefined || enabled === null) enabled = true;
+      const has = queue.filters.has("normalize");
+      if (enabled && !has) queue.filters.add("normalize");
+      else if (!enabled && has) queue.filters.remove("normalize");
+    } catch (e) {
+      client.logger?.warn?.(`[Normalize] no se pudo aplicar en G:${gid}: ${e?.message || e}`);
+    }
+  };
+
   const startClockDriftProbe = () => {
     if (client._clockDriftProbe) return;
     client._clockDriftProbe = true;
-    const state = new Map();
     const warnedAt = new Map();
     const t = setInterval(() => {
       // OJO: `distube.queues` es un QueueManager (BaseManager), NO un Map: sus
-      // colas viven en `.collection` (una Collection de discord.js). Con
-      // `queues.values()` esto tiraba TypeError y el `catch` vacío se lo
-      // comía, así que la sonda nunca midió nada.
+      // colas viven en `.collection` (una Collection de discord.js).
       const queues = client.distube?.queues?.collection;
       if (!queues) return;
       try {
         for (const q of queues.values()) {
           const gid = q?.textChannel?.guildId || q?.guild?.id;
           if (!gid || !q.playing || q.paused) continue;
-          const pos = Number(q.currentTime) || 0;
+          // Reloj CRUDO: `q.voice.playbackTime` NO está parcheado (a diferencia
+          // de `q.currentTime`, que ya devuelve el valor corregido).
+          const raw = Number(q.voice?.playbackTime) || 0;
           const now = Date.now();
-          const prev = state.get(gid);
-          if (prev && prev.pos > 0 && pos >= prev.pos) {
-            const drift = pos - prev.pos - (now - prev.at) / 1000;
-            state.set(gid, { pos, at: now });
-            if (drift > 1.2 && now - (warnedAt.get(gid) || 0) > 60000) {
-              warnedAt.set(gid, now);
-              client.logger.warn(
-                `[AudioDrift] G:${gid} el reloj de posición va ${drift.toFixed(2)}s por DELANTE del audio real ` +
-                `en "${q.songs?.[0]?.name || "?"}" (pos=${pos.toFixed(1)}s). Cualquier seek desde ahora salta adelante.`
-              );
-            }
-          } else {
-            state.set(gid, { pos, at: now });
+          const e = driftEntry(gid);
+          if (e.pos == null) { e.pos = raw; e.at = now; continue; }
+          const delta = raw - e.pos;
+          const wall = (now - e.at) / 1000;
+          e.pos = raw; e.at = now;
+          if (wall <= 0) continue;
+          // Retroceso o salto grande = seek/cambio de tema, no deriva: re-ancla.
+          if (delta < -0.5 || delta > 15) continue;
+          const drift = delta - wall;
+          // Solo deriva POSITIVA apreciable (holgura para el ruido del timer).
+          // La negativa (reloj atrasado) no daña: reanudaría antes, no después.
+          if (drift > 0.15 && drift < 15) {
+            const dur = Number(q.songs?.[0]?.duration) || 0;
+            let off = e.offset + drift;
+            if (dur > 0 && off > dur) off = dur;
+            e.offset = off;
+          }
+          if (drift > 1.2 && now - (warnedAt.get(gid) || 0) > 60000) {
+            warnedAt.set(gid, now);
+            client.logger.warn(
+              `[AudioDrift] G:${gid} el reloj va ${drift.toFixed(2)}s por DELANTE del audio real ` +
+              `en "${q.songs?.[0]?.name || "?"}" (pos=${raw.toFixed(1)}s, desfase acumulado=${e.offset.toFixed(2)}s). ` +
+              `Se corrige el reloj: los seeks caen donde se oye.`
+            );
           }
         }
       } catch (e) {
-        // Este catch vacío ya escondió un bug real (acceder a `queues.values()`
-        // en un QueueManager). Ahora se reporta, como mucho 1 vez por minuto,
-        // para no convertir un fallo en spam.
         if (Date.now() - (warnedAt.get("__probe") || 0) > 60000) {
           warnedAt.set("__probe", Date.now());
           client.logger.warn(
@@ -1834,7 +1936,7 @@ if (song.user?.id) {
           );
         }
       }
-    }, 2000);
+    }, 1000);
     if (typeof t.unref === "function") t.unref();
   };
   startClockDriftProbe();
@@ -1927,10 +2029,12 @@ if (song.user?.id) {
               // el siguiente playSong desarma estos timers. Escalones RÁPIDOS para
               // no dejar cortado al usuario, SIN saltar la canción que estaba
               // sonando:
-              //   20s  → si se cortó A MITAD: reintenta LA MISMA con seek(0)
-              //          (NO se pierde la cola); si ya terminó (transición
-              //          colgada) o ya se reintentó y volvió a caer: skip()
-              //   +30s → si sigue idle: otro seek(0); si no alcanza, skip().
+              //   20s  → si se cortó A MITAD: reintenta LA MISMA reanudando en
+              //          la posición donde se cortó (NO se pierde la cola); si
+              //          ya terminó (transición colgada) o ya se reintentó y
+              //          volvió a caer: skip()
+              //   +30s → si sigue idle: otro reintento reanudando; si no
+              //          alcanza, skip().
               //          NUNCA se destruye la conexión: no debe desconectar.
               if (!client._voiceStallTimers) client._voiceStallTimers = new Map();
               if (!client._voiceIdleAt) client._voiceIdleAt = new Map();
@@ -1947,9 +2051,13 @@ if (song.user?.id) {
                   if (!client._voiceLastPos) client._voiceLastPos = new Map();
                   const curUrl = client.distube.getQueue(guildId)?.songs?.[0]?.url
                     || client.actualPlaying?.get(guildId)?.url || null;
+                  // Guardamos la posición OÍDA (no la del reloj crudo, que va
+                  // adelantado): restamos el desfase acumulado para reanudar
+                  // exactamente donde se cortó.
+                  const correctedMs = Math.max(0, posMs - clockOffset(guildId) * 1000);
                   const prev = client._voiceLastPos.get(guildId);
-                  if (!prev || prev.url !== curUrl || posMs > (Number(prev.ms) || 0)) {
-                    client._voiceLastPos.set(guildId, { url: curUrl, ms: posMs });
+                  if (!prev || prev.url !== curUrl || correctedMs > (Number(prev.ms) || 0)) {
+                    client._voiceLastPos.set(guildId, { url: curUrl, ms: correctedMs });
                   }
                 }
               } catch {}
@@ -2044,7 +2152,7 @@ if (song.user?.id) {
                 return { cur, next: lq.songs[1], dur, nowMs, ended };
               };
               // Reintenta reproducir la canción ACTUAL sin recrear la cola:
-              // seek(0) reusa la cola existente (songs[0]) y solo reinicia el
+              // seek() reusa la cola existente (songs[0]) y solo reinicia el
               // stream. NO se usa stop(): Queue.stop() llama a remove() y BORRA
               // toda la cola (index.js:1155-1176) → eso era lo que la colapsaba
               // a "len 1" y disparaba la desconexión.
@@ -2055,11 +2163,14 @@ if (song.user?.id) {
                 // seek() solo reproduce songs[0]; si el target no es la actual
                 // no forzamos nada (evita saltos raros).
                 if (!cur || cur.url !== target.url) return false;
+                // Reanudar donde se cortó (posición OÍDA guardada), no desde 0.
+                const resumeAt = resumeSecondsFor(guildId, target.url, 2);
                 try {
                   client.logger.warn(
-                    `[QueueWatchdog ${guildId}] ${phase}: reintentando "${target.name || target.url}" SIN desconectar (seek 0, la cola se conserva).`
+                    `[QueueWatchdog ${guildId}] ${phase}: reintentando "${target.name || target.url}" SIN desconectar ` +
+                    `(reanudando en ${resumeAt.toFixed(1)}s, la cola se conserva).`
                   );
-                  await withTimeout(lq.seek(0), 15000, "seek 0 watchdog");
+                  await withTimeout(lq.seek(resumeAt), 15000, "seek replay watchdog");
                   // seek() no emite playSong: refrescamos la fuente de verdad y
                   // el panel a mano para no quedar desincronizados.
                   if (!client.actualPlaying) client.actualPlaying = new Map();
@@ -2086,7 +2197,7 @@ if (song.user?.id) {
                   );
                   return true;
                 } catch (e) {
-                  client.logger.warn(`[QueueWatchdog ${guildId}] ${phase}: seek 0 no alcanzó (${e?.message || e}); queda el siguiente escalón.`);
+                  client.logger.warn(`[QueueWatchdog ${guildId}] ${phase}: reanudar en ${Math.round(resumeSecondsFor(guildId, target.url))}s no alcanzó (${e?.message || e}); queda el siguiente escalón.`);
                   return false;
                 }
               };
@@ -2111,7 +2222,7 @@ if (song.user?.id) {
                   // Último recurso: saltar a la siguiente. JAMÁS se destruye la
                   // conexión (el bot no debe desconectarse de voz).
                   client.logger.warn(
-                    `[QueueWatchdog ${guildId}] PEG 50s: seek 0 no alcanzó; forzando la cola (drenar + play, sin desconectar).`
+                    `[QueueWatchdog ${guildId}] PEG 50s: reanudar no alcanzó; forzando la cola (drenar + play, sin desconectar).`
                   );
                   client._voiceIdleAt?.delete(guildId);
                   client._voiceUnstickTimers.delete(guildId);

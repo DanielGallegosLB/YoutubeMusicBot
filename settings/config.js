@@ -38,6 +38,9 @@ const emojiSettings = {
 };
 
 const filters = {
+  // Normalización de volumen (loudness equalization): mantiene un nivel parejo
+  // entre canciones. Se aplica por defecto (toggle en el panel + `${guildId}.volumenormalize`).
+  normalize: "dynaudnorm=f=200:g=15",
   clear: "dynaudnorm=f=200",
   lightbass: "bass=g=8,dynaudnorm=f=200",
   heavybass: "bass=g=20,dynaudnorm=f=200",

@@ -717,6 +717,21 @@ module.exports = {
     // Favorita el like no esté en `likedBy` (una escritura en carrera pudo
     // dejarlo solo en el store de stats, y ese store es el que lleva la cuenta).
     const gStat = await this.guildStats(client, guildId).catch(() => ({}));
+
+    // PERF: antes, por cada favorita se recorría TODO gStat recalculando
+    // canonUrlKey (new URL + regex) en cada par → O(favoritas × stats). Con
+    // cientos de favoritas bloqueaba el event loop ~2s cada 5s (cortes de audio).
+    // Ahora se indexa gStat UNA vez por clave canónica: O(favoritas + stats).
+    const statKeys = Object.keys(gStat);
+    const statsByCanon = new Map(); // canon -> [entrada de stats, ...]
+    for (const k of statKeys) {
+      const ck = this.canonUrlKey(k);
+      let arr = statsByCanon.get(ck);
+      if (!arr) { arr = []; statsByCanon.set(ck, arr); }
+      arr.push(gStat[k] || {});
+    }
+    const favCanon = new Set(); // canon de las URLs ya listadas (para las filas virtuales)
+
     for (const userId of Object.keys(root.playlists)) {
       const pl = root.playlists[userId];
       if (!pl || typeof pl !== "object") continue;
@@ -731,9 +746,9 @@ module.exports = {
           let likedGlobally = false;
           let dislikedGlobally = false;
           let gPlays = 0;
-          for (const k of Object.keys(gStat)) {
-            if (this.canonUrlKey(k) !== this.canonUrlKey(url)) continue;
-            const e = gStat[k] || {};
+          const urlCanon = this.canonUrlKey(url);
+          if (url) favCanon.add(urlCanon);
+          for (const e of statsByCanon.get(urlCanon) || []) {
             gPlays = Math.max(gPlays, Number(e.plays) || 0);
             if ((e.likedBy || []).includes(userId)) likedGlobally = true;
             if ((e.dislikedBy || []).includes(userId)) dislikedGlobally = true;
@@ -760,15 +775,17 @@ module.exports = {
     // gStat antes de los locks): se listan igual como filas "virtuales" para que
     // en el dashboard sean encontrables y se vea que la info existe.
     const virtual = [];
-    for (const k of Object.keys(gStat)) {
+    const virtualCanon = new Set();
+    for (const k of statKeys) {
       const e = gStat[k] || {};
       const likesArr = e.likedBy || [];
       const dislikesArr = e.dislikedBy || [];
       const plays = Number(e.plays) || 0;
       if (!likesArr.length && !dislikesArr.length && !plays) continue;
+      if (!k) continue;
       const canon = this.canonUrlKey(k);
-      if (!k || out.some((o) => o.url && this.canonUrlKey(o.url) === canon)) continue;
-      if (virtual.some((o) => this.canonUrlKey(o.url) === canon)) continue;
+      if (favCanon.has(canon) || virtualCanon.has(canon)) continue;
+      virtualCanon.add(canon);
       virtual.push({
         url: k,
         name: k,

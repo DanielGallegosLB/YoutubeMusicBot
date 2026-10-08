@@ -1,6 +1,7 @@
 const { spawn } = require("child_process");
 const path = require("path");
 const fs = require("fs");
+const os = require("os");
 
 const YTDLP_PATH = path.join(
   process.cwd(),
@@ -42,7 +43,9 @@ function buildArgs(playlistUrl, startItem, endItem, extraPrints = []) {
 
 function runYtDlp(args, timeoutMs = 0) {
   return new Promise((resolve, reject) => {
-    const proc = spawn(YTDLP_PATH, args);
+    const proc = spawn(YTDLP_PATH, args, { windowsHide: true });
+    // Prioridad baja: yt-dlp no debe quitarle CPU a ffmpeg / al encoder Opus.
+    try { os.setPriority(proc.pid, os.constants.priority.PRIORITY_BELOW_NORMAL); } catch {}
     let stdout = "", stderr = "";
     let done = false;
     const timer =
@@ -197,7 +200,32 @@ async function fetchPlaylistAllURLsFlat(playlistUrl, maxItems = 1000) {
  * @param {number} [timeoutMs]
  * @returns {Promise<{status:string, title?:string, reason?:string}>}
  */
-async function validateSinglePlayable(url, timeoutMs = 15000) {
+const YT_HOST_RE = /^(?:https?:\/\/)?(?:www\.|m\.|music\.)?(?:youtube\.com|youtu\.be)\//i;
+
+// Validación liviana por HTTP (oEmbed): sin lanzar procesos ni resolver desafíos JS.
+// Devuelve null si no puede decidir (hay que caer a yt-dlp).
+async function validateViaOEmbed(url, timeoutMs) {
+  try {
+    const res = await fetch(
+      `https://www.youtube.com/oembed?url=${encodeURIComponent(url)}&format=json`,
+      { signal: AbortSignal.timeout(Math.min(timeoutMs, 8000)) }
+    );
+    if (res.ok) {
+      const data = await res.json().catch(() => ({}));
+      return { status: "ok", title: data.title || url };
+    }
+    // 404 = borrado o privado. Es el único caso donde estamos seguros.
+    if (res.status === 404) return { status: "invalid", reason: "oembed 404: video borrado o privado" };
+    // 401/403 = embed deshabilitado o restringido por edad: el video puede existir. Que decida yt-dlp.
+    if (res.status === 401 || res.status === 403) return null;
+    // 429/5xx etc.: sin veredicto confiable, no gastar CPU con yt-dlp.
+    return { status: "unknown", reason: `oembed ${res.status}` };
+  } catch (e) {
+    return { status: "unknown", reason: `oembed error: ${(e?.message || e).toString().slice(0, 120)}` };
+  }
+}
+
+async function validateWithYtDlp(url, timeoutMs) {
   return serializeValidation(async () => {
     const cookiePath = path.join(process.cwd(), "yt-cookies.txt");
     const args = [
@@ -222,12 +250,21 @@ async function validateSinglePlayable(url, timeoutMs = 15000) {
       return { status: "unknown", reason: evidence.replace(/\s+/g, " ").trim().slice(0, 220) || "salida vacía" };
     } catch (e) {
       if (/timeout/i.test(e?.message || "")) {
-        console.error(`[validateSinglePlayable] Timeout (${timeoutMs}ms) para ${url} → hay una cola de validaciones: yt-dlp está lento, se conserva la canción.`);
+        console.error(`[validateSinglePlayable] Timeout (${timeoutMs}ms) para ${url} → yt-dlp está lento, se conserva la canción.`);
         return { status: "unknown", reason: `timeout ${timeoutMs}ms` };
       }
       return { status: "unknown", reason: (e?.message || e).toString().slice(0, 220) };
     }
   });
+}
+
+async function validateSinglePlayable(url, timeoutMs = 15000) {
+  // YouTube: primero oEmbed (instantáneo, ~0% CPU). Solo si no es concluyente se usa yt-dlp.
+  if (YT_HOST_RE.test(String(url || ""))) {
+    const quick = await validateViaOEmbed(url, timeoutMs);
+    if (quick) return quick;
+  }
+  return validateWithYtDlp(url, timeoutMs);
 }
 
 /**
@@ -271,4 +308,78 @@ function searchYoutube(query) {
   });
 }
 
-module.exports = { YTDLP_PATH, isPlaylistURL, fetchPlaylistURLs, fetchPlaylistAllURLsFlat, fetchPlaylistURLsIncrementally, fetchPlaylistFirstURL, validateSinglePlayable, searchYoutube };
+/**
+ * Busca en YouTube y devuelve HASTA `limit` resultados como objetos jugables.
+ * Usa yt-dlp (no el searcher de ytdl-core que crashea con `canonicalBaseUrl`).
+ * @param {string} query
+ * @param {number} [limit]
+ * @param {number} [timeoutMs]
+ * @returns {Promise<Array<{url:string,name:string,duration:number,uploader:string,videoId:string|null}>>}
+ */
+function searchYoutubeVideos(query, limit = 10, timeoutMs = 25000) {
+  return new Promise((resolve) => {
+    if (typeof query !== "string" || !query.trim()) return resolve([]);
+    const n = Math.max(1, Math.min(25, Number(limit) || 10));
+    const cookiePath = path.join(process.cwd(), "yt-cookies.txt");
+    const args = [
+      "--default-search", `ytsearch${n}`,
+      "--flat-playlist",
+      "--dump-json",
+      "--no-warnings",
+      "--ignore-errors",
+      "--no-check-certificates",
+      "--js-runtimes", "node",
+      query,
+    ];
+    if (fs.existsSync(cookiePath)) args.push("--cookies", cookiePath);
+    const proc = spawn(YTDLP_PATH, args);
+    let stdout = "";
+    let done = false;
+    const finish = (results) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      resolve(results);
+    };
+    const timer = setTimeout(() => {
+      try { proc.kill(); } catch {}
+      finish([]);
+    }, timeoutMs);
+    proc.stdout.on("data", (d) => (stdout += d));
+    proc.on("error", () => finish([]));
+    proc.on("close", () => {
+      const out = [];
+      for (const line of stdout.split(/\r?\n/)) {
+        const t = line.trim();
+        if (!t) continue;
+        let j;
+        try { j = JSON.parse(t); } catch { continue; }
+        const videoId = j.id || null;
+        const url = j.webpage_url || j.url || (videoId ? `https://www.youtube.com/watch?v=${videoId}` : null);
+        if (!url) continue;
+        out.push({
+          url,
+          name: j.title || "Canción desconocida",
+          duration: Number(j.duration) || 0,
+          uploader: j.uploader || j.channel || "",
+          videoId,
+        });
+      }
+      finish(out.slice(0, n));
+    });
+  });
+}
+
+// Para URLs de video único de YouTube: oEmbed en vez de yt-dlp. Devuelve la URL si existe, null si no.
+// Playlists y otros sitios siguen yendo por yt-dlp.
+async function probeSingleURL(url, timeoutMs = 12000) {
+  if (YT_HOST_RE.test(String(url || "")) && !isPlaylistURL(url)) {
+    const v = await validateViaOEmbed(url, timeoutMs);
+    if (v && v.status === "ok") return url;
+    if (v && v.status === "invalid") return null;
+    // unknown (429/red caída) o 401/403: caer a yt-dlp
+  }
+  return fetchPlaylistFirstURL(url, { timeoutMs });
+}
+
+module.exports = { YTDLP_PATH, isPlaylistURL, fetchPlaylistURLs, fetchPlaylistAllURLsFlat, fetchPlaylistURLsIncrementally, fetchPlaylistFirstURL, validateSinglePlayable, probeSingleURL, searchYoutube, searchYoutubeVideos };

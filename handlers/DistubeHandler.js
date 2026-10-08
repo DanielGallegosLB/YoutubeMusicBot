@@ -462,7 +462,7 @@ module.exports = async (client) => {
           }
         }
 
-        const controlButtons = ["previous", "rewind10", "pauseresume", "forward10", "skip", "stop", "shuffle", "loop_song", "loop_queue", "autoplay", "autodj"];
+        const controlButtons = ["previous", "rewind10", "pauseresume", "forward10", "skip", "stop", "shuffle", "loop_song", "loop_queue", "autoplay", "autodj", "normalize"];
 
         // Paginación del embed de cola
         if (customId.startsWith("queue_page_")) {
@@ -626,6 +626,38 @@ module.exports = async (client) => {
                   interaction,
                   ` ${client.config.emoji.SUCCESS} Reproducción automática desactivada `
                 );
+              }
+            }
+            break;
+          case "normalize":
+            {
+              if (!channel) {
+                return send(interaction, ` ${client.config.emoji.ERROR} Debes unirte a un canal de voz `);
+              } else if (
+                interaction.guild.members.me.voice.channel &&
+                !interaction.guild.members.me.voice.channel.equals(channel)
+              ) {
+                return send(interaction, ` ${client.config.emoji.ERROR} Debes unirte a __mi__ canal de voz `);
+              } else if (!queue) {
+                return send(interaction, ` ${client.config.emoji.ERROR} No hay nada sonando ahora `);
+              } else if (checkDJ) {
+                return send(interaction, `${client.config.emoji.SUCCESS} No eres DJ ni has solicitado esta canción..`);
+              }
+              try {
+                const has = !!queue.filters?.has?.("normalize");
+                const next = !has;
+                if (next) queue.filters.add("normalize");
+                else queue.filters.remove("normalize");
+                try {
+                  await client.music.set(`${interaction.guildId}.volumenormalize`, next);
+                } catch (_e) {}
+                refresh(queue, 200);
+                return send(
+                  interaction,
+                  `${client.config.emoji.SUCCESS} Normalización de volumen ${next ? "activada" : "desactivada"}`
+                );
+              } catch (e) {
+                return send(interaction, ` ${client.config.emoji.ERROR} No se pudo cambiar la normalización`);
               }
             }
             break;

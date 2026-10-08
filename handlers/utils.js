@@ -92,14 +92,15 @@ module.exports = async (client) => {
         .setDisabled(dis(!hasNext)),
     ]);
 
-    // Row 2: Stop • Shuffle • Loop Song • Loop Queue • Autoplay
+    // Layout pensado para móvil: controles en filas cortas y la "zona de
+    // peligro" (Stop / AutoDJ / No AutoDJ) aislada al final, lejos de los
+    // botones que se tocan todo el tiempo (Next, Like, Loop).
+    //
+    // Fila 2: Shuffle • Loop canción • Loop cola • Autoplay • Normalizar
+    const normalizeOn = queue
+      ? !!(queue.filters?.has?.("normalize"))
+      : true; // sin cola: reflejar el default (encendido)
     const row2 = new ActionRowBuilder().addComponents([
-      new ButtonBuilder()
-        .setStyle(ButtonStyle.Danger)
-        .setCustomId("stop")
-        .setEmoji(client.config.emoji.stop)
-        .setLabel("Stop")
-        .setDisabled(state),
       new ButtonBuilder()
         .setStyle(ButtonStyle.Secondary)
         .setCustomId("shuffle")
@@ -124,19 +125,16 @@ module.exports = async (client) => {
         .setEmoji(client.config.emoji.autoplay)
         .setLabel("Autoplay")
         .setDisabled(state),
+      new ButtonBuilder()
+        .setStyle(normalizeOn ? ButtonStyle.Success : ButtonStyle.Secondary)
+        .setCustomId("normalize")
+        .setEmoji("🎚️")
+        .setLabel("Normalizar")
+        .setDisabled(state),
     ]);
 
-    // Row 3: Auto DJ 🛸 • Like 👍 • Dislike 👎 • Favorita ⭐
-    // Auto DJ visuals (toggle state)
-    const autoDjOn = !!client.autoDj?.get(queue?.textChannel?.guildId || queue?.guildId);
-    const autoDjStyle = autoDjOn ? ButtonStyle.Success : ButtonStyle.Primary;
+    // Fila 3: sociales — Like 👍 • Dislike 👎 • Favorita ⭐
     const row3 = new ActionRowBuilder().addComponents([
-      new ButtonBuilder()
-        .setStyle(autoDjStyle)
-        .setCustomId("autodj")
-        .setEmoji("🛸")
-        .setLabel(autoDjOn ? "Auto DJ: ON" : "Auto DJ")
-        .setDisabled(dis(!track)),
       new ButtonBuilder()
         .setStyle(ButtonStyle.Secondary)
         .setCustomId("player_like")
@@ -155,6 +153,24 @@ module.exports = async (client) => {
         .setEmoji("⭐")
         .setLabel("Favorita")
         .setDisabled(dis(!track)),
+    ]);
+
+    // Fila 4: zona de peligro — Stop ⏹️ • Auto DJ 🛸 • No AutoDJ 🚫
+    const autoDjOn = !!client.autoDj?.get(queue?.textChannel?.guildId || queue?.guildId);
+    const autoDjStyle = autoDjOn ? ButtonStyle.Success : ButtonStyle.Primary;
+    const row4 = new ActionRowBuilder().addComponents([
+      new ButtonBuilder()
+        .setStyle(ButtonStyle.Danger)
+        .setCustomId("stop")
+        .setEmoji(client.config.emoji.stop)
+        .setLabel("Stop")
+        .setDisabled(state),
+      new ButtonBuilder()
+        .setStyle(autoDjStyle)
+        .setCustomId("autodj")
+        .setEmoji("🛸")
+        .setLabel(autoDjOn ? "Auto DJ: ON" : "Auto DJ")
+        .setDisabled(dis(!track)),
       new ButtonBuilder()
         .setStyle(ButtonStyle.Danger)
         .setCustomId("autodj_skipban")
@@ -163,7 +179,7 @@ module.exports = async (client) => {
         .setDisabled(dis(!track)),
     ]);
 
-    return [row1, row2, row3];
+    return [row1, row2, row3, row4];
   };
 
   // Programa el auto-borrado de confirmaciones efímeras. Tiempo configurable
