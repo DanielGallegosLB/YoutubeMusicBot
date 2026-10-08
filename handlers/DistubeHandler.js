@@ -676,10 +676,10 @@ module.exports = async (client) => {
 
                 skip(queue).catch(() => {});
                 refresh(queue, 300);
-                return send(
-                  interaction,
-                  `${client.config.emoji.SUCCESS} Canción saltada`
-                );
+                // Sin "✅ Canción saltada": la interacción ya quedó confirmada
+                // con deferUpdate() (línea 495), así que no hay que mandar nada.
+                // Ese followUp ephemeral molestaba en cada skip.
+                return;
               }
             }
             break;

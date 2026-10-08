@@ -328,18 +328,15 @@ module.exports = {
     // Remove a dislike for this user for this play if present
     const disIdx = track.dislikedBy.indexOf(userId);
     if (disIdx !== -1) track.dislikedBy.splice(disIdx, 1);
-    // Acumula cada 👍 (sin tope): el mismo usuario sube el contador en cada
-    // clic, tanto desde el embed como desde el dashboard.
+    // Acumula cada 👍 (sin tope): cada clic suma 1 voto, tanto desde el embed
+    // como desde el dashboard. El contador es VOLUMEN de votos, no nº de
+    // personas: getGlobalTrackStats muestra los nombres deduplicados aparte.
     //
-    // Si el store global ya tiene un 👍 de ESTE usuario y la favorita no lo
-    // tenía (un set en carrera lo dejó solo en gStat), primero se siembra esa
-    // base. Sin esto el acumulador arrancaba en 0: la canción que ya tenía 1
-    // like seguía mostrando 1 después del primer click, y recién al segundo
-    // markaba 2 — "como si el like no se guardara".
-    const g0 = (await this.guildStats(client, guildId))[trackUrl];
-    if (g0?.likedBy?.includes(userId) && !track.likedBy.includes(userId)) {
-      track.likedBy.push(userId);
-    }
+    // El seed por `includes` que había antes queda fuera a propósito: si el
+    // store global ya tenía a este usuario y la favorita no, sembraba 1 y el
+    // push siguiente sumaba otro => un solo clic marcaba 2. Para la carrera
+    // "el like se quedó solo en gStat" el arreglo correcto es la reconciliación
+    // por reproducción, no sembrar dentro del click.
     track.likedBy.push(userId);
     all[name] = list;
     await Promise.all([

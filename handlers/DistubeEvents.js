@@ -1310,9 +1310,28 @@ module.exports = async (client) => {
       }
     })();
 
-    if (song.user?.id) {
-      MusicTracker.logPlay(gid, song.user.id, song);
+if (song.user?.id) {
+    MusicTracker.logPlay(gid, song.user.id, song);
     }
+
+    // El audioPlayer se recrea en cada reconexión: hay que reaplicarle la
+    // tolerancia a cortes cada vez que arranca una canción.
+    hardenAudioPlayer((client.distube.getQueue(gid) || queue)?.voice);
+
+    // Identidad de la canción REALMENTE en emisión. El `audioResource` de
+    // DisTube v5 se crea sin `metadata` (`distube/dist/index.js:1847`), así que
+    // el resource no sabe qué canción es, y para cuando salta el evento `idle`
+    // `queue.songs[0]` ya puede ser la SIGUIENTE (jump() hace splice ANTES de
+    // parar el player, línea 1061). Se guarda aquí, donde `song` sí es el
+    // correcto, para poder distinguir "el stream murió a medias" de "el usuario
+    // pidió skip".
+    if (!client._voiceCurrent) client._voiceCurrent = new Map();
+    client._voiceCurrent.set(gid, {
+      url: song.url || null,
+      name: song.name || null,
+      duration: Math.round(Number(song.duration) || 0),
+      startedAt: Date.now(),
+    });
 
     const activityText = song.uploader?.name
       ? `${song.name} -${song.uploader.name}`
@@ -1607,12 +1626,16 @@ module.exports = async (client) => {
                 `[FFMPEG_EXITED] Reintentando (${st.n}/2) la canción ${trackName} con un stream nuevo... ` +
                 `(si persiste, regenera las cookies del navegador: npm run export-cookies)`
               );
-              await client.distube.play(vc, url, {
-                member: queue.songs?.[0]?.member || vc.guild?.members?.me,
-                textChannel: queue.textChannel,
-                selfDeaf: true,
-                skip: true,
-              });
+              // Reconstruye el stream del MISMO tema desde el principio.
+              //
+              // Antes usaba `distube.play(vc, url, { skip: true })`: eso mete la
+              // canción en la posición 1 de la cola y ejecuta `queue.skip()`, así
+              // que el reintento no reproducía la canción rota sino la SIGUIENTE
+              // de la cola (en logs.txt: se anunciaba el reintento de "Ojalá nos
+              // perdonen" y empezó "Soda Stereo" 60 ms después).
+              // `queue.seek(0)` vuelve a resolver el stream (yt-dlp) y reproduce
+              // la canción que YA está en cabeza, sin tocar el resto de la cola.
+              await withTimeout(queue.seek(0), 15000, "reintento ffmpeg");
               return;
             } catch (e) {
               client.logger.error(`[FFMPEG_EXITED] El reintento de ${trackName} también falló:`, e?.message || e);
@@ -1732,6 +1755,90 @@ module.exports = async (client) => {
       .catch(() => {});
   });
 
+  // ---- Tolerancia a cortes de audio --------------------------------------
+  //
+  // @discordjs/voice para el player a los 100 ms sin audio
+  // (`maxMissedFrames: 5`, default de `createAudioPlayer`, y DisTube lo crea
+  // sin options: `distube/dist/index.js:304`). Con 100 ms de margen, un hipo de
+  // ffmpeg mataba el player y se oía un corte de ~1 s. Con 50 (1 s) el player
+  // aguanta el hipo, inserta el silencio y sigue solo, sin cortar la canción.
+  const MAX_MISSED_FRAMES = Math.max(5, Number(process.env.VOICE_MAX_MISSED_FRAMES) || 50);
+  const hardenAudioPlayer = (voice) => {
+    try {
+      const p = voice?.audioPlayer;
+      if (!p?.behaviors) return false;
+      if (p.behaviors.maxMissedFrames >= MAX_MISSED_FRAMES) return false;
+      const prev = p.behaviors.maxMissedFrames;
+      p.behaviors.maxMissedFrames = MAX_MISSED_FRAMES;
+      client.logger.log(
+        `[Voice] maxMissedFrames ${prev} -> ${MAX_MISSED_FRAMES}: el player tolera cortes de ~1s ` +
+        `en vez de detenerse al primer hipo de ffmpeg.`
+      );
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  // ---- Sonda de deriva del reloj de posición -------------------------------
+  //
+  // @discordjs/voice mete un frame de SILENCIO cuando el stream no entrega audio
+  // (underrun) y suma `playbackDuration += 20` igual que si fuera música real
+  // (`@discordjs/voice/dist/index.js:652` + `:677`). O sea que `queue.currentTime`
+  // mide TIEMPO EMITIDO, no tiempo ESCUCHADO, y se va adelantando con cada corte.
+  // Todo `seek()` que use ese reloj (autoresume, botones del dashboard) reanuda
+  // más adelante de donde realmente se cortó: es el "se adelanta 1-2 segundos".
+  // Esta sonda mide la diferencia entre el reloj y el reloj de pared para
+  // confirmarlo con datos en vez de conjecture.
+  const startClockDriftProbe = () => {
+    if (client._clockDriftProbe) return;
+    client._clockDriftProbe = true;
+    const state = new Map();
+    const warnedAt = new Map();
+    const t = setInterval(() => {
+      // OJO: `distube.queues` es un QueueManager (BaseManager), NO un Map: sus
+      // colas viven en `.collection` (una Collection de discord.js). Con
+      // `queues.values()` esto tiraba TypeError y el `catch` vacío se lo
+      // comía, así que la sonda nunca midió nada.
+      const queues = client.distube?.queues?.collection;
+      if (!queues) return;
+      try {
+        for (const q of queues.values()) {
+          const gid = q?.textChannel?.guildId || q?.guild?.id;
+          if (!gid || !q.playing || q.paused) continue;
+          const pos = Number(q.currentTime) || 0;
+          const now = Date.now();
+          const prev = state.get(gid);
+          if (prev && prev.pos > 0 && pos >= prev.pos) {
+            const drift = pos - prev.pos - (now - prev.at) / 1000;
+            state.set(gid, { pos, at: now });
+            if (drift > 1.2 && now - (warnedAt.get(gid) || 0) > 60000) {
+              warnedAt.set(gid, now);
+              client.logger.warn(
+                `[AudioDrift] G:${gid} el reloj de posición va ${drift.toFixed(2)}s por DELANTE del audio real ` +
+                `en "${q.songs?.[0]?.name || "?"}" (pos=${pos.toFixed(1)}s). Cualquier seek desde ahora salta adelante.`
+              );
+            }
+          } else {
+            state.set(gid, { pos, at: now });
+          }
+        }
+      } catch (e) {
+        // Este catch vacío ya escondió un bug real (acceder a `queues.values()`
+        // en un QueueManager). Ahora se reporta, como mucho 1 vez por minuto,
+        // para no convertir un fallo en spam.
+        if (Date.now() - (warnedAt.get("__probe") || 0) > 60000) {
+          warnedAt.set("__probe", Date.now());
+          client.logger.warn(
+            `[AudioDrift] sonda de deriva falló: ${e?.message || e}`
+          );
+        }
+      }
+    }, 2000);
+    if (typeof t.unref === "function") t.unref();
+  };
+  startClockDriftProbe();
+
   // ---- Voice / DAVE / player diagnostics (one-time per guild) ----
     const instrumentVoice = (queue) => {
       const guildId = queue.textChannel?.guildId || queue.guildId;
@@ -1760,26 +1867,57 @@ module.exports = async (client) => {
       }
       if (voice._jvdDiag) return;
       voice._jvdDiag = true;
+      hardenAudioPlayer(voice);
       if (voice.audioPlayer) {
         voice.audioPlayer.on("stateChange", (oldState, newState) => {
           const status = newState.status;
           if (status === "idle" || status === "playing" || status === "buffering" || status === "autopaused") {
-            // La canción que el voice está emitiendo DE VERDAD (del resource
-            // real del audioPlayer), para cruzarla con queue.songs[0].
-            let resName = null;
-            let resMeta = null;
-            try {
-              const res = newState.resource;
-              if (res?.metadata) resMeta = res.metadata;
-              if (resName === null && resMeta?.name) resName = resMeta.name;
-              if (resMeta?.title && !resName) resName = resMeta.title;
-              if (res?.playbackDuration !== undefined) resName = `${resName ?? "?"} (played ${Math.round(res.playbackDuration/1000)}s)`;
-            } catch {}
+            // El `audioResource` de DisTube v5 se crea SIN `metadata`
+            // (`distube/dist/index.js:1847`: solo `inputType` e
+            // `inlineVolume`), así que `resource.metadata` siempre es undefined
+            // y no sirve para identificar el tema. La identidad viene de
+            // `_voiceCurrent`, que se llena en playSong con la canción buena.
+            const cur = client._voiceCurrent?.get(guildId) || null;
+            const resName = (() => {
+              const played = Math.round((oldState.resource?.playbackDuration || 0) / 1000);
+              if (status !== "idle") return null;
+              return `"${cur?.name || "?"}" (emitidos ${played}s de ${cur?.duration || "?"}s)`;
+            })();
             client.logger.log(
               `[VoiceDiag ${guildId}] player ${oldState.status} -> ${status}` +
               (resName ? ` :: ${resName}` : "") +
-              (resMeta && oldState.status !== status ? ` :: meta=${String(resMeta.name || resMeta.title || (typeof resMeta === 'string' ? resMeta : JSON.stringify(Object.keys(resMeta))))}` : "")
+              ` :: missed=${newState.missedFrames ?? oldState.missedFrames ?? 0}` +
+              (status === "idle" && newState.reason ? ` :: reason=${newState.reason}` : "")
             );
+            // ¿La canción TERMINÓ o se CORTÓ antes de tiempo? Si el audio se
+            // emite menos de lo que dura la canción, el oyente pierde el final y
+            // para él "la canción se adelantó". Se mide con el reloj del propio
+            // player contra la duración declarada del tema.
+            //
+            // Solo se avisa si la canción que murió SIGUE siendo la actual: en un
+            // skip manual `songs[0]` ya es la siguiente, y comparar la del
+            // resource contra la siguiente daba un falso "faltaron N segundos"
+            // en cada skip.
+            if (status === "idle" && cur?.duration) {
+              try {
+                const played = Math.round((oldState.resource?.playbackDuration || 0) / 1000);
+                const lq0 = client.distube.getQueue(guildId);
+                const s0 = lq0?.songs?.[0];
+                const stillCurrent =
+                  !!s0 &&
+                  ((cur.url && (s0.url === cur.url || s0.name === cur.name)) ||
+                    (!cur.url && s0.name === cur.name));
+                const dur = cur.duration;
+                if (stillCurrent && played > 3 && dur > played + 3) {
+                  client.logger.warn(
+                    `[AudioTrunc] G:${guildId} "${cur.name}" emitió ${played}s de ${dur}s: ` +
+                    `faltaron ${dur - played}s de audio (motivo=${newState.reason || "?"}, missed=${oldState.missedFrames ?? 0}).`
+                  );
+                }
+              } catch (e) {
+                client.logger.warn(`[AudioTrunc] no se pudo medir el corte: ${e?.message || e}`);
+              }
+            }
             // `autopaused` = el player NO tiene ninguna conexión "playable" (la de
             // voz se cayó). El watchdog también tiene que cubrirlo: si solo mira
             // `idle`, una conexión muerta deja al bot mudo indefinidamente sin
@@ -1850,7 +1988,14 @@ module.exports = async (client) => {
                     tq.resolve();
                     n++;
                   }
-                } catch {}
+                } catch (e) {
+                  // Si drain falla, la `_taskQueue` sigue colgada y TODO lo que
+                  // se pida después (skip, seek, play) espera para siempre: el
+                  // bot queda mudo. Esto no puede fallar en silencio.
+                  client.logger.warn(
+                    `[Voice] no se pudo drenar la _taskQueue (quedaban ${pend ?? "?"}): ${e?.message || e}`
+                  );
+                }
                 return n;
               };
 

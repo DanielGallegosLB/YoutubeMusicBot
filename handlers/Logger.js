@@ -8,11 +8,16 @@ const backupFile = `${logFile}.1`;
 // Tope del archivo: al llegar se rota (logs.txt -> logs.txt.1) y se sigue.
 // Antes logs.txt llegó a 41 MB (33 MB solo de spam de ffmpeg) sin rollover.
 const MAX_BYTES = Math.max(1, Number(process.env.LOG_MAX_MB) || 8) * 1024 * 1024;
-// Espejo en la consola. Se puede apagar con LOG_CONSOLE=0: en Windows, una
-// consola con miles de líneas por segundo (y el usuario haciendo scroll o
-// seleccionando texto) BLOQUEA la escritura y con ella TODO el event loop del
-// bot: el audio se corta y no vuelve hasta que se release la selección.
-const MIRROR_CONSOLE = process.env.LOG_CONSOLE !== "0";
+// Espejo en la consola. Se puede regular con LOG_CONSOLE:
+//   (vacío) o "all" → todo, "warn" → solo warn/error, "0" → nada.
+// En Windows, una consola con miles de líneas por segundo (y el usuario haciendo
+// scroll o seleccionando texto) BLOQUEA la escritura y con ella TODO el event
+// loop del bot: el ticker de audio de @discordjs/voice corre cada 20 ms, así que
+// un bloqueo de 1s es un corte de audio audible. El archivo SIEMPRE lleva todo.
+const LOG_CONSOLE = String(process.env.LOG_CONSOLE ?? "").trim().toLowerCase();
+const MIRROR_NONE = ["0", "off", "false", "no"].includes(LOG_CONSOLE);
+const MIRROR_WARN = MIRROR_NONE || LOG_CONSOLE === "warn";
+const MIRROR_ALL = !MIRROR_NONE && !MIRROR_WARN;
 const MAX_ENTRY_CHARS = 2000;
 
 function getTimestamp() {
@@ -116,6 +121,7 @@ if (!global.__consoleLoggingInstalled) {
 
   const colors = { log: "32", info: "36", warn: "33", error: "31", debug: "34" };
   const fileLevel = { log: "INFO", info: "INFO", warn: "WARN", error: "ERROR", debug: "DEBUG" };
+  const isProblem = { log: false, info: false, warn: true, error: true, debug: false };
 
   for (const method of Object.keys(colors)) {
     const original = console[method];
@@ -131,7 +137,8 @@ if (!global.__consoleLoggingInstalled) {
       const flat = String(message).replace(/\s*\r?\n\s*/g, " ");
       const entry = `[${getTimestamp()}] [${fileLevel[method]}] ${flat}\n`;
       queue(entry);
-      if (!MIRROR_CONSOLE) return;
+      if (MIRROR_NONE) return;
+      if (!MIRROR_ALL && !isProblem[method]) return;
       const shown = flat.length > MAX_ENTRY_CHARS ? `${flat.slice(0, MAX_ENTRY_CHARS)}…` : flat;
       try {
         original(`\x1b[${colors[method]}m[${fileLevel[method]}]\x1b[0m [${getTimestamp()}] ${shown}`);
