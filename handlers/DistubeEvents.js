@@ -7,7 +7,7 @@ const UserHistory = require("./UserHistory");
 const MusicTracker = require("./MusicTracker");
 const PlaylistStore = require("./PlaylistStore");
 const AutoDjSource = require("./Autodjsource");
-const { fetchPlaylistFirstURL, validateSinglePlayable, probeSingleURL, isPlaylistURL } = require("./PlaylistFetcher");
+const { fetchPlaylistFirstURL, validateSinglePlayable, isPlaylistURL } = require("./PlaylistFetcher");
 const { isAgeGateError, friendlyPlaybackError } = require("./PlaybackError");
 const { startMarqueeActivity, stopMarqueeActivity } = require("./ActivityManager");
 
@@ -1094,7 +1094,7 @@ module.exports = async (client) => {
         const probe =
           cachedOk && Date.now() - cachedOk < NEXT_VALIDATE_TTL
             ? cleanUrl
-            : await probeSingleURL(cleanUrl, 12000);
+            : await fetchPlaylistFirstURL(cleanUrl, { timeoutMs: 12000 });
         const single = probe && isSafeSingle(probe) ? cleanYtUrl(probe) : null;
         if (single && excludedCanon.has(canonUrlKey(single))) {
           seenMark(seen, url);
@@ -1806,14 +1806,15 @@ if (song.user?.id) {
   // stream nuevo arranca con el reloj ya correcto).
   if (!client._clockDrift) client._clockDrift = new Map();
 
+  const newDriftState = () => ({ offset: 0, pos: null, rawStart: null, wallStart: 0, samples: [] });
   const driftEntry = (gid) => {
     let e = client._clockDrift.get(gid);
-    if (!e) { e = { offset: 0, pos: null, at: 0 }; client._clockDrift.set(gid, e); }
+    if (!e) { e = newDriftState(); client._clockDrift.set(gid, e); }
     return e;
   };
   const resetClockDrift = (gid) => {
     if (!gid) return;
-    client._clockDrift.set(gid, { offset: 0, pos: null, at: 0 });
+    client._clockDrift.set(gid, newDriftState());
   };
   const clockOffset = (gid) => Number(client._clockDrift.get(gid)?.offset) || 0;
 
@@ -1889,6 +1890,16 @@ if (song.user?.id) {
     if (client._clockDriftProbe) return;
     client._clockDriftProbe = true;
     const warnedAt = new Map();
+    // La sonda mide el adelanto ACUMULADO del reloj crudo contra el reloj de
+    // pared desde un ancla, y se queda con el MÍNIMO de las últimas muestras.
+    // Así el ruido de ráfagas (un micro-bloqueo atrasa el reloj y luego se
+    // recupera de golpe: adelanto transitorio de ±1-2s que se cancela solo) da
+    // ~0, y solo una ventaja PERSISTENTE se descuenta. (La versión anterior
+    // sumaba cada ráfaga positiva e ignoraba las negativas: el ruido se volvía
+    // una rampa de ~25s/min y las reanudaciones retrocedían la canción.)
+    const WINDOW = 20;      // muestras (1 por segundo)
+    const MIN_SAMPLES = 10; // no corregir antes de tener historia
+    const MAX_OFFSET = 3;   // tope de seguridad (s)
     const t = setInterval(() => {
       // OJO: `distube.queues` es un QueueManager (BaseManager), NO un Map: sus
       // colas viven en `.collection` (una Collection de discord.js).
@@ -1897,34 +1908,36 @@ if (song.user?.id) {
       try {
         for (const q of queues.values()) {
           const gid = q?.textChannel?.guildId || q?.guild?.id;
-          if (!gid || !q.playing || q.paused) continue;
+          if (!gid) continue;
+          const e = driftEntry(gid);
+          // Pausa / sin reproducir: la pared sigue corriendo y el reloj no.
+          // Re-anclar al volver para no medir la pausa como deriva negativa.
+          if (!q.playing || q.paused) { e.pos = null; e.rawStart = null; e.samples = []; continue; }
           // Reloj CRUDO: `q.voice.playbackTime` NO está parcheado (a diferencia
           // de `q.currentTime`, que ya devuelve el valor corregido).
           const raw = Number(q.voice?.playbackTime) || 0;
           const now = Date.now();
-          const e = driftEntry(gid);
-          if (e.pos == null) { e.pos = raw; e.at = now; continue; }
-          const delta = raw - e.pos;
-          const wall = (now - e.at) / 1000;
-          e.pos = raw; e.at = now;
-          if (wall <= 0) continue;
-          // Retroceso o salto grande = seek/cambio de tema, no deriva: re-ancla.
-          if (delta < -0.5 || delta > 15) continue;
-          const drift = delta - wall;
-          // Solo deriva POSITIVA apreciable (holgura para el ruido del timer).
-          // La negativa (reloj atrasado) no daña: reanudaría antes, no después.
-          if (drift > 0.15 && drift < 15) {
-            const dur = Number(q.songs?.[0]?.duration) || 0;
-            let off = e.offset + drift;
-            if (dur > 0 && off > dur) off = dur;
-            e.offset = off;
+          if (e.pos == null || e.rawStart == null) {
+            e.pos = raw; e.rawStart = raw; e.wallStart = now; e.samples = [];
+            continue;
           }
-          if (drift > 1.2 && now - (warnedAt.get(gid) || 0) > 60000) {
+          const delta = raw - e.pos;
+          e.pos = raw;
+          // Retroceso o salto grande = seek/cambio de stream: re-ancla.
+          if (delta < -0.5 || delta > 15) {
+            e.rawStart = raw; e.wallStart = now; e.samples = []; e.offset = 0;
+            continue;
+          }
+          const lead = (raw - e.rawStart) - (now - e.wallStart) / 1000;
+          e.samples.push(lead);
+          if (e.samples.length > WINDOW) e.samples.shift();
+          const persistent = e.samples.length >= MIN_SAMPLES ? Math.min(...e.samples) : 0;
+          e.offset = Math.max(0, Math.min(persistent, MAX_OFFSET));
+          if (e.offset > 0.5 && now - (warnedAt.get(gid) || 0) > 60000) {
             warnedAt.set(gid, now);
             client.logger.warn(
-              `[AudioDrift] G:${gid} el reloj va ${drift.toFixed(2)}s por DELANTE del audio real ` +
-              `en "${q.songs?.[0]?.name || "?"}" (pos=${raw.toFixed(1)}s, desfase acumulado=${e.offset.toFixed(2)}s). ` +
-              `Se corrige el reloj: los seeks caen donde se oye.`
+              `[AudioDrift] G:${gid} el reloj va ${e.offset.toFixed(2)}s por DELANTE de forma sostenida ` +
+              `en "${q.songs?.[0]?.name || "?"}" (pos=${raw.toFixed(1)}s). Se corrige el reloj.`
             );
           }
         }
