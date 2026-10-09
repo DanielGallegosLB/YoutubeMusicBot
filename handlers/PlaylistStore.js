@@ -1038,6 +1038,16 @@ module.exports = {
     const resolveNames = (ids) => Promise.all(ids.map((id) => _resolveName(client, guild, id)));
     likedNames.push(...await resolveNames(likedByIds));
     dislikedNames.push(...await resolveNames(dislikedByIds));
+    // Skips (señal de AutoDJ): cuántas veces los oyentes saltaron este tema.
+    // Se usa como PESO para bajar su probabilidad en el AutoDJ; aquí se muestra.
+    let skips = 0;
+    let skipsByUser = {};
+    try {
+      const skipsData = await this.getAutodjSkips(client, guildId);
+      const canon = this.canonUrlKey(trackUrl);
+      skipsByUser = skipsData?.[canon] || skipsData?.[trackUrl] || {};
+      for (const n of Object.values(skipsByUser)) skips += Number(n) || 0;
+    } catch (_) {}
     // El CONTEO queda acumulado (todos los 👍/👎); los nombres se deduplican
     // para no mostrar "dani_sas, dani_sas" cuando el mismo usuario likeó varias
     // reproducciones de la misma canción.
@@ -1045,6 +1055,8 @@ module.exports = {
       likes: likedByIds.length,
       dislikes: dislikedByIds.length,
       plays,
+      skips,
+      skipsByUser,
       likedBy: [...new Set(likedNames)],
       dislikedBy: [...new Set(dislikedNames)],
       owners: await resolveNames(ownerIds),

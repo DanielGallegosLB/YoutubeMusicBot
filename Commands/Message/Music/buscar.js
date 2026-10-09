@@ -7,6 +7,7 @@ const {
 } = require("discord.js");
 const MusicBot = require("../../../handlers/Client");
 const { Queue } = require("distube");
+const { searchYoutubeVideos } = require("../../../handlers/PlaylistFetcher");
 const { numberEmojis } = require("../../../settings/config");
 
 module.exports = {
@@ -31,67 +32,61 @@ module.exports = {
    * @param {Queue} queue
    */
   run: async (client, message, args, prefix, queue) => {
-    // Code
-    let query = args.join(" ");
+    const query = args.join(" ").trim();
     if (!query) {
       return client.embed(message, `Please Provide Song Name to Search`);
     }
 
-    let res = await client.searcher.search(query, {
-      limit: 10,
-      safeSearch: true,
-      type: "video",
-    });
-    let tracks = res
-      .map((song, index) => {
-        return `\`${index + 1}\`) [\`${client.getTitle(song)}\`](${
-          song.url
-        }) \`[${song.formattedDuration}]\``;
-      })
+    const results = await searchYoutubeVideos(query, 10);
+    if (!results.length) {
+      return client.embed(message, `No se encontraron resultados para \`${query}\``);
+    }
+
+    const tracks = results
+      .map(
+        (song, index) =>
+          `\`${index + 1}\`) [\`${client.getTitle(song)}\`](${song.url}) ` +
+          `\`[${song.duration ? new Date(song.duration * 1000).toISOString().substr(14, 5) : "0:00"}]\``
+      )
       .join("\n\n");
 
-    let embed = new EmbedBuilder()
+    const embed = new EmbedBuilder()
       .setColor(client.config.embed.color)
       .setTitle(`\`${query}\` Search Results`)
       .setDescription(tracks.substring(0, 3800))
-      //   .setThumbnail(client.user.displayAvatarURL({ dynamic: true }))
       .setFooter(client.getFooter(message.author));
 
-    let menuraw = new ActionRowBuilder().addComponents([
+    const menuraw = new ActionRowBuilder().addComponents([
       new StringSelectMenuBuilder()
-        .setCustomId("search")
+        .setCustomId("buscar_select")
         .setPlaceholder(`Click to See Best Songs`)
         .addOptions(
-          res.map((song, index) => {
-            return {
-              label: client.getTitle(song),
-              value: song.url,
-              description: `Click to Play Song`,
-              emoji: numberEmojis[index + 1],
-            };
-          })
+          results.map((song, index) => ({
+            label: client.getTitle(song),
+            value: String(index),
+            description: `${song.uploader || "YouTube"}`.slice(0, 100),
+            emoji: numberEmojis[index + 1],
+          }))
         ),
     ]);
 
+    const { channel } = message.member.voice;
     message
       .reply({ embeds: [embed], components: [menuraw] })
-      .then(async (msg) => {
-        let filter = (i) => i.user.id === message.author.id;
-        let collector = await msg.createMessageComponentCollector({
-          filter: filter,
+      .then((msg) => {
+        const collector = msg.createMessageComponentCollector({
+          filter: (i) => i.user.id === message.author.id,
+          time: 120000,
         });
-        const { channel } = message.member.voice;
         collector.on("collect", async (interaction) => {
-          if (interaction.isStringSelectMenu()) {
-            await interaction.deferUpdate().catch((e) => {});
-            if (interaction.customId === "search") {
-              let song = interaction.values[0];
-              await client.distube.play(channel, song, {
-                member: message.member,
-                textChannel: message.channel,
-              });
-            }
-          }
+          if (!interaction.isStringSelectMenu() || interaction.customId !== "buscar_select") return;
+          await interaction.deferUpdate().catch(() => {});
+          const picked = results[Number(interaction.values[0])];
+          if (!picked) return;
+          await client.distube.play(channel, picked.url, {
+            member: message.member,
+            textChannel: message.channel,
+          });
         });
       });
   },

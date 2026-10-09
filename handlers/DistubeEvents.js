@@ -7,6 +7,7 @@ const UserHistory = require("./UserHistory");
 const MusicTracker = require("./MusicTracker");
 const PlaylistStore = require("./PlaylistStore");
 const AutoDjSource = require("./Autodjsource");
+const AutoDjLogger = require("./AutoDjLogger");
 const { fetchPlaylistFirstURL, validateSinglePlayable, isPlaylistURL } = require("./PlaylistFetcher");
 const { isAgeGateError, friendlyPlaybackError } = require("./PlaybackError");
 const { startMarqueeActivity, stopMarqueeActivity } = require("./ActivityManager");
@@ -836,6 +837,34 @@ module.exports = async (client) => {
     const dbg = [];
     const dbgLine = (l) => dbg.push(l);
 
+    // ── Log de decisiones del AutoDJ (archivo separado: logs/autodj.log) ─────
+    // Registra por qué se eligió cada canción (origen, 👍/👎, plays totales y de
+    // la SESIÓN, skips, peso) más el tamaño de los pools, para poder auditar
+    // después que se usen TODAS las canciones de las listas y no solo un subconjunto.
+    const srcState = AutoDjSource.stateOf(client, guildId);
+    const sessionPlaysOf = (u) => {
+      try { return Number(client._sessionPlays?.get?.(guildId)?.get?.(canonUrlKey(u))) || 0; }
+      catch (_) { return 0; }
+    };
+    const poolSnapshot = {
+      fuenteConocida: srcState.urls.length,
+      fuenteUsadas: srcState.used.size,
+      favoritas: allPool.length,
+      historial: allHistory.length,
+      picks: picks.length,
+      rescateSinLike: Object.values(fallbackPools).flat().length,
+    };
+    const logPick = (entry) => {
+      AutoDjLogger.decision({
+        guildId,
+        oyentes: listeners,
+        patron: pattern.map((p) => (p.type === "random" ? "random" : `rec:${p.userId}`)),
+        fuenteMomentanea: AutoDjSource.candidates(client, guildId, { currentUrl: queue.songs[0]?.url }).length,
+        ...poolSnapshot,
+        ...entry,
+      }, entry.origen === "random" ? "pick.random" : "pick.rec");
+    };
+
     const pickForStep = (step, taken, inQueue) => {
       // 🎲 → al azar entre TODAS las canciones de la lista ingresada que aún no
       // sonaron ni se eligieron (aunque el loader no las haya encolado todavía).
@@ -851,6 +880,18 @@ module.exports = async (client) => {
           const url = pickLeastPlayed(cand, (u) => skipWeight(u, "*"), playsOfUrl);
           taken.add(url);
           dbgLine(`🎲 random: candidatas=${cand.length} -> ${url} (skips oyentes=${skipCountOf(url, "*")})`);
+          logPick({
+            origen: "random",
+            motivo: "lista-sin-usar",
+            url,
+            nombre: null,
+            yaEnCola: inQueue.has(url),
+            candidatasLista: cand.length,
+            skips: skipCountOf(url, "*"),
+            playsTotales: playsOfUrl(url),
+            playsSesion: sessionPlaysOf(url),
+            peso: Number(skipWeight(url, "*").toFixed(3)),
+          });
           return { url, name: null, existing: inQueue.has(url), fromList: true };
         }
         dbgLine(`🎲 random: candidatas=${cand.length} -> SIN (lista agotada, cae a favoritas)`);
@@ -916,8 +957,10 @@ module.exports = async (client) => {
       let usedFallback = false;
       // 1) Alguna favorita REAL sin ver → la normal, nunca se repite.
       const freshReal = freshOf(pool);
+      let motivo;
       if (freshReal.length) {
         found = pickLeastPlayed(freshReal, weightOf);
+        motivo = "favorita-nueva";
       } else if (ALLOW_UNLIKED) {
         // 2) El pool REAL ya se vio entero → Favoritas SIN 👍 (nunca con 👎).
         //    Con un pool real chico esto es lo que evita el reciclado constante:
@@ -926,10 +969,11 @@ module.exports = async (client) => {
         if (fbFresh.length) {
           found = pickLeastPlayed(fbFresh, weightOf);
           usedFallback = true;
+          motivo = "rescate-sin-like";
         }
       }
       // 3) No queda nada sin ver: se recyclinga (olvida la mitad más vieja).
-      if (!found) found = pickUnseen(pool, seen, excludedCanon, nearQueue, weightOf);
+      if (!found) { found = pickUnseen(pool, seen, excludedCanon, nearQueue, weightOf); motivo = "reciclada"; }
       if (found && !taken.has(found.url)) {
         taken.add(found.url);
         found.existing = inQueue.has(found.url);
@@ -940,6 +984,22 @@ module.exports = async (client) => {
           `${usedFallback ? " [sin 👍 → rescate]" : ""}` +
           `${found.existing ? " [ya en cola→se adelanta]" : " [nueva→play()]"}`
         );
+        logPick({
+          origen: "rec",
+          motivo,
+          paso: step.type === "rec" && step.userId && step.userId !== "*" ? `rec:${step.userId}` : "rec:*",
+          url: found.url,
+          nombre: found.name || found.title || null,
+          yaEnCola: !!found.existing,
+          fromList: !!found.fromList,
+          likes: (found.likedBy || []).length,
+          dislikes: (found.dislikedBy || []).length,
+          skips: skipCountOf(found.url, step.userId),
+          playsTotales: found.playCount ?? playsOfUrl(found.url),
+          playsSesion: sessionPlaysOf(found.url),
+          peso: Number(skipWeight(found.url, step.userId).toFixed(3)),
+          candidatas: pool.length,
+        });
         return found;
       }
       dbgLine(`🛸 rec: ${tag} -> SIN (descartadas por seen/excl/taken/near)`);
@@ -1005,6 +1065,19 @@ module.exports = async (client) => {
       ` huecos=${botSlots.join(",")} faltan=${missingSlots.join(",")} toAdd=${toAdd} oyentes=${listeners.join(",")}`
     );
     for (const l of dbg) client.logger.log(`[AutoDJ] G:${guildId}   ${l}`);
+
+    // Resumen del refill en el log dedicado: permite ver de un vistazo si TODAS
+    // las canciones de la fuente entran al sorteo o si el pool real es chico.
+    AutoDjLogger.decision({
+      guildId,
+      oyentes: listeners,
+      patron: pattern.map((p) => (p.type === "random" ? "random" : `rec:${p.userId}`)),
+      refillAgregadas: block.length,
+      huecosFaltantes: missingSlots.length,
+      toAdd,
+      ...poolSnapshot,
+      candidatasListaRestantes: AutoDjSource.candidates(client, guildId, { currentUrl: queue.songs[0]?.url }).length,
+    }, "refill.resumen");
 
     // Materializar como Song objects reales (DisTube necesita la resolución).
     // Para "rec de fulano" se usa el member de ESE usuario (la canción queda a
@@ -1234,6 +1307,15 @@ module.exports = async (client) => {
           console.error(`[PlaySong Stats Error]`, err);
         }
       }
+      // Reproducciones EN ESTA SESIÓN (en memoria): se usan en el log de
+      // decisiones del AutoDJ para distinguir temas ya repetidos en la sesión.
+      try {
+        if (!(client._sessionPlays instanceof Map)) client._sessionPlays = new Map();
+        let sp = client._sessionPlays.get(gid);
+        if (!sp) { sp = new Map(); client._sessionPlays.set(gid, sp); }
+        const ck = canonUrlKey(song.url);
+        sp.set(ck, (sp.get(ck) || 0) + 1);
+      } catch (_) {}
     }
 
     // Qué está SONANDO de verdad (lo emite DisTube en el voice). Se usa para
@@ -1257,6 +1339,8 @@ module.exports = async (client) => {
 patchClock(queue, gid);
     resetClockDrift(gid);
     applyNormalizeDefault(queue, gid);
+    // Pre-resolver las siguientes canciones: hace que el skip sea instantáneo.
+    client.warmStreamURLs?.(queue, 2);
     instrumentVoice(queue);
 
     // Diagnóstico de transición: cuánto silencio hubo entre el player idle
@@ -1417,9 +1501,13 @@ if (song.user?.id) {
         if (stats.likes > 0) statsParts.push(`👍${stats.likes}`);
         if (stats.dislikes > 0) statsParts.push(`👎${stats.dislikes}`);
         if (stats.plays > 0) statsParts.push(`🔥${stats.plays}`);
+        if (stats.skips > 0) {
+          const SW = Math.max(0, Number(process.env.AUTODJ_SKIP_WEIGHT) || 2);
+          statsParts.push(`⏭${stats.skips} (🎲~${Math.round(100 / (1 + SW * stats.skips))}%)`);
+        }
         const likeNames = (stats.likedBy || []).length ? `\n👍 Likes: ${stats.likedBy.join(", ")}` : "";
         const dislikeNames = (stats.dislikedBy || []).length ? `\n👎 Dislikes: ${stats.dislikedBy.join(", ")}` : "";
-        statsValue = stats.likes > 0 || stats.dislikes > 0 || stats.plays > 0
+        statsValue = stats.likes > 0 || stats.dislikes > 0 || stats.plays > 0 || stats.skips > 0
           ? `${statsParts.join(" · ")}${likeNames}${dislikeNames}`
           : "Sin stats aún";
       } catch (e) {}

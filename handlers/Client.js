@@ -97,6 +97,26 @@ class MusicBot extends Client {
     this.searcher = new YouTubePlugin();
     this.searcher.getStreamURL = (song) => ytDlpPlugin.getStreamURL(song);
     this.searcher.validate = () => false;
+
+    // ── Cache + warm-up de URL de stream ────────────────────────────────
+    // getStreamURL de YtDlpPlugin corre un yt-dlp COMPLETO (simulate + format)
+    // CADA vez que arranca una canción. Sin caché, cada skip = 5-15s de
+    // extracción. Aquí se memoriza por URL y además se pre-resuelven las
+    // siguientes canciones de la cola (warmStreamURLs) para que el skip sea
+    // instantáneo: Distube salta la extracción si song.stream.url ya está seteada.
+    const STREAM_URL_TTL_MS = Math.max(60000, Number(process.env.STREAM_URL_TTL_MS) || 30 * 60 * 1000);
+    this._streamURLCache = new Map();
+    const rawGetStreamURL = ytDlpPlugin.getStreamURL.bind(ytDlpPlugin);
+    const cacheGetStreamURL = async (song) => {
+      const key = song?.url;
+      if (!key) return rawGetStreamURL(song);
+      const hit = this._streamURLCache.get(key);
+      if (hit && Date.now() - hit.at < STREAM_URL_TTL_MS) return hit.url;
+      const url = await rawGetStreamURL(song);
+      if (url) this._streamURLCache.set(key, { url, at: Date.now() });
+      return url;
+    };
+    ytDlpPlugin.getStreamURL = cacheGetStreamURL;
     const originalSearchSong = this.searcher.searchSong.bind(this.searcher);
     this.searcher.searchSong = async (query, options = {}) => {
       for (let attempt = 1; attempt <= 2; attempt++) {
@@ -183,6 +203,34 @@ class MusicBot extends Client {
         })(),
       },
     });
+
+    // Pre-resuelve (en segundo plano) las URLs de stream de las PRÓXIMAS `count`
+    // canciones de la cola y las deja en song.stream.url. Distube entonces salta
+    // la extracción de yt-dlp al reproducirlas: el skip/transición es inmediato.
+    // 1 sola a la vez para no competir con la reproducción ni saturar la red.
+    this._warmInFlight = this._warmInFlight || new Set();
+    this.warmStreamURLs = (queue, count = 2) => {
+      try {
+        if (!queue?.songs?.length) return;
+        const targets = queue.songs
+          .slice(1, 1 + Math.max(0, count))
+          .filter((s) => s?.url && s.stream?.playFromSource && !s.stream.url);
+        if (!targets.length) return;
+        (async () => {
+          for (const song of targets) {
+            if (this._warmInFlight.has(song.url)) continue;
+            this._warmInFlight.add(song.url);
+            try {
+              const url = await cacheGetStreamURL(song);
+              if (url && song.stream && !song.stream.url) song.stream.url = url;
+            } catch (_) {
+            } finally {
+              this._warmInFlight.delete(song.url);
+            }
+          }
+        })();
+      } catch (_) {}
+    };
   }
 
   start(token) {

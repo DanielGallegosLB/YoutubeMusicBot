@@ -39,7 +39,7 @@ module.exports = {
    */
   run: async (client, interaction, args, queue) => {
     // Code
-    const filters = Object.keys(client.config.filters);
+    const filters = Object.keys(client.config.filters).filter((f) => f !== "normalize");
 
     const row = new ActionRowBuilder().addComponents([
       new StringSelectMenuBuilder()

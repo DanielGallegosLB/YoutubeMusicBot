@@ -563,9 +563,9 @@ module.exports = async (client) => {
   // Stats de canción con caché corta (20s) + tope: acelera el render del embed
   // fijo y evita martillar a Mongo en cada transición/refill.
   const _statsCache = new Map(); // `${guild}|${url}` -> { at, data }
-  const EMPTY_STATS = { likes: 0, dislikes: 0, plays: 0, likedBy: [], dislikedBy: [], owners: [] };
+  const EMPTY_STATS = { likes: 0, dislikes: 0, plays: 0, skips: 0, skipsByUser: {}, likedBy: [], dislikedBy: [], owners: [] };
   const hasRealStats = (d) =>
-    !!d && (d.likes > 0 || d.dislikes > 0 || d.plays > 0 ||
+    !!d && (d.likes > 0 || d.dislikes > 0 || d.plays > 0 || d.skips > 0 ||
       (d.likedBy || []).length > 0 || (d.dislikedBy || []).length > 0 || (d.owners || []).length > 0);
   const statsWithCache = async (client, guildId, url, allPlaylists, guild = null) => {
     const k = `${guildId}|${url}`;
@@ -803,6 +803,7 @@ module.exports = async (client) => {
       if (currentStats.likes > 0) currentStatsParts.push(`👍${currentStats.likes}`);
       if (currentStats.dislikes > 0) currentStatsParts.push(`👎${currentStats.dislikes}`);
       if (currentStats.plays > 0) currentStatsParts.push(`🔥${currentStats.plays}`);
+      if (currentStats.skips > 0) currentStatsParts.push(`⏭${currentStats.skips}`);
       const currentStatsText = currentStatsParts.length > 0 ? ` | ${currentStatsParts.join(" ")}` : "";
       // A quién le gusta la canción actual (tiene el video en sus Favoritas).
       const currentOwners = (currentStats.owners || []).slice(0, 3).join(", ");
@@ -861,6 +862,7 @@ module.exports = async (client) => {
         if (tStats.likes > 0) tStatsParts.push(`👍${tStats.likes}`);
         if (tStats.dislikes > 0) tStatsParts.push(`👎${tStats.dislikes}`);
         if (tStats.plays > 0) tStatsParts.push(`🔥${tStats.plays}`);
+        if (tStats.skips > 0) tStatsParts.push(`⏭${tStats.skips}`);
         const tStatsStr = tStatsParts.length > 0 ? ` | ${tStatsParts.join(" ")}` : "";
         // A la derecha (solo canciones tuyas): quién la pidió/le gusta. Las del
         // bot (autoDj) ya llevan su rótulo arriba, nada de listas largas.
@@ -1022,6 +1024,12 @@ module.exports = async (client) => {
         if (stats.likes > 0) parts.push(`👍${stats.likes}`);
         if (stats.dislikes > 0) parts.push(`👎${stats.dislikes}`);
         if (stats.plays > 0) parts.push(`🔥${stats.plays}`);
+        // Skips: señal que baja la probabilidad del AutoDJ para este tema.
+        if (stats.skips > 0) {
+          const SW = Math.max(0, Number(process.env.AUTODJ_SKIP_WEIGHT) || 2);
+          const pct = Math.round(100 / (1 + SW * stats.skips));
+          parts.push(`⏭${stats.skips} (🎲~${pct}%)`);
+        }
         const likes = (stats.likedBy || []).length ? `\n👍 Likes: ${stats.likedBy.join(", ")}` : "";
         const dislikes = (stats.dislikedBy || []).length ? `\n👎 Dislikes: ${stats.dislikedBy.join(", ")}` : "";
         return parts.length || likes || dislikes ? `${parts.join(" · ")}${likes}${dislikes}` : rawStats;
