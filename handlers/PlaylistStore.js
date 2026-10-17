@@ -919,6 +919,48 @@ module.exports = {
     };
   },
 
+  /**
+   * Vacía las "Canciones Favoritas" de UN usuario SIN tocar sus likes.
+   *
+   * Los 👍/👎/reproducciones viven TAMBIÉN en el store global por URL
+   * (`${guildId}.trackstats`), que es de donde el AutoDJ y las stats sacan la
+   * información. Antes de vaciar la lista se asegura de que cada canción tenga
+   * su entrada global (por si algún like quedó solo dentro de la favorita y no
+   * en el store global por una escritura en carrera): así borrar las favoritas
+   * NO borra ni un voto. Devuelve { removed, likes, dislikes, plays }.
+   */
+  async clearFavoritesPreservingLikes(client, guildId, userId) {
+    const key = `${guildId}.playlists.${userId}`;
+    const all = (await client.music.get(key).catch(() => null)) || {};
+    const { list, key: favKey } = this._favoritesListOf(all);
+    if (!list.length) return { removed: 0, likes: 0, dislikes: 0, plays: 0 };
+    const st = await this.guildStats(client, guildId);
+    let likes = 0, dislikes = 0, plays = 0;
+    for (const t of list) {
+      if (!t?.url) continue;
+      likes += (t.likedBy || []).length;
+      dislikes += (t.dislikedBy || []).length;
+      plays += (t.playCount || 0);
+      // Asegura la entrada global sin duplicar el volumen ya registrado: si la
+      // entrada global no existe (el like quedó solo en la favorita), se crea
+      // con lo que trae la favorita. Si ya existe, NO se duplica (trackLike ya
+      // acumuló cada voto por su lado).
+      if (!st[t.url]) {
+        st[t.url] = {
+          plays: Number(t.playCount) || 0,
+          likedBy: [...(t.likedBy || [])],
+          dislikedBy: [...(t.dislikedBy || [])],
+        };
+      }
+    }
+    await this.saveGuildStats(client, guildId, st);
+    if (favKey) {
+      all[favKey] = [];
+      await client.music.set(key, all);
+    }
+    return { removed: list.length, likes, dislikes, plays };
+  },
+
 
 
   /** Get the per-user AutoDJ exclusion lists for a guild: { [userId]: [urls...] } */
@@ -991,6 +1033,9 @@ module.exports = {
     // Quién tiene ESTA canción en sus "Canciones Favoritas" (o sea, a quién le
     // gusta). Es lo que se muestra en la cola para saber a quién le gusta cada tema.
     const ownerIds = [];
+    // ⭐ Favoritos: usuarios que GUARDARON la canción con el botón ⭐ (manual:true).
+    // Se cuenta aparte de los 👍: un like NO convierte la canción en favorita.
+    const favoriteIds = [];
     const pushUnique = (arr, id) => { if (!arr.includes(id)) arr.push(id); };
     for (const userId of Object.keys(allPlaylists)) {
       const userPlaylists = allPlaylists[userId];
@@ -1000,6 +1045,7 @@ module.exports = {
         // sus likes/dislikes/plays como UNA sola canción.
         if (this.canonUrlKey(t.url) === this.canonUrlKey(trackUrl)) {
           plays += (t.playCount || 0);
+          if (t.manual === true) pushUnique(favoriteIds, userId);
           // Solo una favorita REAL (con 👍 o guardada a mano ⭐) cuenta como
           // "dueña" del tema. Antes aparecía como 👤 cualquiera que tuviera la
           // canción en Favoritas, incluso la basura que una versión vieja del
@@ -1057,6 +1103,8 @@ module.exports = {
       plays,
       skips,
       skipsByUser,
+      favorites: favoriteIds.length,
+      favoriteBy: await resolveNames(favoriteIds),
       likedBy: [...new Set(likedNames)],
       dislikedBy: [...new Set(dislikedNames)],
       owners: await resolveNames(ownerIds),
@@ -1143,6 +1191,7 @@ const _LOCKED_METHODS = new Set([
   "listGuildFavorites",
   "pruneUnlikedFavorites",
   "pruneUnlikedFavoritesForUser",
+  "clearFavoritesPreservingLikes",
   "countPlay",
   // ── Todo lo que escribe `${guildId}.autodj` ────────────────────────────────
   // Cada uno hace get→mutar→set del documento ENTERO del guild. Sin el lock, un

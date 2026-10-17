@@ -700,9 +700,19 @@ module.exports = async (client) => {
     } catch (e) {}
 
     // Patrón de intercalado (dashboard / comando): [rec:user, random, ...].
-    const pattern =
+    const rawPattern =
       (await PlaylistStore.getAutoDjPattern(client, guildId).catch(() => null)) ||
       PlaylistStore.DEFAULT_AUTODJ_PATTERN;
+    // REACTIVO A LOS PRESENTES: los pasos "rec de fulano" SOLO cuentan si fulano
+    // sigue en el canal. Si se va, su recomendación desaparece del ciclo (y
+    // vuelve sola si regresa). Los pasos "rec:*" (cualquiera) y 🎲 siempre valen.
+    // Si al filtrar no queda ningún paso (todos se fueron), se usa 🎲 para no
+    // dejar el AutoDJ sin nada que intercalar.
+    const listenerSet = new Set(listeners);
+    const filteredPattern = rawPattern.filter(
+      (p) => p.type === "random" || !p.userId || p.userId === "*" || listenerSet.has(p.userId)
+    );
+    const pattern = filteredPattern.length ? filteredPattern : [{ type: "random" }];
 
     // Exclusiones: lo que cada oyente pidió NO volver a escuchar con AutoDJ
     // (botón "🚫 No AutoDJ" / 2+ skips).
@@ -1007,17 +1017,31 @@ module.exports = async (client) => {
     };
 
     // ---- Sumar siguiendo el patrón, intercalado EN MEDIO de la lista ----
-    // Las canciones del bot viven en HUECOS fijos de la cola (índices 2, 5, 8…,
-    // donde 1 = el primer tema que suena al rato), así entre cada dos del bot
-    // quedan 1-2 temas de TU lista y el bot jamás se "roba" el turno ni se
-    // amontona. Se mantienen LOOKAHEAD_CYCLES ciclos del patrón por delante y
-    // SOLO se repone el hueco que queda vacío. Si la cola es corta, rellena con
-    // al menos 1 para no quedarse en silencio.
+    // Las canciones del bot viven en HUECOS fijos de la cola. El primer ciclo del
+    // patrón va consecutivo al frente (1,2,3,4…) para que la mezcla se vea desde
+    // la primera página; el resto se intercala con un tema tuyo entre cada dos.
+    // Se mantienen LOOKAHEAD_CYCLES ciclos del patrón por delante y SOLO se
+    // repone el hueco que queda vacío. Si la cola es corta, rellena con al menos
+    // 1 para no quedarse en silencio.
     const LOOKAHEAD_CYCLES = Math.max(1, Number(process.env.AUTODJ_LOOKAHEAD_CYCLES) || 2);
     const targetBot = pattern.length * LOOKAHEAD_CYCLES;
     const upNext = queue.songs.length - 1;
     // Huecos objetivo (índices sobre toda la cola, 1 = el primero que sigue).
-    const botSlots = Array.from({ length: targetBot }, (_, k) => 2 + k * 3);
+    //
+    // MEZCLA DESDE EL FRENTE: el PRIMER ciclo del patrón va consecutivo al
+    // principio (posiciones 1,2,3,4,… = rec A, 🎲, rec B, 🎲, …), así los
+    // primeros temas ya son las recomendaciones de los presentes alternadas con
+    // aleatorias de la lista. Después sigue el intercalado normal (un tema tuyo
+    // entre cada dos del bot). Con AUTODJ_FRONT_MIX=0 se vuelve al comportamiento
+    // viejo (2,5,8…: el bot recién a partir de la 2ª y todo al final).
+    const frontMix = process.env.AUTODJ_FRONT_MIX !== "0";
+    const SLOT_GAP = Math.max(1, Number(process.env.AUTODJ_SLOT_GAP) || (frontMix ? 2 : 3));
+    const frontCycle = frontMix ? Math.min(pattern.length, targetBot) : 0;
+    const botSlots = [];
+    for (let k = 0; k < targetBot; k++) {
+      if (k < frontCycle) botSlots.push(1 + k); // 1,2,…,pattern.length
+      else botSlots.push(frontCycle + (k - frontCycle + 1) * SLOT_GAP); // luego con separación
+    }
     const occupiedBot = new Set();
     for (let i = 1; i < queue.songs.length; i++) {
       const s = queue.songs[i];
@@ -1071,7 +1095,8 @@ module.exports = async (client) => {
     AutoDjLogger.decision({
       guildId,
       oyentes: listeners,
-      patron: pattern.map((p) => (p.type === "random" ? "random" : `rec:${p.userId}`)),
+      patronEfectivo: pattern.map((p) => (p.type === "random" ? "random" : `rec:${p.userId}`)),
+      patronConfigurado: rawPattern.map((p) => (p.type === "random" ? "random" : `rec:${p.userId}`)),
       refillAgregadas: block.length,
       huecosFaltantes: missingSlots.length,
       toAdd,
@@ -1496,19 +1521,21 @@ if (song.user?.id) {
     if (song.url) {
       try {
         const stats = await PlaylistStore.getGlobalTrackStats(client, gid, song.url)
-          .catch(() => ({ likes: 0, dislikes: 0, plays: 0, likedBy: [], dislikedBy: [] }));
+          .catch(() => ({ likes: 0, dislikes: 0, plays: 0, skips: 0, favorites: 0, favoriteBy: [], likedBy: [], dislikedBy: [] }));
         const statsParts = [];
         if (stats.likes > 0) statsParts.push(`👍${stats.likes}`);
         if (stats.dislikes > 0) statsParts.push(`👎${stats.dislikes}`);
         if (stats.plays > 0) statsParts.push(`🔥${stats.plays}`);
+        if (stats.favorites > 0) statsParts.push(`⭐${stats.favorites}`);
         if (stats.skips > 0) {
           const SW = Math.max(0, Number(process.env.AUTODJ_SKIP_WEIGHT) || 2);
           statsParts.push(`⏭${stats.skips} (🎲~${Math.round(100 / (1 + SW * stats.skips))}%)`);
         }
         const likeNames = (stats.likedBy || []).length ? `\n👍 Likes: ${stats.likedBy.join(", ")}` : "";
         const dislikeNames = (stats.dislikedBy || []).length ? `\n👎 Dislikes: ${stats.dislikedBy.join(", ")}` : "";
-        statsValue = stats.likes > 0 || stats.dislikes > 0 || stats.plays > 0 || stats.skips > 0
-          ? `${statsParts.join(" · ")}${likeNames}${dislikeNames}`
+        const favNames = (stats.favoriteBy || []).length ? `\n⭐ Favoritos: ${stats.favoriteBy.join(", ")}` : "";
+        statsValue = stats.likes > 0 || stats.dislikes > 0 || stats.plays > 0 || stats.skips > 0 || stats.favorites > 0
+          ? `${statsParts.join(" · ")}${likeNames}${dislikeNames}${favNames}`
           : "Sin stats aún";
       } catch (e) {}
     }
@@ -2092,6 +2119,18 @@ if (song.user?.id) {
               ` :: missed=${newState.missedFrames ?? oldState.missedFrames ?? 0}` +
               (status === "idle" && newState.reason ? ` :: reason=${newState.reason}` : "")
             );
+            // Un "idle" momentáneo (hipo de red al recargar el resource) puede
+            // volver a "playing" SIN que empiece otra canción (no hay playSong
+            // que limpie nada). Si el watchdog se dejara armado, dispararía a los
+            // 45s y REINICIARÍA una canción que venía sonando bien. Al volver a
+            // reproducir se cancela la vigilancia y se descarta el "idle".
+            if (status === "playing") {
+              const stallT = client._voiceStallTimers?.get(guildId);
+              if (stallT) { clearTimeout(stallT); client._voiceStallTimers.delete(guildId); }
+              const unstickT = client._voiceUnstickTimers?.get(guildId);
+              if (unstickT) { clearTimeout(unstickT); client._voiceUnstickTimers.delete(guildId); }
+              client._voiceIdleAt?.delete(guildId);
+            }
             // ¿La canción TERMINÓ o se CORTÓ antes de tiempo? Si el audio se
             // emite menos de lo que dura la canción, el oyente pierde el final y
             // para él "la canción se adelantó". Se mide con el reloj del propio
@@ -2352,6 +2391,15 @@ if (song.user?.id) {
                 const idleSince = client._voiceIdleAt?.get(guildId);
                 if (!idleSince) return;
                 client._voiceStallTimers.delete(guildId);
+                // Seguro extra: si al vencer el plazo el player YA está
+                // reproduciendo (blip idle->playing cuyo evento se perdió, o
+                // simplemente ya no está idle), NO hay PEG: reiniciar acá
+                // cortaría una canción que suena bien. Se descarta el marcador.
+                const playerStatus = lq.voice?.audioPlayer?.state?.status;
+                if (playerStatus === "playing") {
+                  client._voiceIdleAt?.delete(guildId);
+                  return;
+                }
                 const idleFor = Date.now() - idleSince;
                 const { cur, next, dur, nowMs, ended } = stallStatus(lq);
                 if (!cur?.url) return;
