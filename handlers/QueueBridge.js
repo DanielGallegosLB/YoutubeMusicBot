@@ -704,6 +704,54 @@ async function processCommands(client) {
       continue;
     }
 
+    if (["remove_favorite_for_user", "unlike_for_user", "toggle_manual_favorite"].includes(cmd.action)) {
+      const gid = String(cmd.guildId || "");
+      const uid = String(cmd.userId || "");
+      const url = String(cmd.url || "");
+      if (gid && uid && /^https?:\/\//.test(url)) {
+        try {
+          let ok = false;
+          let detail = {};
+          if (cmd.action === "remove_favorite_for_user") {
+            const res = await withDbBounded(PlaylistStore.removeFavoriteForUser(client, gid, uid, url), 12000);
+            ok = !!res;
+            detail = { removed: !!res, name: res?.name || null };
+          } else if (cmd.action === "unlike_for_user") {
+            const res = await withDbBounded(PlaylistStore.unlikeForUser(client, gid, uid, url), 12000);
+            ok = !!res;
+            detail = { likeCount: res?.likeCount || 0, dislikeCount: res?.dislikeCount || 0 };
+          } else {
+            const song = (cmd.song && typeof cmd.song === "object") ? cmd.song : {};
+            const res = await withDbBounded(PlaylistStore.toggleManualFavoriteForUser(client, gid, uid, {
+              url,
+              name: song.name || song.title || null,
+              thumbnail: song.thumbnail || null,
+              uploader: song.uploader || null,
+              duration: Number(song.duration) || 0,
+            }), 12000);
+            ok = !!res;
+            detail = { manual: !!res?.manual };
+          }
+          _lastFavSig = "";
+          _lastSnapshotSig = "";
+          client.invalidateQueueCaches?.(gid);
+          await writeFavoritesSnapshot(client).catch(() => {});
+          queueWrite(
+            LIKE_RESULT_FILE,
+            JSON.stringify({ action: cmd.action, requestedAt: cmd.t || null, doneAt: new Date().toISOString(), guildId: gid, userId: uid, url, ok, ...detail })
+          );
+          console.log(`[Bridge] ${cmd.action} G:${gid} U:${uid} ok=${ok}`);
+        } catch (e) {
+          console.warn(`[Bridge] Error en ${cmd.action}:`, e?.message || e);
+          queueWrite(
+            LIKE_RESULT_FILE,
+            JSON.stringify({ action: cmd.action, requestedAt: cmd.t || null, doneAt: new Date().toISOString(), guildId: gid, userId: uid, url, ok: false, error: e?.message || String(e) })
+          );
+        }
+      }
+      continue;
+    }
+
     // ── Gestión de canciones pedidas por usuario (dashboard) ──────────────
     // { action: "add_user_request", guildId, userId, song: {url,name,artist,duration,thumbnail,source}, t }
     // { action: "remove_user_request", guildId, userId, url, t }

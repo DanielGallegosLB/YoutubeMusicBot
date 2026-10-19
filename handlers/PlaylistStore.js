@@ -453,6 +453,92 @@ module.exports = {
     };
   },
 
+  /** Quita la cancion (por URL canonica) de las "Canciones Favoritas" de UN
+   *  usuario. Borra el track entero de su lista de favoritas (y por tanto su
+   *  likedBy/dislikedBy de la favorita). Devuelve { removed: true, name } o null. */
+  async removeFavoriteForUser(client, guildId, userId, trackUrl) {
+    if (!trackUrl) return null;
+    const key = `${guildId}.playlists.${userId}`;
+    const all = await this.getAll(client, guildId, userId);
+    const list = all["Canciones Favoritas"] || [];
+    const k = this.canonUrlKey(trackUrl);
+    const before = list.length;
+    const removedTrack = list.find((t) => t && t.url && this.canonUrlKey(t.url) === k);
+    const newList = list.filter((t) => !(t && t.url && this.canonUrlKey(t.url) === k));
+    if (newList.length === before) return null;
+    all["Canciones Favoritas"] = newList;
+    await client.music.set(key, all);
+    return { removed: true, name: removedTrack?.name || null };
+  },
+
+  /** Quita el 👍 de UN usuario a una cancion: saca al usuario de likedBy de la
+   *  favorita y del store global. Devuelve { likeCount, dislikeCount, score }. */
+  async unlikeForUser(client, guildId, userId, trackUrl) {
+    if (!trackUrl) return null;
+    const key = `${guildId}.playlists.${userId}`;
+    const all = await this.getAll(client, guildId, userId);
+    const list = all["Canciones Favoritas"] || [];
+    const track = this.findTrackByCanon(list, trackUrl);
+    let likeCount = 0;
+    let dislikeCount = 0;
+    if (track) {
+      if (!track.likedBy) track.likedBy = [];
+      let li = track.likedBy.indexOf(userId);
+      while (li !== -1) { track.likedBy.splice(li, 1); li = track.likedBy.indexOf(userId); }
+      dislikeCount = (track.dislikedBy || []).length;
+      likeCount = track.likedBy.length;
+      all["Canciones Favoritas"] = list;
+      await client.music.set(key, all);
+    }
+    try {
+      const st = await this.guildStats(client, guildId);
+      const e = st[trackUrl];
+      if (e && Array.isArray(e.likedBy)) {
+        let i = e.likedBy.indexOf(userId);
+        while (i !== -1) { e.likedBy.splice(i, 1); i = e.likedBy.indexOf(userId); }
+        st[trackUrl] = e;
+        await this.saveGuildStats(client, guildId, st);
+      }
+    } catch (_) {}
+    return { likeCount, dislikeCount, score: likeCount - dislikeCount };
+  },
+
+  /** Marca/desmarca una cancion como FAVORITA manual (⭐) de un usuario: si no
+   *  esta la agrega con manual:true; si ya esta manual la deja como autoguardada
+   *  (manual:false). Devuelve { manual: boolean } o null. */
+  async toggleManualFavoriteForUser(client, guildId, userId, track) {
+    if (!track || !track.url) return null;
+    const key = `${guildId}.playlists.${userId}`;
+    const all = await this.getAll(client, guildId, userId);
+    const list = all["Canciones Favoritas"] || [];
+    let t = this.findTrackByCanon(list, track.url);
+    if (t) {
+      t.manual = !t.manual;
+      if (t.manual) t.manualAt = Date.now(); else delete t.manualAt;
+      all["Canciones Favoritas"] = list;
+      await client.music.set(key, all);
+      return { manual: !!t.manual };
+    }
+    const entry = {
+      url: String(track.url),
+      name: track.name || track.title || track.url,
+      thumbnail: track.thumbnail || null,
+      uploader: track.uploader || null,
+      duration: Number(track.duration) || 0,
+      formattedDuration: track.formattedDuration || null,
+      playCount: 0,
+      likedBy: [],
+      dislikedBy: [],
+      manual: true,
+      manualAt: Date.now(),
+      savedAt: Date.now(),
+    };
+    list.push(entry);
+    all["Canciones Favoritas"] = list;
+    await client.music.set(key, all);
+    return { manual: true };
+  },
+
   /** Get favorites sorted by score (likes - dislikes) + playCount */
   async getSortedFavorites(client, guildId, userId) {
     const all = await this.getAll(client, guildId, userId);
@@ -1183,6 +1269,9 @@ const _LOCKED_METHODS = new Set([
   "likeTrackByUrl",
   "likeForUser",
   "dislikeTrackByUrl",
+  "removeFavoriteForUser",
+  "unlikeForUser",
+  "toggleManualFavoriteForUser",
   "sortFavorites",
   "rename",
   "delete",
