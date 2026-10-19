@@ -76,7 +76,7 @@ class MusicBot extends Client {
           ],
           jsRuntimes: "node",
           noCheckCertificates: true,
-          format: "bestaudio/best",
+          format: "bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio/best",
           extractorArgs: "youtube:player_client=web_embedded,android",
         };
         try {

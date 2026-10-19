@@ -18,6 +18,9 @@ const CHANNELS_FILE = path.join(DASH_DIR, "musicbot_channels.json");
 const CLEAR_RESULT_FILE = path.join(DASH_DIR, "musicbot_favclear_result.json");
 const AUTODJ_RESULT_FILE = path.join(DASH_DIR, "musicbot_autodj_result.json");
 const LIKE_RESULT_FILE = path.join(DASH_DIR, "musicbot_like_result.json");
+const UserRequests = require("./UserRequests");
+const REQUESTS_FILE = path.join(DASH_DIR, "musicbot_userrequests.json");
+const REQUESTS_RESULT_FILE = path.join(DASH_DIR, "musicbot_requests_result.json");
 
 const SNAPSHOT_INTERVAL = 5000; // ms
 const CMDS_INTERVAL = 2000; // ms
@@ -60,7 +63,54 @@ function songView(song, guild) {
 async function queueView(client, guild) {
   try {
     const queue = client.distube.getQueue(guild.id);
-    if (!queue || !queue.songs || !queue.songs.length) return null;
+    if (!queue || !queue.songs || !queue.songs.length) {
+      // Incluso sin cola activa, devolvemos un "stub" vacío para que el
+      // dashboard muestre las pestañas (pedidas/favoritas/autodj) de esta guild.
+      const vc =
+        (guild.members && guild.members.me && guild.members.me.voice && guild.members.me.voice.channel) ||
+        null;
+      let autoDjPattern = null;
+      let autoDjUsers = [];
+      let favStats = null;
+      try {
+        autoDjPattern =
+          (await withDbBounded(PlaylistStore.getAutoDjPattern(client, guild.id), 1800).catch(() => null)) ||
+          PlaylistStore.DEFAULT_AUTODJ_PATTERN.map((s) => ({ ...s }));
+        if (vc) {
+          const listeners = [...vc.members.values()].filter((m) => m && !m.user?.bot);
+          const ids = listeners.map((m) => m.id);
+          const pools = ids.length
+            ? (await withDbBounded(PlaylistStore.getAutoDjPoolsByUser(client, guild.id, ids), 2200).catch(() => ({}))) || {}
+            : {};
+          autoDjUsers = listeners.map((m) => ({
+            id: m.id,
+            tag: m.user?.tag || m.user?.username || m.id,
+            name: m.user?.globalName || m.user?.username || m.user?.tag || m.id,
+            avatar: m.user?.displayAvatarURL?.() || null,
+            liked: (pools[m.id] || []).length,
+          }));
+        }
+        favStats = await withDbBounded(PlaylistStore.countUnlikedFavorites(client, guild.id), 1800).catch(() => null);
+      } catch {}
+      return {
+        guildId: guild.id,
+        guildName: guild.name || guild.id,
+        voiceChannel: vc ? vc.name : null,
+        autoDj: !!client.autoDj?.get(guild.id),
+        autoDjPattern,
+        autoDjUsers,
+        favStats,
+        repeatMode: 0,
+        paused: false,
+        volume: null,
+        currentTime: 0,
+        duration: 0,
+        actualPlaying: null,
+        nowPlaying: null,
+        mismatch: undefined,
+        songs: [],
+      };
+    }
     const vc =
       (queue.voice && queue.voice.connection && queue.voice.connection.channel) ||
       (guild.members && guild.members.me && guild.members.me.voice && guild.members.me.voice.channel) ||
@@ -164,8 +214,10 @@ function nowSignature(client) {
     const guilds = [];
     for (const guild of client.guilds.cache.values()) {
       const q = client.distube.getQueue(guild.id);
-      if (!q || !q.songs || !q.songs.length) continue;
-      guilds.push(guild.id + ":" + q.songs.map((s) => s.url || s.name).join("|"));
+      const vc = guild.members?.me?.voice?.channel || null;
+      const ad = !!client.autoDj?.get(guild.id);
+      const base = q && q.songs && q.songs.length ? q.songs.map((s) => s.url || s.name).join("|") : "";
+      guilds.push(guild.id + ":" + base + "|" + (vc ? "v" : "nv") + "|" + (ad ? "a" : "na") + "|" + (q?.repeatMode || 0));
     }
     sig = guilds.join(";") + "|" + Math.floor(Date.now() / 30000);
   } catch {
@@ -184,6 +236,29 @@ async function writeSnapshot(client) {
     for (const guild of client.guilds.cache.values()) {
       const view = await queueView(client, guild);
       if (view) guilds.push(view);
+      else {
+        // Forzamos stub para que el dashboard vea esta guild aun sin cola
+        try {
+          const vc = guild.members?.me?.voice?.channel || null;
+          guilds.push({
+            guildId: guild.id,
+            guildName: guild.name || guild.id,
+            voiceChannel: vc ? vc.name : null,
+            autoDj: !!client.autoDj?.get(guild.id),
+            autoDjPattern: null,
+            autoDjUsers: [],
+            favStats: null,
+            repeatMode: 0,
+            paused: false,
+            volume: null,
+            currentTime: 0,
+            duration: 0,
+            actualPlaying: null,
+            nowPlaying: null,
+            songs: [],
+          });
+        } catch {}
+      }
     }
     queueWrite(QUEUE_FILE, JSON.stringify({ updatedAt: new Date().toISOString(), guilds }));
   } catch {}
@@ -245,6 +320,51 @@ async function writeFavoritesSnapshot(client) {
     if (sig === _lastFavSig) return;
     _lastFavSig = sig;
     queueWrite(FAVORITES_FILE, JSON.stringify(payload));
+  } catch {}
+}
+
+// ── Snapshot de canciones PEDIDAS por cada usuario (+ artistas detectados) ──
+// El dashboard lo usa para ver/agregar/quitar/actualizar las canciones que
+// pidió cada usuario y los artistas que el bot detectó de esa persona.
+let _lastReqSig = "";
+async function writeUserRequestsSnapshot(client) {
+  try {
+    if (!client.music) return;
+    const guilds = [];
+    for (const guild of client.guilds.cache.values()) {
+      const requests = await withDbBounded(UserRequests.listGuildUserRequests(client, guild.id), 4500).catch(() => ({})) || {};
+      const artists = await withDbBounded(UserRequests.listGuildUserArtists(client, guild.id), 4500).catch(() => ({})) || {};
+      const userIds = [...new Set([...Object.keys(requests), ...Object.keys(artists)])];
+      if (!client._favUserName) client._favUserName = new Map();
+      if (!client._favUserFetching) client._favUserFetching = new Set();
+      const users = {};
+      for (const uid of userIds) {
+        let u = client.users?.cache?.get(uid) || guild.members?.cache?.get(uid)?.user || null;
+        if (!u && client._favUserName.has(uid)) {
+          u = { username: client._favUserName.get(uid), tag: client._favUserName.get(uid) };
+        } else if (!u && !client._favUserFetching.has(uid)) {
+          client._favUserFetching.add(uid);
+          client.users.fetch(uid).then((fu) => {
+            client._favUserName.set(uid, fu.username || fu.tag || uid);
+            client._favUserFetching.delete(uid);
+          }).catch(() => client._favUserFetching.delete(uid));
+        }
+        users[uid] = {
+          id: uid,
+          tag: u ? (u.tag || u.username || uid) : uid,
+          name: u ? (u.globalName || u.username || u.tag || uid) : uid,
+          avatar: u?.displayAvatarURL?.() || null,
+          requests: requests[uid] || [],
+          artists: artists[uid] || [],
+        };
+      }
+      guilds.push({ guildId: guild.id, guildName: guild.name || guild.id, users });
+    }
+    const payload = { updatedAt: new Date().toISOString(), guilds };
+    const sig = JSON.stringify(payload);
+    if (sig === _lastReqSig) return;
+    _lastReqSig = sig;
+    queueWrite(REQUESTS_FILE, JSON.stringify(payload));
   } catch {}
 }
 
@@ -584,6 +704,67 @@ async function processCommands(client) {
       continue;
     }
 
+    // ── Gestión de canciones pedidas por usuario (dashboard) ──────────────
+    // { action: "add_user_request", guildId, userId, song: {url,name,artist,duration,thumbnail,source}, t }
+    // { action: "remove_user_request", guildId, userId, url, t }
+    // { action: "update_user_request", guildId, userId, url, fields: {name,artist,...}, t }
+    // { action: "clear_user_requests", guildId, userId, t }
+    if (["add_user_request", "remove_user_request", "update_user_request", "clear_user_requests"].includes(cmd.action)) {
+      try {
+        const gid = String(cmd.guildId || "");
+        const uid = String(cmd.userId || "");
+        let ok = false;
+        let detail = {};
+        if (cmd.action === "add_user_request") {
+          const song = (cmd.song && typeof cmd.song === "object") ? cmd.song : {};
+          const url = String(song.url || cmd.url || "");
+          if (/^https?:\/\//.test(url)) {
+            const res = await withDbBounded(UserRequests.addManualRequest(client, gid, uid, {
+              url,
+              name: song.name || song.title || null,
+              artist: song.artist || null,
+              duration: Number(song.duration) || 0,
+              thumbnail: song.thumbnail || null,
+              source: song.source || null,
+            }), 12000);
+            ok = !!res;
+            detail = { url, name: res?.name || null };
+          }
+        } else if (cmd.action === "remove_user_request") {
+          ok = !!(await withDbBounded(UserRequests.removeManualRequest(client, gid, uid, String(cmd.url || "")), 12000));
+        } else if (cmd.action === "update_user_request") {
+          const res = await withDbBounded(UserRequests.updateManualRequest(client, gid, uid, String(cmd.url || ""), cmd.fields || {}), 12000);
+          ok = !!res;
+        } else if (cmd.action === "clear_user_requests") {
+          const n = await withDbBounded(UserRequests.clearUserRequests(client, gid, uid), 12000);
+          ok = n >= 0;
+          detail = { removed: n || 0 };
+        }
+        _lastReqSig = ""; // fuerza refresco del snapshot
+        await writeUserRequestsSnapshot(client).catch(() => {});
+        queueWrite(
+          REQUESTS_RESULT_FILE,
+          JSON.stringify({
+            action: cmd.action,
+            requestedAt: cmd.t || null,
+            doneAt: new Date().toISOString(),
+            guildId: gid,
+            userId: uid,
+            ok,
+            ...detail,
+          })
+        );
+        console.log(`[Bridge] user_request ${cmd.action} G:${gid} U:${uid} ok=${ok}`);
+      } catch (e) {
+        console.warn("[Bridge] Error en user_request:", e?.message || e);
+        queueWrite(
+          REQUESTS_RESULT_FILE,
+          JSON.stringify({ action: cmd.action, requestedAt: cmd.t || null, guildId: cmd.guildId, userId: cmd.userId, ok: false, error: e?.message || String(e) })
+        );
+      }
+      continue;
+    }
+
     if (cmd.action !== "move") continue;
     const from = cmd.from;
     const to = cmd.to;
@@ -623,13 +804,47 @@ module.exports = (client) => {
     writeChannelsSnapshot(client).catch((e) => console.warn("[Bridge] channels:", e?.message || e));
   }, 10000);
   setInterval(() => {
+    writeUserRequestsSnapshot(client).catch((e) => console.warn("[Bridge] userrequests:", e?.message || e));
+  }, 15000);
+  setInterval(() => {
     processCommands(client).catch((e) => console.warn("[Bridge] processCommands:", e?.message || e));
   }, CMDS_INTERVAL);
   setTimeout(() => {
     writeSnapshot(client).catch(() => {});
     writeFavoritesSnapshot(client).catch(() => {});
+    writeUserRequestsSnapshot(client).catch(() => {});
   }, 1500); // primer snapshot apenas inicie
   // El snapshot de canales espera un poco más: getChannelPolicy lee la DB de
   // música y los canales no cambian seguido.
   setTimeout(() => writeChannelsSnapshot(client).catch(() => {}), 4000);
+
+  // ── Primer arranque: si una guild nunca registró canciones pedidas, las
+  // carga desde las Favoritas de cada usuario (una sola vez, marcado con
+  // `${guildId}.seededUserRequests`) para que el dashboard muestre datos y el
+  // AutoDJ/artistas tengan de dónde tirar. Idempotente y reversible.
+  setTimeout(async () => {
+    try {
+      if (!client.music || !client.guilds) return;
+      for (const guild of client.guilds.cache.values()) {
+        try {
+          const done = await withDbBounded(client.music.get(`${guild.id}.seededUserRequests`), 4000).catch(() => null);
+          if (done) continue;
+          const existing = await withDbBounded(UserRequests.listGuildUserRequests(client, guild.id), 4000).catch(() => ({})) || {};
+          if (Object.keys(existing).length) {
+            await client.music.set(`${guild.id}.seededUserRequests`, true).catch(() => {});
+            continue;
+          }
+          const res = await UserRequests.seedFromFavorites(client, guild.id, PlaylistStore);
+          await client.music.set(`${guild.id}.seededUserRequests`, true).catch(() => {});
+          console.log(`[Bridge] pedidas sembradas desde favoritas G:${guild.name} users=${res.users} req=${res.requests}`);
+        } catch (e) {
+          console.warn("[Bridge] seed pedidas guild:", e?.message || e);
+        }
+      }
+      _lastReqSig = "";
+      await writeUserRequestsSnapshot(client).catch(() => {});
+    } catch (e) {
+      console.warn("[Bridge] seed pedidas:", e?.message || e);
+    }
+  }, 20000); // deja que la DB y el cache de guilds estén listos
 };

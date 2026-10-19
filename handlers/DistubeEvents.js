@@ -5,6 +5,7 @@ const AutoresumeHandler = require("./AutoresumeHandler");
 const InitAutoResume = require("./InitAutoresume");
 const UserHistory = require("./UserHistory");
 const MusicTracker = require("./MusicTracker");
+const UserRequests = require("./UserRequests");
 const PlaylistStore = require("./PlaylistStore");
 const AutoDjSource = require("./Autodjsource");
 const AutoDjLogger = require("./AutoDjLogger");
@@ -289,6 +290,17 @@ module.exports = async (client) => {
     if (max === min) return weightedPick(arr, weightOf);
     const sorted = arr.slice().sort((a, b) => playsOfFn(a) - playsOfFn(b));
     const tier = sorted.slice(0, Math.max(1, Math.ceil(sorted.length * 0.25)));
+    return weightedPick(tier, weightOf);
+  };
+
+  const likesOf = (t) => Math.max(0, (t?.likedBy || []).length - (t?.dislikedBy || []).length);
+  const pickMostLiked = (arr, weightOf) => {
+    if (!arr?.length) return null;
+    const scores = arr.map(likesOf);
+    const max = Math.max(...scores);
+    if (max <= 0) return weightedPick(arr, weightOf);
+    const sorted = arr.slice().sort((a, b) => likesOf(b) - likesOf(a) || playsOf(a) - playsOf(b));
+    const tier = sorted.slice(0, Math.max(1, Math.ceil(sorted.length * 0.3)));
     return weightedPick(tier, weightOf);
   };
 
@@ -769,6 +781,70 @@ module.exports = async (client) => {
     // automáticamente cada canción que sonaba y el AutoDJ metía temas que el
     // usuario nunca pidió.
     const poolsByUser = await PlaylistStore.getAutoDjPoolsByUser(client, guildId, listeners);
+    const requestsByUser = {};
+    const artistsByUser = {};
+    for (const uid of listeners) {
+      try {
+        requestsByUser[uid] = await UserRequests.getUserRequests(client, guildId, uid) || [];
+        artistsByUser[uid] = await UserRequests.getUserArtists(client, guildId, uid) || [];
+      } catch {
+        requestsByUser[uid] = [];
+        artistsByUser[uid] = [];
+      }
+    }
+    const artistNameOf = (t) => {
+      const u = t?.uploader;
+      const raw = (u && (u.name || u.url || u)) || t?.artist || null;
+      return typeof raw === "string" ? raw.trim().toLowerCase() : null;
+    };
+    for (const uid of listeners) {
+      try {
+        const reqs = requestsByUser[uid];
+        if (Array.isArray(reqs) && reqs.length) {
+          const pool = poolsByUser[uid] || (poolsByUser[uid] = []);
+          const have = new Set(pool.map((t) => canonUrlKey(t.url)));
+          for (const r of reqs) {
+            if (!r?.url) continue;
+            const k = canonUrlKey(r.url);
+            if (have.has(k)) continue;
+            have.add(k);
+            pool.push({
+              url: r.url,
+              name: r.name || null,
+              uploader: r.artist ? { name: r.artist } : null,
+              likedBy: [],
+              dislikedBy: [],
+              playCount: Number(r.plays) || 0,
+              _fromRequest: true,
+            });
+          }
+        }
+        // Artistas detectados del usuario → meter canciones de OTROS usuarios
+        // (favoritas o pedidas) cuyo artista coincida con los suyos.
+        const topArtists = (artistsByUser[uid] || []).slice(0, 12).map((a) => String(a.name || "").trim().toLowerCase()).filter(Boolean);
+        if (topArtists.length) {
+          const artistSet = new Set(topArtists);
+          const pool = poolsByUser[uid] || (poolsByUser[uid] = []);
+          const have = new Set(pool.map((t) => canonUrlKey(t.url)));
+          for (const otherUid of listeners) {
+            if (otherUid === uid) continue;
+            const others = [
+              ...(poolsByUser[otherUid] || []),
+              ...(requestsByUser[otherUid] || []).map((r) => ({ url: r.url, name: r.name, uploader: r.artist ? { name: r.artist } : null, playCount: Number(r.plays) || 0, _fromRequest: true })),
+            ];
+            for (const t of others) {
+              if (!t?.url) continue;
+              const an = artistNameOf(t);
+              if (!an || !artistSet.has(an)) continue;
+              const k = canonUrlKey(t.url);
+              if (have.has(k)) continue;
+              have.add(k);
+              pool.push({ ...t, _fromArtist: true });
+            }
+          }
+        }
+      } catch {}
+    }
     // Segundo escalón (rescate): las Favoritas sin 👍/⭐. NUNCA son la primera
     // opción; solo entran cuando ya se vio TODO el pool real, que es lo que
     // provocaba el reciclado (con 19 Pool reales el bot repetía cada poco).
@@ -965,11 +1041,11 @@ module.exports = async (client) => {
       // primera de la lista: por eso se repetían las mismas 2-3 canciones.
       let found = null;
       let usedFallback = false;
-      // 1) Alguna favorita REAL sin ver → la normal, nunca se repite.
+      // 1) Alguna favorita REAL sin ver → la más LIKEADA primero, nunca se repite.
       const freshReal = freshOf(pool);
       let motivo;
       if (freshReal.length) {
-        found = pickLeastPlayed(freshReal, weightOf);
+        found = pickMostLiked(freshReal, weightOf);
         motivo = "favorita-nueva";
       } else if (ALLOW_UNLIKED) {
         // 2) El pool REAL ya se vio entero → Favoritas SIN 👍 (nunca con 👎).
@@ -1425,6 +1501,7 @@ patchClock(queue, gid);
 
 if (song.user?.id) {
     MusicTracker.logPlay(gid, song.user.id, song);
+    UserRequests.recordRequest(client, gid, song.user.id, song).catch(() => {});
     }
 
     // El audioPlayer se recrea en cada reconexión: hay que reaplicarle la
