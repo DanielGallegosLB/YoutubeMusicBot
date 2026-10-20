@@ -313,7 +313,31 @@ async function writeFavoritesSnapshot(client) {
           avatar: u?.displayAvatarURL?.() || null,
         };
       }
-      guilds.push({ guildId: guild.id, guildName: guild.name || guild.id, users, songs });
+      // Stats GLOBALES por URL (fuente de verdad: el store trackstats del guild):
+      // plays/acumulado y quién dio 👍/👎 (DEDUPLICADO, porque likedBy acumula).
+      // El dashboard las usa para mostrar los totales REALES del servidor, no el
+      // conteo parcial de la copia de un solo usuario. La clave es la URL canónica.
+      const statsByUrl = {};
+      try {
+        const rawStats = await withDbBounded(PlaylistStore.guildStats(client, guild.id), 3500).catch(() => ({})) || {};
+        for (const [url, e] of Object.entries(rawStats)) {
+          if (!url || !e) continue;
+          const canon = PlaylistStore.canonUrlKey(url);
+          const likedBy = [...new Set((e.likedBy || []).map(String))];
+          const dislikedBy = [...new Set((e.dislikedBy || []).map(String))];
+          const prev = statsByUrl[canon] || { url, plays: 0, likedBy: [], dislikedBy: [] };
+          prev.plays = Math.max(prev.plays, Number(e.plays) || 0);
+          prev.likedBy = [...new Set([...prev.likedBy, ...likedBy])];
+          prev.dislikedBy = [...new Set([...prev.dislikedBy, ...dislikedBy])];
+          statsByUrl[canon] = prev;
+        }
+        for (const k of Object.keys(statsByUrl)) {
+          const s = statsByUrl[k];
+          s.likes = s.likedBy.length;
+          s.dislikes = s.dislikedBy.length;
+        }
+      } catch {}
+      guilds.push({ guildId: guild.id, guildName: guild.name || guild.id, users, songs, statsByUrl });
     }
     const payload = { updatedAt: new Date().toISOString(), guilds };
     const sig = JSON.stringify(payload);
@@ -704,7 +728,7 @@ async function processCommands(client) {
       continue;
     }
 
-    if (["remove_favorite_for_user", "unlike_for_user", "toggle_manual_favorite"].includes(cmd.action)) {
+    if (["remove_favorite_for_user", "unlike_for_user", "toggle_manual_favorite", "dislike_for_user"].includes(cmd.action)) {
       const gid = String(cmd.guildId || "");
       const uid = String(cmd.userId || "");
       const url = String(cmd.url || "");
@@ -718,6 +742,17 @@ async function processCommands(client) {
             detail = { removed: !!res, name: res?.name || null };
           } else if (cmd.action === "unlike_for_user") {
             const res = await withDbBounded(PlaylistStore.unlikeForUser(client, gid, uid, url), 12000);
+            ok = !!res;
+            detail = { likeCount: res?.likeCount || 0, dislikeCount: res?.dislikeCount || 0 };
+          } else if (cmd.action === "dislike_for_user") {
+            const song = (cmd.song && typeof cmd.song === "object") ? cmd.song : {};
+            const res = await withDbBounded(PlaylistStore.dislikeForUser(client, gid, uid, {
+              url,
+              name: song.name || song.title || null,
+              thumbnail: song.thumbnail || null,
+              uploader: song.uploader || null,
+              duration: Number(song.duration) || 0,
+            }), 12000);
             ok = !!res;
             detail = { likeCount: res?.likeCount || 0, dislikeCount: res?.dislikeCount || 0 };
           } else {

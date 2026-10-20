@@ -425,6 +425,51 @@ module.exports = {
     };
   },
 
+  /** Da 👎 a una cancion EN NOMBRE de otro usuario (dashboard). La agrega a sus
+   *  "Canciones Favoritas" si falta (con la metadata enviada) y le suma el dislike.
+   *  Devuelve { created, likeCount, dislikeCount, score } o null. */
+  async dislikeForUser(client, guildId, userId, track) {
+    if (!track || !track.url) return null;
+    const key = `${guildId}.playlists.${userId}`;
+    const all = await this.getAll(client, guildId, userId);
+    const list = all["Canciones Favoritas"] || [];
+    let existing = this.findTrackByCanon(list, track.url) || list.find((t) => t.url === track.url);
+    let created = false;
+    if (!existing) {
+      existing = {
+        url: track.url,
+        name: track.name || track.title || track.url,
+        title: track.title || track.name || null,
+        thumbnail: track.thumbnail || null,
+        uploader: track.uploader || null,
+        duration: Number(track.duration) || 0,
+        formattedDuration: track.formattedDuration || null,
+        playCount: 0,
+        likedBy: [],
+        dislikedBy: [],
+        savedAt: new Date().toISOString(),
+      };
+      list.push(existing);
+      created = true;
+    }
+    existing.likedBy = existing.likedBy || [];
+    existing.dislikedBy = existing.dislikedBy || [];
+    const li = existing.likedBy.indexOf(userId);
+    if (li !== -1) existing.likedBy.splice(li, 1);
+    existing.dislikedBy.push(userId);
+    all["Canciones Favoritas"] = list;
+    await Promise.all([
+      client.music.set(key, all),
+      this.trackDislike(client, guildId, track.url, userId),
+    ]);
+    return {
+      created,
+      likeCount: existing.likedBy.length,
+      dislikeCount: existing.dislikedBy.length,
+      score: existing.likedBy.length - existing.dislikedBy.length,
+    };
+  },
+
   /** Add a dislike on a track by URL (acumula sin tope: cada 👎 suma) */
   async dislikeTrackByUrl(client, guildId, userId, name, trackUrl) {
     const key = `${guildId}.playlists.${userId}`;
