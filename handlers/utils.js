@@ -818,11 +818,22 @@ module.exports = async (client) => {
         (currentSong?.autoDjUserId &&
           guild?.members?.cache?.get(currentSong.autoDjUserId)?.user?.tag) ||
         (currentOwners ? currentOwners.split(",")[0].trim() : null);
+      // Rótulo del AutoDJ: ícono según la LÓGICA usada + nombre del usuario.
+      //   rec        🛸  favoritas/historial del usuario
+      //   liked      👍  canciones con like/⭐ del usuario ("le gusta sí o sí")
+      //   pedidas    📝  canciones que ese usuario pidió
+      //   aleatorias 🎰  aleatoria de las pedidas menos escuchadas del usuario
+      //   artistas   🎤  artistas del perfil de ese usuario
+      //   random     🎲  aleatoria de la lista
+      const autoDjIcon = (type) =>
+        type === "liked" ? "👍" : type === "pedidas" ? "📝" : type === "aleatorias" ? "🎰" : type === "artistas" ? "🎤" : type === "random" ? "🎲" : "🛸";
+      const autoDjTypeName = (type) =>
+        type === "liked" ? "Le gusta" : type === "pedidas" ? "Pedida" : type === "aleatorias" ? "Aleatoria de pedidas" : type === "artistas" ? "Artista del perfil" : type === "random" ? "Aleatoria de la lista" : "Recomendación";
       const currentReq =
         currentIsAutoDj
-          ? (currentSong?.autoDjType === "rec"
-              ? `🛸 ${currentRecName || "Recomendación"}`
-              : "🎲 Aleatoria")
+          ? (currentSong?.autoDjType === "random"
+              ? "🎲 Aleatoria"
+              : `${autoDjIcon(currentSong?.autoDjType)} ${currentRecName || autoDjTypeName(currentSong?.autoDjType)}`)
           : (currentSong?.user?.tag || "Auto DJ");
 
       const storedLimit = await client.music.get(`${guild.id}.qlimit`).catch(() => undefined);
@@ -845,14 +856,13 @@ module.exports = async (client) => {
       // usada para recomendar (para "rec"), o 🎲 Aleatoria. Nada de listas largas.
       const autodjLabel = (track, firstOwner) => {
         if (!track || (!track.autoDj && !track._autoDj)) return null;
-        if (track.autoDjType === "rec") {
-          const uid = track.autoDjUserId;
-          const name = uid
-            ? (guild?.members?.cache?.get(uid)?.user?.tag || track.user?.nickname || null)
-            : (firstOwner || null);
-          return name ? `🛸 ${name}` : "🛸 Recomendación";
-        }
-        return "🎲 Aleatoria";
+        if (track.autoDjType === "random") return "🎲 Aleatoria";
+        const icon = autoDjIcon(track.autoDjType);
+        const uid = track.autoDjUserId;
+        const name = uid
+          ? (guild?.members?.cache?.get(uid)?.user?.tag || track.user?.nickname || null)
+          : (firstOwner || null);
+        return name ? `${icon} ${name}` : `${icon} ${autoDjTypeName(track.autoDjType)}`;
       };
 
       let queueString = "";

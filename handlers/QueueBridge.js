@@ -19,6 +19,7 @@ const CLEAR_RESULT_FILE = path.join(DASH_DIR, "musicbot_favclear_result.json");
 const AUTODJ_RESULT_FILE = path.join(DASH_DIR, "musicbot_autodj_result.json");
 const LIKE_RESULT_FILE = path.join(DASH_DIR, "musicbot_like_result.json");
 const UserRequests = require("./UserRequests");
+const MusicTracker = require("./MusicTracker");
 const REQUESTS_FILE = path.join(DASH_DIR, "musicbot_userrequests.json");
 const REQUESTS_RESULT_FILE = path.join(DASH_DIR, "musicbot_requests_result.json");
 
@@ -47,6 +48,13 @@ function songView(song, guild) {
     const u = guild.members.cache.get(requester.id)?.user;
     if (u) requester = u;
   }
+  // Para las canciones del AutoDJ, se resuelve el usuario usado por la lógica
+  // (liked/pedidas/artistas/rec) a un tag legible para el dashboard.
+  let autoDjUser = null;
+  if (song.autoDjUserId && guild?.members?.cache) {
+    const m = guild.members.cache.get(song.autoDjUserId);
+    autoDjUser = m?.user?.tag || m?.user?.username || null;
+  }
   return {
     url: song.url || null,
     name: song.name || song.title || "Sin título",
@@ -56,6 +64,9 @@ function songView(song, guild) {
       (requester && (requester.tag || requester.username || requester.displayName || "desconocido")) ||
       "desconocido",
     autoDj: !!song.autoDj,
+    autoDjType: song.autoDj ? (song.autoDjType || "rec") : null,
+    autoDjUserId: song.autoDjUserId || null,
+    autoDjUser,
   };
 }
 
@@ -313,10 +324,11 @@ async function writeFavoritesSnapshot(client) {
           avatar: u?.displayAvatarURL?.() || null,
         };
       }
-      // Stats GLOBALES por URL (fuente de verdad: el store trackstats del guild):
-      // plays/acumulado y quién dio 👍/👎 (DEDUPLICADO, porque likedBy acumula).
-      // El dashboard las usa para mostrar los totales REALES del servidor, no el
-      // conteo parcial de la copia de un solo usuario. La clave es la URL canónica.
+      // Stats GLOBALES por URL (fuente de verdad: el store trackstats del guild).
+      // likes/dislikes son el CONTEO TOTAL ACUMULADO (cada 👍 suma, se permiten
+      // varios likes por usuario: el sistema usa la cantidad de likes). likedBy/
+      // dislikedBy van DEDUPLICADOS solo para mostrar QUIENES votaron. plays usa
+      // el maximo entre variantes de la misma URL. Clave = URL canonica.
       const statsByUrl = {};
       try {
         const rawStats = await withDbBounded(PlaylistStore.guildStats(client, guild.id), 3500).catch(() => ({})) || {};
@@ -325,16 +337,14 @@ async function writeFavoritesSnapshot(client) {
           const canon = PlaylistStore.canonUrlKey(url);
           const likedBy = [...new Set((e.likedBy || []).map(String))];
           const dislikedBy = [...new Set((e.dislikedBy || []).map(String))];
-          const prev = statsByUrl[canon] || { url, plays: 0, likedBy: [], dislikedBy: [] };
+          const prev = statsByUrl[canon] || { url, plays: 0, likes: 0, dislikes: 0, likedBy: [], dislikedBy: [] };
           prev.plays = Math.max(prev.plays, Number(e.plays) || 0);
+          // Volumen acumulado: se SUMAN los votos de cada variante de URL.
+          prev.likes += (e.likedBy || []).length;
+          prev.dislikes += (e.dislikedBy || []).length;
           prev.likedBy = [...new Set([...prev.likedBy, ...likedBy])];
           prev.dislikedBy = [...new Set([...prev.dislikedBy, ...dislikedBy])];
           statsByUrl[canon] = prev;
-        }
-        for (const k of Object.keys(statsByUrl)) {
-          const s = statsByUrl[k];
-          s.likes = s.likedBy.length;
-          s.dislikes = s.dislikedBy.length;
         }
       } catch {}
       guilds.push({ guildId: guild.id, guildName: guild.name || guild.id, users, songs, statsByUrl });
@@ -358,7 +368,28 @@ async function writeUserRequestsSnapshot(client) {
     for (const guild of client.guilds.cache.values()) {
       const requests = await withDbBounded(UserRequests.listGuildUserRequests(client, guild.id), 4500).catch(() => ({})) || {};
       const artists = await withDbBounded(UserRequests.listGuildUserArtists(client, guild.id), 4500).catch(() => ({})) || {};
-      const userIds = [...new Set([...Object.keys(requests), ...Object.keys(artists)])];
+      // Artistas REALES del perfil: Spotify (socialprofiles, "Artistas que
+      // escucha") + reproducciones JUGNU (MusicPlay) + pedidas (KV). El perfil
+      // de Spotify es la fuente principal (milo j x371). El dashboard y la
+      // vista "Próximas" usan estos para recomendar.
+      const spotifyArtists = await withDbBounded(MusicTracker.spotifyArtistsForGuild(guild.id, 12), 6000).catch(() => ({})) || {};
+      const perfilArtists = await withDbBounded(MusicTracker.topArtistsForGuild(guild.id, 12), 5000).catch(() => ({})) || {};
+      const mergeArtists = (uid) => {
+        const merged = new Map();
+        const put = (name, count) => {
+          const k = String(name || "").trim().toLowerCase();
+          if (!k) return;
+          const c = Math.max(1, Number(count) || 1);
+          const prev = merged.get(k);
+          if (!prev) merged.set(k, { name: String(name).trim(), count: c });
+          else prev.count = Math.max(prev.count, c);
+        };
+        for (const a of (spotifyArtists[uid] || [])) put(a.name, a.count);
+        for (const a of (perfilArtists[uid] || [])) put(a.name, a.count);
+        for (const a of (artists[uid] || [])) put(a.name, a.count);
+        return [...merged.values()].sort((a, b) => (b.count || 0) - (a.count || 0));
+      };
+      const userIds = [...new Set([...Object.keys(requests), ...Object.keys(artists), ...Object.keys(perfilArtists), ...Object.keys(spotifyArtists)])];
       if (!client._favUserName) client._favUserName = new Map();
       if (!client._favUserFetching) client._favUserFetching = new Set();
       const users = {};
@@ -379,7 +410,7 @@ async function writeUserRequestsSnapshot(client) {
           name: u ? (u.globalName || u.username || u.tag || uid) : uid,
           avatar: u?.displayAvatarURL?.() || null,
           requests: requests[uid] || [],
-          artists: artists[uid] || [],
+          artists: mergeArtists(uid),
         };
       }
       guilds.push({ guildId: guild.id, guildName: guild.name || guild.id, users });
@@ -566,7 +597,7 @@ async function processCommands(client) {
         );
         console.log(
           `[Bridge] Patrón AutoDJ G:${cmd.guildId}: ` +
-            (pattern || []).map((p) => (p.type === "random" ? "aleatoria" : `rec:${p.userId}`)).join(" > ") || "(default)"
+            (pattern || []).map((p) => (p.type === "random" ? "aleatoria" : `${p.type}:${p.userId}`)).join(" > ") || "(default)"
         );
         _lastSnapshotSig = ""; // fuerza refresco del snapshot
         // Reordenar ya con el patrón nuevo (el próximo refill también lo usa).

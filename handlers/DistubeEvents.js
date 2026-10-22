@@ -9,11 +9,51 @@ const UserRequests = require("./UserRequests");
 const PlaylistStore = require("./PlaylistStore");
 const AutoDjSource = require("./Autodjsource");
 const AutoDjLogger = require("./AutoDjLogger");
-const { fetchPlaylistFirstURL, validateSinglePlayable, isPlaylistURL } = require("./PlaylistFetcher");
+const { fetchPlaylistFirstURL, validateSinglePlayable, isPlaylistURL, searchYoutubeVideos } = require("./PlaylistFetcher");
 const { isAgeGateError, friendlyPlaybackError } = require("./PlaybackError");
 const { startMarqueeActivity, stopMarqueeActivity } = require("./ActivityManager");
 
 const MAX_SESSION_SONGS = 150;
+
+// ── Búsqueda en YouTube al vuelo (paso 🎤 Artistas del perfil) ──────────────
+// Cuando el server no tiene canciones guardadas de los artistas TOP del perfil
+// (ej. milo j, kidd voodoo), se buscan en YouTube en el momento y se elige una
+// NUEVA (que el usuario no tenga en su historial/cola). Cache corto para no
+// martillar la API de YouTube ni resolver la misma búsqueda en cada refill.
+const _artistSearchCache = new Map(); // query -> { at, results:[{url,name,uploader,duration}] }
+const ARTIST_SEARCH_TTL = Math.max(
+  60000,
+  Number(process.env.AUTODJ_ARTIST_SEARCH_TTL) || 10 * 60 * 1000
+);
+const ARTIST_SEARCH_LIMIT = Math.max(
+  3,
+  Math.min(15, Number(process.env.AUTODJ_ARTIST_SEARCH_LIMIT) || 8)
+);
+
+async function searchArtistSongs(client, query, limit = ARTIST_SEARCH_LIMIT) {
+  if (!query) return [];
+  const key = String(query).trim().toLowerCase();
+  const hit = _artistSearchCache.get(key);
+  if (hit && (Date.now() - hit.at) < ARTIST_SEARCH_TTL) return hit.results;
+  try {
+    const raw = await searchYoutubeVideos(String(query).trim(), limit);
+    const results = (Array.isArray(raw) ? raw : [])
+      .map((s) => ({
+        url: s?.url || null,
+        name: s?.name || null,
+        uploader: s?.uploader ? { name: String(s.uploader) } : null,
+        duration: Number(s?.duration) || 0,
+      }))
+      .filter((s) => s.url);
+    _artistSearchCache.set(key, { at: Date.now(), results });
+    client?.logger?.log?.(`[AutoDJ] 🔎 artistas "${query}" → ${results.length} resultados`);
+    return results;
+  } catch (err) {
+    client?.logger?.log?.(`[AutoDJ] búsqueda artistas falló ("${query}"): ${err?.message || err}`);
+    _artistSearchCache.set(key, { at: Date.now(), results: [] });
+    return [];
+  }
+}
 
 const isOtherRequester = (user, ownerId) => !!(ownerId && user?.id && user.id !== ownerId);
 
@@ -786,7 +826,28 @@ module.exports = async (client) => {
     for (const uid of listeners) {
       try {
         requestsByUser[uid] = await UserRequests.getUserRequests(client, guildId, uid) || [];
-        artistsByUser[uid] = await UserRequests.getUserArtists(client, guildId, uid) || [];
+        // Artistas del perfil REAL: Spotify (socialprofiles, "Artistas que
+        // escucha") + reproducciones JUGNU (MusicPlay) + pedidas (KV). El de
+        // Spotify es la fuente principal. Se fusiona por nombre con el conteo
+        // máximo (Spotify x371 domina sobre pedidas x1).
+        const [spotify, perfil, pedidas] = await Promise.all([
+          MusicTracker.spotifyTopArtists(guildId, uid, 20).catch(() => []),
+          MusicTracker.topArtists(guildId, uid, 20).catch(() => []),
+          UserRequests.getUserArtists(client, guildId, uid).catch(() => []),
+        ]);
+        const merged = new Map();
+        const put = (name, count) => {
+          const k = String(name || "").trim().toLowerCase();
+          if (!k) return;
+          const c = Math.max(1, Number(count) || 1);
+          const prev = merged.get(k);
+          if (!prev) merged.set(k, { name: String(name).trim(), count: c });
+          else prev.count = Math.max(prev.count, c);
+        };
+        for (const a of (spotify || [])) put(a.name, a.count);
+        for (const a of (perfil || [])) put(a.name, a.count);
+        for (const a of (pedidas || [])) put(a.name, a.count);
+        artistsByUser[uid] = [...merged.values()].sort((a, b) => (b.count || 0) - (a.count || 0));
       } catch {
         requestsByUser[uid] = [];
         artistsByUser[uid] = [];
@@ -796,6 +857,74 @@ module.exports = async (client) => {
       const u = t?.uploader;
       const raw = (u && (u.name || u.url || u)) || t?.artist || null;
       return typeof raw === "string" ? raw.trim().toLowerCase() : null;
+    };
+    // Normaliza nombres de canal/artista de YouTube ("Kanye West - Topic" ≈
+    // "Kanye West", "Michael Jackson Official", "XVEVO").
+    const artistKey = (x) => String(x || "").trim().toLowerCase()
+      .replace(/\s*-\s*topic$/i, "")
+      .replace(/vevo$/i, "")
+      .replace(/\s*-\s*(official|oficial)(\s+(audio|video|music video))?$/i, "")
+      .replace(/\s+(official|oficial)$/i, "")
+      .replace(/[^a-z0-9\s]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    // Pesos del perfil: se separan colaboraciones ("bizarrap; milo j") y cada
+    // artista suma. Map { claveArtista: peso }.
+    // Construye el mapa ponderado { claveArtista: peso } desde el perfil. Si
+    // `topN` > 0, se queda SOLO con los N artistas más escuchados (ej: milo j y
+    // kidd voodoo), ignorando el resto (Kanye/uni/...). Así el paso 🎤 recomienda
+    // únicamente canciones de los artistas TOP del perfil.
+    const ARTIST_TOP_N = Math.max(0, Number(process.env.AUTODJ_ARTIST_TOP_N ?? 2) || 0);
+    const artistWeightMap = (list, topN = ARTIST_TOP_N) => {
+      const acc = new Map();
+      for (const a of (Array.isArray(list) ? list : [])) {
+        const parts = String(a?.name || "").split(/\s*(?:;|&|\bfeat\.?\b|\bft\.?\b|\bx\b)\s*/i);
+        for (const p of parts) {
+          const k = artistKey(p);
+          if (!k) continue;
+          acc.set(k, (acc.get(k) || 0) + Math.max(1, Number(a?.count) || 1));
+        }
+      }
+      if (!topN || acc.size <= topN) return acc;
+      const kept = [...acc.entries()].sort((a, b) => b[1] - a[1]).slice(0, topN);
+      return new Map(kept);
+    };
+    // Nombres "reales" de los N artistas más escuchados del perfil (para buscar
+    // en YouTube al vuelo cuando no hay canciones suyas guardadas en el server).
+    const topArtistNames = (list, topN = ARTIST_TOP_N) => {
+      const agg = new Map(); // keyNormalizada -> { name, count }
+      for (const a of (Array.isArray(list) ? list : [])) {
+        const raw = String(a?.name || "").trim();
+        if (!raw) continue;
+        for (const p of raw.split(/\s*(?:;|&|\bfeat\.?\b|\bft\.?\b|\bx\b)\s*/i)) {
+          const nm = p.trim();
+          const k = artistKey(nm);
+          if (!k) continue;
+          const prev = agg.get(k);
+          const c = Math.max(1, Number(a?.count) || 1);
+          if (!prev) agg.set(k, { name: nm, count: c });
+          else prev.count = Math.max(prev.count, c);
+        }
+      }
+      let arr = [...agg.values()].sort((a, b) => b.count - a.count);
+      if (topN && arr.length > topN) arr = arr.slice(0, topN);
+      return arr;
+    };
+    // Match ESTRICTO por tokens (nada de substring suelto: "uni" NO debe
+    // matchear "universal"). Devuelve el PESO del mejor artista que matchea.
+    const artistMatchWeight = (weightMap, raw) => {
+      const k = artistKey(raw);
+      if (!k || k.length < 2) return 0;
+      let best = 0;
+      if (weightMap.has(k)) best = Math.max(best, weightMap.get(k));
+      for (const [a, w] of weightMap) {
+        if (a.length < 2) continue;
+        const ok = k === a
+          || k.startsWith(a + " ") || k.endsWith(" " + a) || k.includes(" " + a + " ")
+          || a.startsWith(k + " ") || a.endsWith(" " + k) || a.includes(" " + k + " ");
+        if (ok) best = Math.max(best, w);
+      }
+      return best;
     };
     for (const uid of listeners) {
       try {
@@ -820,10 +949,10 @@ module.exports = async (client) => {
           }
         }
         // Artistas detectados del usuario → meter canciones de OTROS usuarios
-        // (favoritas o pedidas) cuyo artista coincida con los suyos.
-        const topArtists = (artistsByUser[uid] || []).slice(0, 12).map((a) => String(a.name || "").trim().toLowerCase()).filter(Boolean);
-        if (topArtists.length) {
-          const artistSet = new Set(topArtists);
+        // (favoritas o pedidas) cuyo artista coincida con los suyos. Se prioriza
+        // por el PESO del artista (los que el usuario más escucha primero).
+        const weightMap = artistWeightMap(artistsByUser[uid]);
+        if (weightMap.size) {
           const pool = poolsByUser[uid] || (poolsByUser[uid] = []);
           const have = new Set(pool.map((t) => canonUrlKey(t.url)));
           for (const otherUid of listeners) {
@@ -834,12 +963,12 @@ module.exports = async (client) => {
             ];
             for (const t of others) {
               if (!t?.url) continue;
-              const an = artistNameOf(t);
-              if (!an || !artistSet.has(an)) continue;
+              const w = artistMatchWeight(weightMap, artistNameOf(t));
+              if (!w) continue;
               const k = canonUrlKey(t.url);
               if (have.has(k)) continue;
               have.add(k);
-              pool.push({ ...t, _fromArtist: true });
+              pool.push({ ...t, _fromArtist: true, _artistWeight: w });
             }
           }
         }
@@ -898,6 +1027,44 @@ module.exports = async (client) => {
 
     const allPool = Object.values(poolsByUser).flat().filter((t) => t?.url);
 
+    // ── Pools específicos de los pasos nuevos ────────────────────────────────
+    // liked      👍  → favoritas con 👍/⭐ del usuario (le gusta sí o sí).
+    // pedidas    📝  → canciones que ESE usuario pidió (sus requests).
+    // aleatorias 🎰  → al azar entre las pedidas de ESE usuario, priorizando las
+    //                  que MENOS se reprodujeron (no repite siempre las mismas).
+    // artistas   🎤  → canciones de OTROS cuyo artista está en el perfil del
+    //                  usuario (los "_fromArtist" que ya se armaron arriba).
+    const likedPoolByUser = {};
+    const pedidasPoolByUser = {};
+    const aleatoriasPoolByUser = {};
+    const artistasPoolByUser = {};
+    for (const uid of listeners) {
+      const pool = poolsByUser[uid] || [];
+      likedPoolByUser[uid] = pool.filter(
+        (t) => t?.url && !t._fromRequest && !t._fromArtist &&
+          ((t.likedBy || []).length > 0 || t.manual === true)
+      );
+      pedidasPoolByUser[uid] = pool.filter((t) => t?.url && t._fromRequest);
+      aleatoriasPoolByUser[uid] = pool.filter((t) => t?.url && t._fromRequest);
+      artistasPoolByUser[uid] = pool.filter((t) => t?.url && t._fromArtist);
+    }
+    // Etiqueta corta de un paso del patrón para logs.
+    const stepShort = (p) => {
+      if (!p || p.type === "random") return "🎲";
+      const icon = p.type === "liked" ? "👍" : p.type === "pedidas" ? "📝" : p.type === "aleatorias" ? "🎰" : p.type === "artistas" ? "🎤" : "🛸";
+      return `${icon}:${p.userId}`;
+    };
+    // Si el paso trae userId "*" y un tipo que necesita destinatario, se reparte
+    // de forma CÍCLICA entre los oyentes presentes en orden de conexión: el
+    // índice del hueco dentro del patrón decide a quién le toca la próxima.
+    const cycleUser = (type, userId, slotIndex) => {
+      if (!type || type === "random") return null;
+      if (userId && userId !== "*") return userId;
+      if (!listeners.length) return null;
+      const n = listeners.length;
+      return listeners[((slotIndex % n) + n) % n];
+    };
+
     // playCount por URL para el paso 🎲, que maneja URLs sueltas y no objetos
     // con playCount. Se arma con las favoritas de la llamada (las que sí lo
     // traen); lo que no esté, se trata como no reproducido (0).
@@ -944,14 +1111,17 @@ module.exports = async (client) => {
       AutoDjLogger.decision({
         guildId,
         oyentes: listeners,
-        patron: pattern.map((p) => (p.type === "random" ? "random" : `rec:${p.userId}`)),
+        patron: pattern.map((p) => (p.type === "random" ? "random" : `${p.type}:${p.userId}`)),
         fuenteMomentanea: AutoDjSource.candidates(client, guildId, { currentUrl: queue.songs[0]?.url }).length,
         ...poolSnapshot,
         ...entry,
       }, entry.origen === "random" ? "pick.random" : "pick.rec");
     };
 
-    const pickForStep = (step, taken, inQueue) => {
+    const pickForStep = async (step, taken, inQueue, slotIndex = 0) => {
+      // Destinatario efectivo del paso: si es "*" y el tipo necesita un usuario,
+      // se reparte de forma cíclica entre los oyentes (orden de conexión).
+      const effUser = cycleUser(step.type, step.userId, slotIndex);
       // 🎲 → al azar entre TODAS las canciones de la lista ingresada que aún no
       // sonaron ni se eligieron (aunque el loader no las haya encolado todavía).
       // Sin reposición: cada una sale una sola vez por sesión. Si la lista ya no
@@ -990,10 +1160,147 @@ module.exports = async (client) => {
       // colgara 45-60s por candidata.
       const isSafeCand = (t) => t?.url && !isPlaylistURL(t.url) && isSafeSingle(t.url);
       let pool;
-      if (step.type === "rec" && step.userId && step.userId !== "*") {
-        const own = (poolsByUser[step.userId] || []).filter((t) => isSafeCand(t));
+      if (step.type === "liked") {
+        // 👍 "le gusta sí o sí": SOLO sus favoritas con like/⭐ (sin historial
+        // ajeno). Ordenadas por score; si se agotan se reciclan (abajo).
+        const src = (likedPoolByUser[effUser] || []).filter(isSafeCand);
+        const score = (t) => ((t.likedBy || []).length - (t.dislikedBy || []).length) * 10 + (t.playCount || 0) - SKIP_WEIGHT * skipCountOf(t.url, effUser);
+        pool = src.slice().sort((a, b) => score(b) - score(a));
+      } else if (step.type === "pedidas") {
+        // 📝 aleatoria de lo que ESE usuario pidió (con reposición, es corto).
+        const src = (pedidasPoolByUser[effUser] || []).filter(isSafeCand);
+        const have = new Set(src.map((t) => canonUrlKey(t.url)));
+        const extra = (requestsByUser[effUser] || [])
+          .map((r) => ({ url: r.url, name: r.name || null, uploader: r.artist ? { name: r.artist } : null, likedBy: [], dislikedBy: [], playCount: Number(r.plays) || 0, _fromRequest: true }))
+          .filter((t) => isSafeCand(t) && !have.has(canonUrlKey(t.url)));
+        pool = shuffleWeighted(src.concat(extra), (t) => skipWeight(t.url, effUser));
+      } else if (step.type === "aleatorias") {
+        // 🎰 aleatoria entre las pedidas de ESE usuario, priorizando las que
+        // MENOS se reprodujeron: se elige ponderado SOLO entre el cuartil menos
+        // escuchado (evita repetir siempre las mismas pedidas). Seleccion directa
+        // (como random), sin pasar por el orden "mas gustado".
+        const src = (aleatoriasPoolByUser[effUser] || []).filter(isSafeCand);
+        const have = new Set(src.map((t) => canonUrlKey(t.url)));
+        const extra = (requestsByUser[effUser] || [])
+          .map((r) => ({ url: r.url, name: r.name || null, uploader: r.artist ? { name: r.artist } : null, likedBy: [], dislikedBy: [], playCount: Number(r.plays) || 0, _fromRequest: true }))
+          .filter((t) => isSafeCand(t) && !have.has(canonUrlKey(t.url)));
+        const all = src.concat(extra);
+        if (all.length) {
+          const chosen = pickLeastPlayed(all, (t) => skipWeight(t.url, effUser));
+          if (chosen?.url) {
+            taken.add(chosen.url);
+            logPick({
+              origen: "aleatorias",
+              motivo: "pedida-menos-escuchada",
+              paso: stepShort(step),
+              url: chosen.url,
+              nombre: chosen.name || null,
+              yaEnCola: inQueue.has(chosen.url),
+              candidatas: all.length,
+              skips: skipCountOf(chosen.url, effUser),
+              likes: (chosen.likedBy || []).length,
+              dislikes: (chosen.dislikedBy || []).length,
+              playsTotales: playsOf(chosen),
+              playsSesion: sessionPlaysOf(chosen.url),
+              peso: Number(skipWeight(chosen.url, effUser).toFixed(3)),
+            });
+            return { url: chosen.url, name: chosen.name || null, existing: inQueue.has(chosen.url), fromList: false, autoDjType: "aleatorias", autoDjUserId: effUser || null };
+          }
+        }
+        dbgLine(`🎰 aleatorias: candidatas=0 -> cae a favoritas/recicladas`);
+        pool = [];
+      } else if (step.type === "artistas") {
+        // 🎤 "novedosa de artistas del perfil": candidatas cuyo artista está en
+        // el perfil del usuario (los _fromArtist). Selección DIRECTA priorizando
+        // el artista MÁS escuchado por el usuario (peso), y entre esos, lo menos
+        // visto. Sin esto, un Kanye con más likes globales ganaba siempre aunque
+        // el usuario escuche milo j/kidd voodoo. Si no hay, cae a rec.
+        let src = (artistasPoolByUser[effUser] || []).filter(isSafeCand);
+        if (src.length) {
+          // Excluir lo que el usuario ya conoce (su propio pool/historial) y lo
+          // que ya está en cola/cerca, para que sea NOVEDOSA de verdad.
+          const ownNow = new Set((poolsByUser[effUser] || []).map((t) => t.url));
+          src = src.filter((t) => !seen.has(t.url) && !taken.has(t.url) && !ownNow.has(t.url));
+        }
+        if (src.length) {
+          src = src.slice().sort((a, b) => {
+            const d = (b._artistWeight || 0) - (a._artistWeight || 0);
+            if (d) return d;
+            return skipWeight(b.url, effUser) - skipWeight(a.url, effUser);
+          });
+          // El pool ya está restringido a los artistas TOP del perfil (mapa
+          // limitado a AUTODJ_ARTIST_TOP_N, por defecto 2). Dentro de esos,
+          // elegimos lo MENOS visto/reproducido (canciones nuevas para él),
+          // repartiendo entre los top-2 sin quedar pegado sólo al #1.
+          const chosen = pickLeastPlayed(src, (t) => skipWeight(t.url, effUser), (t) => playsOf(t));
+          if (chosen?.url) {
+            taken.add(chosen.url);
+            logPick({
+              origen: "artistas",
+              motivo: "artista-perfil",
+              paso: stepShort(step),
+              url: chosen.url,
+              nombre: chosen.name || null,
+              yaEnCola: inQueue.has(chosen.url),
+              candidatas: src.length,
+              artistaPeso: chosen._artistWeight || 0,
+              skips: skipCountOf(chosen.url, effUser),
+              likes: (chosen.likedBy || []).length,
+              dislikes: (chosen.dislikedBy || []).length,
+              playsTotales: playsOf(chosen),
+              playsSesion: sessionPlaysOf(chosen.url),
+              peso: Number(skipWeight(chosen.url, effUser).toFixed(3)),
+            });
+            return { url: chosen.url, name: chosen.name || null, existing: inQueue.has(chosen.url), fromList: false, autoDjType: "artistas", autoDjUserId: effUser || null };
+          }
+        }
+        // Fallback: no hay canciones guardadas de los artistas TOP en el server
+        // (ej. milo j/kidd voodoo). Se BUSCAN en YouTube al vuelo y se elige una
+        // NUEVA (no vista, no en cola, no ya escuchada por el usuario).
+        {
+          const tops = topArtistNames(artistsByUser[effUser]);
+          if (tops.length) {
+            const ownPool = new Set((poolsByUser[effUser] || []).map((t) => t.url));
+            const ownHist = new Set((historyByUser.get(effUser) || []).map((t) => t?.url).filter(Boolean));
+            for (const top of tops) {
+              const results = await searchArtistSongs(client, top.name);
+              const fresh = results.filter((r) => r?.url
+                && !seen.has(r.url) && !taken.has(r.url) && !inQueue.has(r.url)
+                && !ownPool.has(r.url) && !ownHist.has(r.url)
+                && isSafeCand(r));
+              if (!fresh.length) continue;
+              // Distribución (aleatoria) dentro de lo nuevo para no repetir el
+              // mismo resultado siempre; se evita la primera posición trivial.
+              const pool2 = fresh.length > 1 ? fresh.slice(1) : fresh;
+              const chosen = pool2[Math.floor(Math.random() * pool2.length)];
+              if (!chosen?.url) continue;
+              taken.add(chosen.url);
+              logPick({
+                origen: "artistas",
+                motivo: "artista-perfil-youtube",
+                paso: stepShort(step),
+                url: chosen.url,
+                nombre: chosen.name || null,
+                yaEnCola: false,
+                candidatas: fresh.length,
+                artistaBuscado: top.name,
+                skips: 0,
+                likes: 0,
+                dislikes: 0,
+                playsTotales: 0,
+                playsSesion: 0,
+                peso: 1,
+              });
+              return { url: chosen.url, name: chosen.name || null, existing: false, fromList: false, autoDjType: "artistas", autoDjUserId: effUser || null };
+            }
+          }
+        }
+        dbgLine(`🎤 artistas: candidatas=${src.length} -> cae a favoritas/recicladas`);
+        pool = [];
+      } else if (step.type === "rec" && effUser) {
+        const own = (poolsByUser[effUser] || []).filter((t) => isSafeCand(t));
         const ownUrls = new Set(own.map((t) => t.url));
-        const scratch = (historyByUser.get(step.userId) || []).filter((t) => isSafeCand(t) && !ownUrls.has(t.url));
+        const scratch = (historyByUser.get(effUser) || []).filter((t) => isSafeCand(t) && !ownUrls.has(t.url));
         const ownHist = scratch.slice(0, REC_HISTORY_MAX).filter((t) => t?.url);
         // REC PARA UN USUARIO = SOLO lo que le gusta escuchar: sus favoritas
         // ordenadas por score (likes×10 + reproducciones) y su historial.
@@ -1002,7 +1309,7 @@ module.exports = async (client) => {
         // debe volver a recomendarse.
         // El score además descuenta los SKIPS de ESE usuario: no desaparece del
         // pool (si es su única favorita sigue sonando), pero cae en la lista.
-        const score = (t) => ((t.likedBy || []).length - (t.dislikedBy || []).length) * 10 + (t.playCount || 0) - SKIP_WEIGHT * skipCountOf(t.url, step.userId);
+        const score = (t) => ((t.likedBy || []).length - (t.dislikedBy || []).length) * 10 + (t.playCount || 0) - SKIP_WEIGHT * skipCountOf(t.url, effUser);
         pool = [
           ...own.slice().sort((a, b) => score(b) - score(a)),
           ...ownHist.slice().sort((a, b) => score(b) - score(a)),
@@ -1033,7 +1340,7 @@ module.exports = async (client) => {
         if (s?.url && (i === 0 || i <= REC_MIN_GAP)) nearQueue.add(s.url);
       }
       const tag = `pool=${pool.length} (favs=${allPool.length} hist=${allHistory.length} picks=${picks.length}) near=${nearQueue.size}`;
-      const weightOf = (t) => skipWeight(t.url, step.userId);
+      const weightOf = (t) => skipWeight(t.url, effUser || step.userId);
       const isUsableNow = (t) => t?.url && !excludedCanon.has(canonUrlKey(t.url)) && !nearQueue.has(t.url);
       const freshOf = (arr) => arr.filter((t) => isUsableNow(t) && !seen.has(t.url) && !taken.has(t.url));
       // Tres escalones, en orden. Antes el paso 3 (reciclar) saltaba siempre al
@@ -1047,10 +1354,12 @@ module.exports = async (client) => {
       if (freshReal.length) {
         found = pickMostLiked(freshReal, weightOf);
         motivo = "favorita-nueva";
-      } else if (ALLOW_UNLIKED) {
+      } else if (ALLOW_UNLIKED && step.type === "rec") {
         // 2) El pool REAL ya se vio entero → Favoritas SIN 👍 (nunca con 👎).
         //    Con un pool real chico esto es lo que evita el reciclado constante:
         //    las candidatas pasan de 24 a 84.
+        //    Solo para pasos "rec": liked/pedidas/artistas son pools cerrados de
+        //    gusto del usuario y NO deben rellenarse con rescates sin like.
         const fbFresh = freshOf(Object.values(fallbackPools).flat().filter(isSafeCand));
         if (fbFresh.length) {
           found = pickLeastPlayed(fbFresh, weightOf);
@@ -1063,27 +1372,31 @@ module.exports = async (client) => {
       if (found && !taken.has(found.url)) {
         taken.add(found.url);
         found.existing = inQueue.has(found.url);
+        found.autoDjType = step.type;
+        found.autoDjUserId = effUser || null;
+        const icon = step.type === "random" ? "🎲" : step.type === "liked" ? "👍" : step.type === "pedidas" ? "📝" : step.type === "aleatorias" ? "🎰" : step.type === "artistas" ? "🎤" : "🛸";
         dbgLine(
-          `🛸 rec: ${tag}` +
-          ` skips=${skipCountOf(found.url, step.userId)}` +
+          `${icon} ${step.type}: ${tag}` +
+          ` skips=${skipCountOf(found.url, effUser || step.userId)}` +
           ` -> ${found.url}${found.fromList ? " (lista)" : ""}` +
           `${usedFallback ? " [sin 👍 → rescate]" : ""}` +
           `${found.existing ? " [ya en cola→se adelanta]" : " [nueva→play()]"}`
         );
         logPick({
-          origen: "rec",
+          origen: step.type === "random" ? "random" : "rec",
+          tipo: step.type,
           motivo,
-          paso: step.type === "rec" && step.userId && step.userId !== "*" ? `rec:${step.userId}` : "rec:*",
+          paso: effUser ? `${step.type}:${effUser}` : `${step.type}:*`,
           url: found.url,
           nombre: found.name || found.title || null,
           yaEnCola: !!found.existing,
           fromList: !!found.fromList,
           likes: (found.likedBy || []).length,
           dislikes: (found.dislikedBy || []).length,
-          skips: skipCountOf(found.url, step.userId),
+          skips: skipCountOf(found.url, effUser || step.userId),
           playsTotales: found.playCount ?? playsOfUrl(found.url),
           playsSesion: sessionPlaysOf(found.url),
-          peso: Number(skipWeight(found.url, step.userId).toFixed(3)),
+          peso: Number(skipWeight(found.url, effUser || step.userId).toFixed(3)),
           candidatas: pool.length,
         });
         return found;
@@ -1143,7 +1456,7 @@ module.exports = async (client) => {
     const block = [];
     for (let i = 0; i < toAdd; i++) {
       const step = pattern[(si + i) % pattern.length];
-      const pick = pickForStep(step, taken, inQueue);
+      const pick = await pickForStep(step, taken, inQueue, si + i);
       if (!pick) continue;
       seenMark(seen, pick.url);
       // Usada: el loader no la encola de nuevo y la 🎲 no la repite.
@@ -1153,7 +1466,7 @@ module.exports = async (client) => {
     }
     if (!block.length) {
       client.logger.log(
-        `[AutoDJ] G:${guildId} refill: patrón=${pattern.map((p) => (p.type === "random" ? "🎲" : `🛸:${p.userId}`)).join(">")}` +
+        `[AutoDJ] G:${guildId} refill: patrón=${pattern.map((p) => stepShort(p)).join(">")}` +
         ` huecos=${botSlots.join(",")} faltan=${missingSlots.join(",")} toAdd=${toAdd} oyentes=${listeners.join(",")}`
       );
       for (const l of dbg) client.logger.log(`[AutoDJ] G:${guildId}   ${l}`);
@@ -1161,7 +1474,7 @@ module.exports = async (client) => {
     }
     queue._autoDjStep = (si + block.length) % pattern.length;
     client.logger.log(
-      `[AutoDJ] G:${guildId} refill: patrón=${pattern.map((p) => (p.type === "random" ? "🎲" : `🛸:${p.userId}`)).join(">")}` +
+      `[AutoDJ] G:${guildId} refill: patrón=${pattern.map((p) => stepShort(p)).join(">")}` +
       ` huecos=${botSlots.join(",")} faltan=${missingSlots.join(",")} toAdd=${toAdd} oyentes=${listeners.join(",")}`
     );
     for (const l of dbg) client.logger.log(`[AutoDJ] G:${guildId}   ${l}`);
@@ -1171,8 +1484,8 @@ module.exports = async (client) => {
     AutoDjLogger.decision({
       guildId,
       oyentes: listeners,
-      patronEfectivo: pattern.map((p) => (p.type === "random" ? "random" : `rec:${p.userId}`)),
-      patronConfigurado: rawPattern.map((p) => (p.type === "random" ? "random" : `rec:${p.userId}`)),
+      patronEfectivo: pattern.map((p) => (p.type === "random" ? "random" : `${p.type}:${p.userId}`)),
+      patronConfigurado: rawPattern.map((p) => (p.type === "random" ? "random" : `${p.type}:${p.userId}`)),
       refillAgregadas: block.length,
       huecosFaltantes: missingSlots.length,
       toAdd,
@@ -1185,7 +1498,7 @@ module.exports = async (client) => {
     // su nombre en la cola); para "random" el fallback es el que pidió la cola
     // o el bot. Se guarda de dónde vino cada una (tipo + usuario).
     const fallbackMember = queue.songs[0]?.member || vc?.guild?.members?.me;
-    const addedMeta = new Map(); // url -> { type: "rec"|"random", userId }
+    const addedMeta = new Map(); // url -> { type, userId }
     const movedByUrl = new Map(); // url -> Song que ya estaba en la cola y se movió
     for (const item of block) {
       // Si mientras tanto apagaron el AutoDJ / pulsaron Stop / la cola murió:
@@ -1196,11 +1509,14 @@ module.exports = async (client) => {
       }
       const url = item.track.url;
       const step = item.step;
-      const isRecUser = step.type === "rec" && step.userId && step.userId !== "*";
-      const meta = { type: step.type === "random" ? "random" : "rec", userId: isRecUser ? step.userId : null };
+      // El usuario EFECTIVO (tras la rotación cíclica) y el TIPO real vienen en el
+      // pick; así el embed fijo puede mostrar qué lógica se usó y para quién.
+      const effectiveUser = item.track.autoDjUserId || (step.userId && step.userId !== "*" ? step.userId : null);
+      const effectiveType = item.track.autoDjType || (step.type === "random" ? "random" : "rec");
+      const meta = { type: effectiveType, userId: effectiveUser };
       let member = fallbackMember;
-      if (isRecUser) {
-        member = vc?.guild?.members?.cache?.get(meta.userId) || fallbackMember;
+      if (effectiveUser) {
+        member = vc?.guild?.members?.cache?.get(effectiveUser) || fallbackMember;
       }
       try {
         if (item.existing) {
@@ -1361,7 +1677,7 @@ module.exports = async (client) => {
       client.logger.log(
         `[AutoDJ] +${addedMeta.size} (${[...addedMeta.values()].filter((m) => m.type === "rec").length} 🛸 rec + ` +
         `${[...addedMeta.values()].filter((m) => m.type === "random").length} 🎲 aleatorias) · patrón ` +
-        `${pattern.map((p) => (p.type === "random" ? "🎲" : `🛸:${p.userId}`)).join(" > ")} · cola ${q.songs.length}`
+        `${pattern.map((p) => stepShort(p)).join(" > ")} · cola ${q.songs.length}`
       );
     }
     // Solo se marca lo que el AutoDJ eligió (no contaminar el historial con los

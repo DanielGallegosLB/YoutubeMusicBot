@@ -52,19 +52,28 @@ const DEFAULT_AUTODJ_PATTERN = Object.freeze([
   Object.freeze({ type: "random" }),
 ]);
 
+// Tipos de paso válidos del patrón del AutoDJ:
+//   random     🎲 cualquiera de la lista de la fuente momentánea
+//   rec        🛸 favoritas + historial del usuario (recomendación general)
+//   liked      👍 top de las favoritas con like/⭐ del usuario (le gusta sí o sí)
+//   pedidas    📝 aleatoria de las canciones que ese usuario pidió
+//   aleatorias 🎰 aleatoria de las pedidas MENOS escuchadas de ese usuario
+//   artistas   🎤 novedosa de los artistas del perfil de ese usuario
+const AUTODJ_STEP_TYPES = Object.freeze(["random", "rec", "liked", "pedidas", "aleatorias", "artistas"]);
+
 /**
  * Normaliza el patrón de intercalado del AutoDJ.
- * Acepta: [{type:"rec",userId}, {type:"random"}] → devuelve lo mismo ya validado,
- * o null si está vacío/inválido (eso significa: usar el default).
+ * Acepta pasos {type, userId} (random no lleva userId) → devuelve lo mismo ya
+ * validado, o null si está vacío/inválido (eso significa: usar el default).
  */
 function normalizeAutoDjPattern(pattern) {
   if (!Array.isArray(pattern) || !pattern.length) return null;
   const out = [];
   for (const step of pattern.slice(0, MAX_PATTERN_STEPS)) {
     if (!step || typeof step !== "object") continue;
-    const type = step.type === "random" ? "random" : "rec";
+    const type = AUTODJ_STEP_TYPES.includes(step.type) ? step.type : "rec";
     if (type === "random") out.push({ type: "random" });
-    else out.push({ type: "rec", userId: String(step.userId || "*") });
+    else out.push({ type, userId: String(step.userId || "*") });
   }
   return out.length ? out : null;
 }
@@ -77,6 +86,7 @@ function normalizeAutoDjPattern(pattern) {
 module.exports = {
   DEFAULT_AUTODJ_PATTERN,
   MAX_PATTERN_STEPS,
+  AUTODJ_STEP_TYPES,
   normalizeAutoDjPattern,
   /**
    * Clave canónica de una URL: el MISMO video puede guardarse en favoritas con

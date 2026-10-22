@@ -25,17 +25,6 @@ module.exports = {
   type: ApplicationCommandType.ChatInput,
   options: [
     {
-      name: "usuario",
-      name_localizations: { "en-US": "user", "en-GB": "user" },
-      description: "Usuario cuyos favoritos querés vaciar (por defecto: vos)",
-      description_localizations: {
-        "en-US": "User whose favorites to empty (defaults to you)",
-        "en-GB": "User whose favorites to empty (defaults to you)",
-      },
-      type: ApplicationCommandOptionType.User,
-      required: false,
-    },
-    {
       name: "confirmar",
       name_localizations: { "en-US": "confirm", "en-GB": "confirm" },
       description: "Confirmá para vaciar los favoritos definitivamente",
@@ -45,6 +34,17 @@ module.exports = {
       },
       type: ApplicationCommandOptionType.Boolean,
       required: true,
+    },
+    {
+      name: "usuario",
+      name_localizations: { "en-US": "user", "en-GB": "user" },
+      description: "Usuario cuyos favoritos querés vaciar (por defecto: vos)",
+      description_localizations: {
+        "en-US": "User whose favorites to empty (defaults to you)",
+        "en-GB": "User whose favorites to empty (defaults to you)",
+      },
+      type: ApplicationCommandOptionType.User,
+      required: false,
     },
   ],
 
