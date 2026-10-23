@@ -6,6 +6,7 @@ const {
   cancelLeave,
 } = require("../handlers/EmptyChannelLeave");
 const { stopMarqueeActivity } = require("../handlers/ActivityManager");
+const AutoDjPresence = require("../handlers/AutoDjPresence");
 
 client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
   if (!newState || !newState.guild || !newState.member) return;
@@ -86,6 +87,31 @@ if (embed) {
       }
     } catch (e) {
       client.logger.error(`[UserHistory] Error showing preview:`, e);
+    }
+  }
+
+  // --- AutoDJ: si la persona se va del canal del bot, sus recomendaciones
+  //     (las que el bot le encoló) se van con ella y los huecos que dejó se
+  //     rellenan con las de los que siguen en el canal. ---
+  if (oldState.channelId !== newState.channelId) {
+    try {
+      const botChannel = guild.members.me?.voice?.channel;
+      const wasWithBot = !!botChannel && oldState.channelId === botChannel.id;
+      const stillWithBot = !!botChannel && newState.channelId === botChannel.id;
+      if (wasWithBot && !stillWithBot) {
+        const removed = await AutoDjPresence.removeUserRecommendations(
+          client,
+          guild,
+          newState.member.id
+        );
+        if (removed) {
+          client.logger.log(
+            `[AutoDJ] ${newState.member.user?.tag || newState.member.id} (G:${guildId}) dejó el canal: ${removed} recomendación(es) fuera de la cola.`
+          );
+        }
+      }
+    } catch (error) {
+      console.log(`AutoDJ presence error: `, error);
     }
   }
 

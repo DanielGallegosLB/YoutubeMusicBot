@@ -270,46 +270,104 @@ module.exports = {
     await client.music.set(`${guildId}.trackstats`, stats);
   },
 
+  /** Devuelve las URLs de canciones a las que este usuario dio like (trackstats),
+   *  con su metadata para poder reconstruir entradas.
+   */
+  async getLikedStatsByUser(client, guildId, userId) {
+    if (!guildId || !userId) return [];
+    const st = await this.guildStats(client, guildId);
+    const out = [];
+    for (const [url, e] of Object.entries(st || {})) {
+      if (!e || !Array.isArray(e.likedBy)) continue;
+      if (e.likedBy.includes(userId)) {
+        out.push({
+          url,
+          name: e.name || e.title || url,
+          title: e.title || e.name || null,
+          thumbnail: e.thumbnail || null,
+          uploader: e.uploader || null,
+          duration: Number(e.duration) || 0,
+          formattedDuration: e.formattedDuration || null,
+          source: e.source || null,
+          artist: e.artist || (e.uploader && typeof e.uploader === "object" ? e.uploader.name : e.uploader) || null,
+          likedBy: e.likedBy || [],
+          dislikedBy: e.dislikedBy || [],
+          plays: e.plays || 0,
+        });
+      }
+    }
+    return out;
+  },
+
   /** Registra un like global de un usuario a una canción (sin duplicar el mismo user). */
-  async trackLike(client, guildId, trackUrl, userId) {
+  async trackLike(client, guildId, trackUrl, userId, meta = {}) {
     if (!trackUrl) return;
     const st = await this.guildStats(client, guildId);
     const e = st[trackUrl] || { plays: 0, likedBy: [], dislikedBy: [] };
     e.likedBy = e.likedBy || [];
     e.dislikedBy = e.dislikedBy || [];
-    
+
     // Permitir acumulación de volumen por cada clic
-    e.likedBy.push(userId); 
-    
+    e.likedBy.push(userId);
+
     const di = e.dislikedBy.indexOf(userId);
     if (di !== -1) e.dislikedBy.splice(di, 1);
+
+    // Guardar/actualizar metadata para que el dashboard pueda mostrar nombres
+    if (meta.name && !e.name) e.name = meta.name;
+    if (meta.title && !e.name) e.name = meta.title;
+    if (meta.thumbnail && !e.thumbnail) e.thumbnail = meta.thumbnail;
+    if (meta.uploader && !e.uploader) e.uploader = meta.uploader;
+    if (meta.duration && !e.duration) e.duration = meta.duration;
+    if (meta.formattedDuration && !e.formattedDuration) e.formattedDuration = meta.formattedDuration;
+    if (meta.source && !e.source) e.source = meta.source;
+    if (meta.artist && !e.artist) e.artist = meta.artist;
+
     st[trackUrl] = e;
     await this.saveGuildStats(client, guildId, st);
   },
 
   /** Registra un dislike global de un usuario a una canción (sin duplicar el mismo user). */
-  async trackDislike(client, guildId, trackUrl, userId) {
+  async trackDislike(client, guildId, trackUrl, userId, meta = {}) {
     if (!trackUrl) return;
     const st = await this.guildStats(client, guildId);
     const e = st[trackUrl] || { plays: 0, likedBy: [], dislikedBy: [] };
     e.likedBy = e.likedBy || [];
     e.dislikedBy = e.dislikedBy || [];
-    
+
     // Permitir acumulación de volumen por cada dislike
-    e.dislikedBy.push(userId); 
-    
+    e.dislikedBy.push(userId);
+
     const li = e.likedBy.indexOf(userId);
     if (li !== -1) e.likedBy.splice(li, 1);
+
+    if (meta.name && !e.name) e.name = meta.name;
+    if (meta.title && !e.name) e.name = meta.title;
+    if (meta.thumbnail && !e.thumbnail) e.thumbnail = meta.thumbnail;
+    if (meta.uploader && !e.uploader) e.uploader = meta.uploader;
+    if (meta.duration && !e.duration) e.duration = meta.duration;
+    if (meta.formattedDuration && !e.formattedDuration) e.formattedDuration = meta.formattedDuration;
+    if (meta.source && !e.source) e.source = meta.source;
+    if (meta.artist && !e.artist) e.artist = meta.artist;
+
     st[trackUrl] = e;
     await this.saveGuildStats(client, guildId, st);
   },
 
   /** Registra una reproducción global de una canción en el gremio. */
-  async trackPlay(client, guildId, trackUrl) {
+  async trackPlay(client, guildId, trackUrl, meta = {}) {
     if (!trackUrl) return;
     const st = await this.guildStats(client, guildId);
     const e = st[trackUrl] || { plays: 0, likedBy: [], dislikedBy: [] };
     e.plays = (e.plays || 0) + 1;
+    if (meta.name && !e.name) e.name = meta.name;
+    if (meta.title && !e.name) e.name = meta.title;
+    if (meta.thumbnail && !e.thumbnail) e.thumbnail = meta.thumbnail;
+    if (meta.uploader && !e.uploader) e.uploader = meta.uploader;
+    if (meta.duration && !e.duration) e.duration = meta.duration;
+    if (meta.formattedDuration && !e.formattedDuration) e.formattedDuration = meta.formattedDuration;
+    if (meta.source && !e.source) e.source = meta.source;
+    if (meta.artist && !e.artist) e.artist = meta.artist;
     st[trackUrl] = e;
     await this.saveGuildStats(client, guildId, st);
   },
@@ -378,61 +436,98 @@ module.exports = {
     // entrada duplicada si el tema se guardó con otra variante de URL.
     let existing = this.findTrackByCanon(list, track.url) || list.find((t) => t.url === track.url);
     let created = false;
-    if (!existing) {
-      existing = {
-        url: track.url,
-        name: track.name || track.title || track.url,
-        title: track.title || track.name || null,
-        thumbnail: track.thumbnail || null,
-        uploader: track.uploader || null,
-        duration: Number(track.duration) || 0,
-        formattedDuration: track.formattedDuration || null,
-        playCount: 0,
-        likedBy: [],
-        dislikedBy: [],
-        savedAt: new Date().toISOString(),
-      };
-      list.push(existing);
-      created = true;
-    }
-    existing.likedBy = existing.likedBy || [];
-    existing.dislikedBy = existing.dislikedBy || [];
-    // Tope por reproducción (si el dashboard manda el claimKey de la canción
-    // que está sonando): si este usuario ya sumó en esta reproducción, no suma.
-    if (claimKey) {
-      if (!client.likeClaims) client.likeClaims = new Map();
-      if (client.likeClaims.size > 5000) client.likeClaims.clear();
-      let claims = client.likeClaims.get(claimKey);
-      if (!claims) { claims = new Set(); client.likeClaims.set(claimKey, claims); }
-      if (claims.has(userId)) {
-        return {
-          liked: true,
-          created: false,
-          likeCount: existing.likedBy.length,
-          dislikeCount: existing.dislikedBy.length,
-          score: existing.likedBy.length - existing.dislikedBy.length,
-          alreadyThisPlay: true,
-        };
-      }
-      claims.add(userId);
-    }
-    const disIdx = existing.dislikedBy.indexOf(userId);
-    if (disIdx !== -1) existing.dislikedBy.splice(disIdx, 1);
-    // Acumula cada 👍 que manda el dashboard (para que el total SUBA tanto en el
-    // dashboard como en el embed), con el tope por reproducción de arriba.
-    existing.likedBy.push(userId);
-    all["Canciones Favoritas"] = list;
-    await Promise.all([
-      client.music.set(key, all),
-      this.trackLike(client, guildId, track.url, userId),
-    ]);
-    return {
-      liked: true,
-      created,
-      likeCount: existing.likedBy.length,
-      dislikeCount: existing.dislikedBy.length,
-      score: existing.likedBy.length - existing.dislikedBy.length,
+    let inFavorites = !!existing;
+
+    const meta = {
+      name: track.name || track.title || null,
+      title: track.title || track.name || null,
+      thumbnail: track.thumbnail || null,
+      uploader: track.uploader || null,
+      duration: Number(track.duration) || 0,
+      formattedDuration: track.formattedDuration || null,
+      source: track.source || null,
+      artist: track.artist || (track.uploader && typeof track.uploader === "object" ? track.uploader.name : track.uploader) || null,
     };
+
+    if (existing) {
+      existing.likedBy = existing.likedBy || [];
+      existing.dislikedBy = existing.dislikedBy || [];
+      // Tope por reproducción (si el dashboard manda el claimKey de la canción
+      // que está sonando): si este usuario ya sumó en esta reproducción, no suma.
+      if (claimKey) {
+        if (!client.likeClaims) client.likeClaims = new Map();
+        if (client.likeClaims.size > 5000) client.likeClaims.clear();
+        let claims = client.likeClaims.get(claimKey);
+        if (!claims) { claims = new Set(); client.likeClaims.set(claimKey, claims); }
+        if (claims.has(userId)) {
+          await this.trackLike(client, guildId, track.url, userId, meta).catch(() => {});
+          return {
+            liked: true,
+            created: false,
+            likeCount: existing.likedBy.length,
+            dislikeCount: existing.dislikedBy.length,
+            score: existing.likedBy.length - existing.dislikedBy.length,
+            alreadyThisPlay: true,
+            inFavorites,
+          };
+        }
+        claims.add(userId);
+      }
+      const disIdx = existing.dislikedBy.indexOf(userId);
+      if (disIdx !== -1) existing.dislikedBy.splice(disIdx, 1);
+      // Acumula cada 👍 que manda el dashboard
+      existing.likedBy.push(userId);
+      if (meta.name && !existing.name) existing.name = meta.name;
+      if (meta.title && !existing.title) existing.title = meta.title;
+      if (meta.thumbnail && !existing.thumbnail) existing.thumbnail = meta.thumbnail;
+      if (meta.uploader && !existing.uploader) existing.uploader = meta.uploader;
+      if (meta.duration && !existing.duration) existing.duration = meta.duration;
+      if (meta.formattedDuration && !existing.formattedDuration) existing.formattedDuration = meta.formattedDuration;
+      all["Canciones Favoritas"] = list;
+      await Promise.all([
+        client.music.set(key, all),
+        this.trackLike(client, guildId, track.url, userId, meta),
+      ]);
+      return {
+        liked: true,
+        created,
+        likeCount: existing.likedBy.length,
+        dislikeCount: existing.dislikedBy.length,
+        score: existing.likedBy.length - existing.dislikedBy.length,
+        inFavorites,
+      };
+    } else {
+      // NO crear en "Canciones Favoritas". Solo guardar el like en trackstats
+      // con metadata para que el dashboard pueda mostrarlo y el AutoDJ lo use.
+      if (claimKey) {
+        if (!client.likeClaims) client.likeClaims = new Map();
+        if (client.likeClaims.size > 5000) client.likeClaims.clear();
+        let claims = client.likeClaims.get(claimKey);
+        if (!claims) { claims = new Set(); client.likeClaims.set(claimKey, claims); }
+        if (claims.has(userId)) {
+          await this.trackLike(client, guildId, track.url, userId, meta).catch(() => {});
+          return {
+            liked: true,
+            created: false,
+            likeCount: 0,
+            dislikeCount: 0,
+            score: 0,
+            alreadyThisPlay: true,
+            inFavorites: false,
+          };
+        }
+        claims.add(userId);
+      }
+      await this.trackLike(client, guildId, track.url, userId, meta);
+      return {
+        liked: true,
+        created: false,
+        likeCount: 0,
+        dislikeCount: 0,
+        score: 0,
+        inFavorites: false,
+      };
+    }
   },
 
   /** Da 👎 a una cancion EN NOMBRE de otro usuario (dashboard). La agrega a sus
@@ -445,39 +540,55 @@ module.exports = {
     const list = all["Canciones Favoritas"] || [];
     let existing = this.findTrackByCanon(list, track.url) || list.find((t) => t.url === track.url);
     let created = false;
-    if (!existing) {
-      existing = {
-        url: track.url,
-        name: track.name || track.title || track.url,
-        title: track.title || track.name || null,
-        thumbnail: track.thumbnail || null,
-        uploader: track.uploader || null,
-        duration: Number(track.duration) || 0,
-        formattedDuration: track.formattedDuration || null,
-        playCount: 0,
-        likedBy: [],
-        dislikedBy: [],
-        savedAt: new Date().toISOString(),
-      };
-      list.push(existing);
-      created = true;
-    }
-    existing.likedBy = existing.likedBy || [];
-    existing.dislikedBy = existing.dislikedBy || [];
-    const li = existing.likedBy.indexOf(userId);
-    if (li !== -1) existing.likedBy.splice(li, 1);
-    existing.dislikedBy.push(userId);
-    all["Canciones Favoritas"] = list;
-    await Promise.all([
-      client.music.set(key, all),
-      this.trackDislike(client, guildId, track.url, userId),
-    ]);
-    return {
-      created,
-      likeCount: existing.likedBy.length,
-      dislikeCount: existing.dislikedBy.length,
-      score: existing.likedBy.length - existing.dislikedBy.length,
+    let inFavorites = !!existing;
+
+    const meta = {
+      name: track.name || track.title || null,
+      title: track.title || track.name || null,
+      thumbnail: track.thumbnail || null,
+      uploader: track.uploader || null,
+      duration: Number(track.duration) || 0,
+      formattedDuration: track.formattedDuration || null,
+      source: track.source || null,
+      artist: track.artist || (track.uploader && typeof track.uploader === "object" ? track.uploader.name : track.uploader) || null,
     };
+
+    if (existing) {
+      existing.likedBy = existing.likedBy || [];
+      existing.dislikedBy = existing.dislikedBy || [];
+      const li = existing.likedBy.indexOf(userId);
+      if (li !== -1) existing.likedBy.splice(li, 1);
+      existing.dislikedBy.push(userId);
+      if (meta.name && !existing.name) existing.name = meta.name;
+      if (meta.title && !existing.title) existing.title = meta.title;
+      if (meta.thumbnail && !existing.thumbnail) existing.thumbnail = meta.thumbnail;
+      if (meta.uploader && !existing.uploader) existing.uploader = meta.uploader;
+      if (meta.duration && !existing.duration) existing.duration = meta.duration;
+      if (meta.formattedDuration && !existing.formattedDuration) existing.formattedDuration = meta.formattedDuration;
+      all["Canciones Favoritas"] = list;
+      await Promise.all([
+        client.music.set(key, all),
+        this.trackDislike(client, guildId, track.url, userId, meta),
+      ]);
+      return {
+        disliked: true,
+        created,
+        likeCount: existing.likedBy.length,
+        dislikeCount: existing.dislikedBy.length,
+        score: existing.likedBy.length - existing.dislikedBy.length,
+        inFavorites,
+      };
+    } else {
+      await this.trackDislike(client, guildId, track.url, userId, meta);
+      return {
+        disliked: true,
+        created: false,
+        likeCount: 0,
+        dislikeCount: 0,
+        score: 0,
+        inFavorites: false,
+      };
+    }
   },
 
   /** Add a dislike on a track by URL (acumula sin tope: cada 👎 suma) */
@@ -694,13 +805,37 @@ module.exports = {
 
   /**
    * Pool del AutoDJ agrupado por usuario: { [userId]: Track[] } usando SOLO las
-   * favoritas reales (con like o ⭐ manual), ordenadas por score.
+   * favoritas reales (con like o ⭐ manual), ordenadas por score. También
+   * incluye likes guardados solo en trackstats (para separar 👍 de ⭐).
    */
   async getAutoDjPoolsByUser(client, guildId, userIds) {
     const pools = {};
     for (const uid of userIds) {
       const favs = await this.getSortedFavorites(client, guildId, uid);
       const real = favs.filter((t) => this.isRealFavorite(t) && t.url);
+      // Añadir likes que no estén en la lista de favoritas
+      try {
+        const likedStats = await this.getLikedStatsByUser(client, guildId, uid);
+        if (Array.isArray(likedStats) && likedStats.length) {
+          const seen = new Set(real.map((t) => t.url));
+          for (const s of likedStats) {
+            if (!s?.url || seen.has(s.url)) continue;
+            real.push({
+              url: s.url,
+              name: s.name || s.title || s.url,
+              title: s.title || s.name || null,
+              thumbnail: s.thumbnail || null,
+              uploader: s.uploader || null,
+              duration: Number(s.duration) || 0,
+              formattedDuration: s.formattedDuration || null,
+              likedBy: Array.isArray(s.likedBy) ? s.likedBy.slice() : [uid],
+              dislikedBy: Array.isArray(s.dislikedBy) ? s.dislikedBy.slice() : [],
+              manual: false,
+            });
+            seen.add(s.url);
+          }
+        }
+      } catch (_) {}
       if (real.length) pools[uid] = real;
     }
     return pools;

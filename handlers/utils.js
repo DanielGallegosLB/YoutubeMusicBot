@@ -726,6 +726,26 @@ module.exports = async (client) => {
     }
   };
 
+  // ¿La canción que figura en `client.actualPlaying` ya TERMINÓ y ya no está en
+  // la cola? Si es así, lo que suena AHORA es songs[0] (la siguiente) y el
+  // panel tiene que mostrarla YA: esperar a que DisTube termine de resolver el
+  // stream puede tardar 10-20 s (yt-dlp), y durante ese tiempo el panel se
+  // quedaba con la canción VIEJA en "0. CURRENT TRACK".
+  const realSongEnded = (q, realNow) => {
+    if (!realNow?.url) return false;
+    const songs = q?.songs || [];
+    // Si sigue en la cola, es la que está sonando: no termin��.
+    if (songs.some((s) => s?.url === realNow.url)) return false;
+    // El bot sabe cuándo terminó: el evento finishSong lo marca.
+    if (q?._endedSongUrl && q._endedSongUrl === realNow.url) return true;
+    // Fallback: si ya pasó (duración - margen) desde que empezó, terminó.
+    // El margen absorbe el desvío del reloj de reproducción (hasta ~3 s).
+    const startedAt = Number(realNow.elapsed) || 0;
+    const dur = Number(realNow.duration) || 0;
+    if (!startedAt || !dur) return false;
+    return (Date.now() - startedAt) >= Math.max(0, dur - 4) * 1000;
+  };
+
   // update queue
   /**
    *
@@ -775,7 +795,11 @@ module.exports = async (client) => {
         const realObj = freshQueue.songs.find((s) => s?.url === realNow.url);
         if (realObj) {
           currentSong = realObj;
-        } else {
+        } else if (!realSongEnded(freshQueue, realNow)) {
+          // La real SIGUE sonando pero no está en la cola (skip() en una
+          // transición colgada / refill en caliente): se muestra la sintética
+          // para no mentir. Si en cambio ya TERMINÓ, songs[0] es la que suena
+          // ahora y se deja el CURRENT TRACK como está (la siguiente).
           const uidTag = realNow.requestedBy
             ? (guild?.members?.cache?.get(realNow.requestedBy)?.user?.tag || `<@${realNow.requestedBy}>`)
             : null;
@@ -982,7 +1006,10 @@ module.exports = async (client) => {
           const found = freshQueue.songs.find((s) => s?.url === actual.url);
           if (found) {
             track = found;
-          } else {
+          } else if (!realSongEnded(freshQueue, actual)) {
+            // Sigue sonando pero no está en la cola (skip en transición colgada):
+            // se muestra la sintética. Si ya TERMINÓ, songs[0] es la que suena
+            // ahora → se deja el panel con la siguiente (no con la vieja).
             track = {
               ...track,
               url: actual.url,

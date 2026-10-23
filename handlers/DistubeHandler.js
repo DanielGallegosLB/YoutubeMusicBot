@@ -367,6 +367,7 @@ module.exports = async (client) => {
             if (_queue?._autoDjSelected) { _queue._autoDjSelected.clear(); delete _queue._autoDjSelected; }
             if (_queue?._autoDjExcludedSession) { _queue._autoDjExcludedSession.clear(); delete _queue._autoDjExcludedSession; }
             if (_queue) delete _queue._autoDjStep;   // el ciclo del patrón vuelve al paso 1
+            if (_queue) delete _queue._autoDjTurn;   // el reparto entre oyentes vuelve al primero
             if (_queue?.songs?.length) {
               // La que está SONANDO (songs[0]) se queda AUNQUE la haya metido el
               // bot: no se puede "des-reproducir" y quitarla dejaba la cola

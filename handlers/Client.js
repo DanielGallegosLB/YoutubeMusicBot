@@ -209,7 +209,7 @@ class MusicBot extends Client {
     // la extracción de yt-dlp al reproducirlas: el skip/transición es inmediato.
     // 1 sola a la vez para no competir con la reproducción ni saturar la red.
     this._warmInFlight = this._warmInFlight || new Set();
-    this.warmStreamURLs = (queue, count = 2) => {
+    this.warmStreamURLs = (queue, count = 3) => {
       try {
         if (!queue?.songs?.length) return;
         const targets = queue.songs

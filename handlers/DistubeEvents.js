@@ -400,6 +400,39 @@ module.exports = async (client) => {
       );
     });
 
+  // ---- AutoDJ: encolar SIN bloquear la "_taskQueue" de la cola ----
+  // distube.play() hace esto:
+  //     await queue._taskQueue.queuing(true)   <-- TOMA la cola
+  //     await this.handler.resolve(url)        <-- yt-dlp: 3-15 s
+  //     queue._taskQueue.resolve()             <-- la suelta recién ahí
+  // La transición entre canciones (handleSongFinish) ESPERA esa misma cola,
+  // así que el play() del AutoDJ la BLOQUEABA: de ahí los 16-36 s de silencio
+  // entre tema y tema (y el watchdog saltando/reconectando).
+  // Acá se RESUELVE el video FUERA de la cola y se le pasa a play() el Song ya
+  // resuelto: handler.resolve() devuelve la instancia de Song al instante, así
+  // que la cola se suelta en ~1 ms y la transición nunca queda pegada.
+  const enqueueSong = async (client, vc, url, options) => {
+    // Sin handler no se puede resolver por fuera: se cae al play() de siempre.
+    if (typeof client.distube?.handler?.resolve !== "function") {
+      return client.distube.play(vc, url, options);
+    }
+    const resolved = await withTimeout(
+      client.distube.handler.resolve(url, { member: options?.member }),
+      40000,
+      `resolve ${url}`
+    );
+    if (!resolved || resolved.songs?.length || !resolved.url) {
+      // Se resolvió como lista/set: nunca se mete una lista a la cola.
+      throw new Error(`resolve_no_song ${url}`);
+    }
+    await withTimeout(
+      client.distube.play(vc, resolved, options),
+      20000,
+      `play ${url}`
+    );
+    return resolved;
+  };
+
   // ---- Validador de la siguiente canción ----
   // DisTube resuelve la canción siguiente con SU extractor al terminar la
   // actual; si esa resolución se cuelga (YouTube/throttle/age-gate), la
@@ -533,9 +566,16 @@ module.exports = async (client) => {
       if (liveQ?.voice?.connection && liveQ !== lq) {
         try { await liveQ.leave().catch(() => {}); } catch (e) {}
       }
+      // Se pasa el objeto Song (ya resuelto, y con su stream.url si estaba warm):
+      //   - con la URL, DisTube re-resuelve DENTRO del play (3-15 s) y la
+      //     reconexión arranca en silencio;
+      //   - `pick.user` es un User, NO un GuildMember -> DisTube tiraba
+      //     INVALID_TYPE y la reconexión FALLABA EN SILENCIO (el .catch la
+      //     tapaba y el bot se quedaba mudo).
+      const pickIsSong = !!(pick && typeof pick === "object" && pick.stream && typeof pick.stream === "object");
       await withTimeout(
-        client.distube.play(vc, pick.url, {
-          member: pick.user || null,
+        client.distube.play(vc, pickIsSong ? pick : pick.url, {
+          member: pickIsSong ? (pick.member || null) : null,
           textChannel: lq.textChannel,
           skip: true,
         }),
@@ -1055,14 +1095,57 @@ module.exports = async (client) => {
       return `${icon}:${p.userId}`;
     };
     // Si el paso trae userId "*" y un tipo que necesita destinatario, se reparte
-    // de forma CÍCLICA entre los oyentes presentes en orden de conexión: el
-    // índice del hueco dentro del patrón decide a quién le toca la próxima.
-    const cycleUser = (type, userId, slotIndex) => {
+    // de forma CÍCLICA entre los oyentes presentes en orden de conexión.
+    //
+    // ANTES: el destinatario era `listeners[slotIndex % n]`, donde slotIndex era
+    // el índice del paso DENTRO del patrón. Con un patrón de N pasos y M
+    // oyentes ese índice sólo cambiaba cada LCM(N, M) → en la práctica el paso
+    // "liked" caía SIEMPRE en el mismo oyente (dani_sas) y todas las 🛸/📝/🎤
+    // acababan siendo suyas.
+    // AHORA: un CONTADOR PROPIO de ciclo (queue._autoDjTurn) que avanza en cada
+    // paso "*", de modo que los pasos se reparten round-robin entre TODOS los
+    // oyentes. Además se salta a los oyentes que NO tienen contenido para ese
+    // tipo de paso (si no, el paso se perdería y la cola quedaría con huecos).
+    const hasContentFor = (type, uid) => {
+      if (!uid) return false;
+      if (type === "liked") return (likedPoolByUser[uid] || []).length > 0;
+      if (type === "pedidas" || type === "aleatorias") {
+        return (pedidasPoolByUser[uid] || []).length > 0 ||
+          (aleatoriasPoolByUser[uid] || []).length > 0 ||
+          (requestsByUser[uid] || []).length > 0;
+      }
+      if (type === "artistas") {
+        return (artistasPoolByUser[uid] || []).length > 0 ||
+          (artistsByUser[uid] || []).length > 0;
+      }
+      // "rec"/"rec:*": sus favoritas + su historial.
+      return (poolsByUser[uid] || []).length > 0 || (historyByUser.get(uid) || []).length > 0;
+    };
+    const cycleUser = (type, userId) => {
       if (!type || type === "random") return null;
       if (userId && userId !== "*") return userId;
       if (!listeners.length) return null;
       const n = listeners.length;
-      return listeners[((slotIndex % n) + n) % n];
+      // Contador PROPIO POR TIPO DE PASO: cada tipo rota round-robin entre los
+      // oyentes que tienen contenido para ese tipo. Con un contador único los
+      // pasos y los oyentes quedaban EMPAREJADOS (al "liked" le tocaba siempre
+      // el mismo usuario) porque el turno avanzaba en el mismo orden que el
+      // patrón.
+      const turns = (queue._autoDjTurn && typeof queue._autoDjTurn === "object")
+        ? queue._autoDjTurn
+        : (queue._autoDjTurn = {});
+      const start = (((turns[type] || 0) % n) + n) % n;
+      for (let k = 0; k < n; k++) {
+        const idx = (start + k) % n;
+        const uid = listeners[idx];
+        if (!hasContentFor(type, uid)) continue;
+        turns[type] = (idx + 1) % n;
+        return uid;
+      }
+      // Nadie tiene contenido para ese tipo de paso: se entrega el turno igual
+      // (el paso caerá a sus fallbacks) para no trabar el ciclo de la cola.
+      turns[type] = (start + 1) % n;
+      return listeners[start];
     };
 
     // playCount por URL para el paso 🎲, que maneja URLs sueltas y no objetos
@@ -1118,10 +1201,10 @@ module.exports = async (client) => {
       }, entry.origen === "random" ? "pick.random" : "pick.rec");
     };
 
-    const pickForStep = async (step, taken, inQueue, slotIndex = 0) => {
+    const pickForStep = async (step, taken, inQueue) => {
       // Destinatario efectivo del paso: si es "*" y el tipo necesita un usuario,
       // se reparte de forma cíclica entre los oyentes (orden de conexión).
-      const effUser = cycleUser(step.type, step.userId, slotIndex);
+      const effUser = cycleUser(step.type, step.userId);
       // 🎲 → al azar entre TODAS las canciones de la lista ingresada que aún no
       // sonaron ni se eligieron (aunque el loader no las haya encolado todavía).
       // Sin reposición: cada una sale una sola vez por sesión. Si la lista ya no
@@ -1192,7 +1275,8 @@ module.exports = async (client) => {
             logPick({
               origen: "aleatorias",
               motivo: "pedida-menos-escuchada",
-              paso: stepShort(step),
+              paso: `${step.type}:${effUser || "*"}`,
+              destinatario: effUser || null,
               url: chosen.url,
               nombre: chosen.name || null,
               yaEnCola: inQueue.has(chosen.url),
@@ -1238,7 +1322,8 @@ module.exports = async (client) => {
             logPick({
               origen: "artistas",
               motivo: "artista-perfil",
-              paso: stepShort(step),
+              paso: `${step.type}:${effUser || "*"}`,
+              destinatario: effUser || null,
               url: chosen.url,
               nombre: chosen.name || null,
               yaEnCola: inQueue.has(chosen.url),
@@ -1278,7 +1363,8 @@ module.exports = async (client) => {
               logPick({
                 origen: "artistas",
                 motivo: "artista-perfil-youtube",
-                paso: stepShort(step),
+                paso: `${step.type}:${effUser || "*"}`,
+                destinatario: effUser || null,
                 url: chosen.url,
                 nombre: chosen.name || null,
                 yaEnCola: false,
@@ -1387,6 +1473,7 @@ module.exports = async (client) => {
           tipo: step.type,
           motivo,
           paso: effUser ? `${step.type}:${effUser}` : `${step.type}:*`,
+          destinatario: effUser || null,
           url: found.url,
           nombre: found.name || found.title || null,
           yaEnCola: !!found.existing,
@@ -1456,7 +1543,7 @@ module.exports = async (client) => {
     const block = [];
     for (let i = 0; i < toAdd; i++) {
       const step = pattern[(si + i) % pattern.length];
-      const pick = await pickForStep(step, taken, inQueue, si + i);
+      const pick = await pickForStep(step, taken, inQueue);
       if (!pick) continue;
       seenMark(seen, pick.url);
       // Usada: el loader no la encola de nuevo y la 🎲 no la repite.
@@ -1467,15 +1554,20 @@ module.exports = async (client) => {
     if (!block.length) {
       client.logger.log(
         `[AutoDJ] G:${guildId} refill: patrón=${pattern.map((p) => stepShort(p)).join(">")}` +
-        ` huecos=${botSlots.join(",")} faltan=${missingSlots.join(",")} toAdd=${toAdd} oyentes=${listeners.join(",")}`
+        ` huecos=${botSlots.join(",")} faltan=${missingSlots.join(",")} toAdd=${toAdd} oyentes=${listeners.join(",")} turno=${JSON.stringify(queue._autoDjTurn || {})}`
       );
       for (const l of dbg) client.logger.log(`[AutoDJ] G:${guildId}   ${l}`);
       return 0;
     }
-    queue._autoDjStep = (si + block.length) % pattern.length;
+    // El patrón avanza UN PASO por hueco intentados (no por canciones
+    // agregadas): así el paso del patrón queda alineado con el hueco de la
+    // cola. Antes avanzaba por `block.length`, o sea que un paso que fallaba
+    // se saltaba y el patrón se desfasaba respecto de los huecos (el hueco
+    // que quedó vacío lo llenaba otro paso al refill siguiente).
+    queue._autoDjStep = (si + toAdd) % pattern.length;
     client.logger.log(
       `[AutoDJ] G:${guildId} refill: patrón=${pattern.map((p) => stepShort(p)).join(">")}` +
-      ` huecos=${botSlots.join(",")} faltan=${missingSlots.join(",")} toAdd=${toAdd} oyentes=${listeners.join(",")}`
+      ` huecos=${botSlots.join(",")} faltan=${missingSlots.join(",")} toAdd=${toAdd} oyentes=${listeners.join(",")} turno=${JSON.stringify(queue._autoDjTurn || {})}`
     );
     for (const l of dbg) client.logger.log(`[AutoDJ] G:${guildId}   ${l}`);
 
@@ -1554,11 +1646,7 @@ module.exports = async (client) => {
             }
             item.playUrl = single;
             const t0 = Date.now();
-            await withTimeout(
-              client.distube.play(vc, single, { member, textChannel: queue.textChannel, selfDeaf: true, skip: false }),
-              60000,
-              `toca ${url} (1ª de la lista) -> ${single}`
-            );
+            await enqueueSong(client, vc, single, { member, textChannel: queue.textChannel, selfDeaf: true, skip: false });
             client.logger.log(`[AutoDJ] G:${guildId} añadida ${single} (1ª de la lista ${url}, ${Date.now() - t0}ms)`);
             addedMeta.set(single, meta);
           } else {
@@ -1598,11 +1686,7 @@ module.exports = async (client) => {
           client.logger.warn(`[AutoDJ] G:${guildId} ${url} no se pudo pre-validar (yt-dlp / no es single): se descarta`);
           continue;
         }
-        await withTimeout(
-          client.distube.play(vc, single, { member, textChannel: queue.textChannel, selfDeaf: true, skip: false }),
-          45000,
-          url
-        );
+        await enqueueSong(client, vc, single, { member, textChannel: queue.textChannel, selfDeaf: true, skip: false });
         client.logger.log(`[AutoDJ] G:${guildId} añadida ${single} (${Date.now() - t0}ms)`);
         addedMeta.set(single, meta);
       } catch (e) {
@@ -1651,6 +1735,10 @@ module.exports = async (client) => {
       song._autoDj = true;
       song.autoDjType = meta.type;
       song.autoDjUserId = meta.userId || null;
+      // `_autoDjAdded`: la canción la ENCOLÓ el bot para este usuario. Si ya
+      // estaba en la cola (la puso el usuario con su propia lista) NO se marca:
+      // así, al irse él, no se le borra su propia canción de la cola.
+      song._autoDjAdded = item.existing ? song._autoDjAdded === true : true;
       blockSongs.push(song);
     }
     if (blockSongs.length) {
@@ -1674,6 +1762,12 @@ module.exports = async (client) => {
         finalSeen.add(x.url);
         return true;
       });
+      // Pre-resolver el stream de las canciones del AutoDJ en segundo plano.
+      // El warm del playSong corre ANTES de que el AutoDJ las agregue, así que
+      // la que queda en la posición 1 (la siguiente a sonar) llegaba a la
+      // transición SIN stream.url -> DisTube hacía la extracción de yt-dlp en ese
+      // momento (5-15 s de silencio). Ahora se resuelve con tiempo de sobra.
+      try { client.warmStreamURLs?.(q, 3); } catch (e) {}
       client.logger.log(
         `[AutoDJ] +${addedMeta.size} (${[...addedMeta.values()].filter((m) => m.type === "rec").length} 🛸 rec + ` +
         `${[...addedMeta.values()].filter((m) => m.type === "random").length} 🎲 aleatorias) · patrón ` +
@@ -1749,6 +1843,8 @@ module.exports = async (client) => {
       duration: Number(song.duration) || 0,
       formattedDuration: song.formattedDuration || null,
     });
+    // Ya hay una canción sonando: el flag de "la anterior terminó" se limpia.
+    try { queue._endedSongUrl = null; } catch (e) {}
     // Canción nueva: descartar la última posición capturada de la anterior.
     client._voiceLastPos?.delete(gid);
 
@@ -1756,8 +1852,8 @@ module.exports = async (client) => {
 patchClock(queue, gid);
     resetClockDrift(gid);
     applyNormalizeDefault(queue, gid);
-    // Pre-resolver las siguientes canciones: hace que el skip sea instantáneo.
-    client.warmStreamURLs?.(queue, 2);
+      // Pre-resolver las siguientes canciones: hace que el skip sea instantáneo.
+    client.warmStreamURLs?.(queue, 3);
     instrumentVoice(queue);
 
     // Diagnóstico de transición: cuánto silencio hubo entre el player idle
@@ -2227,6 +2323,10 @@ if (song.user?.id) {
   client.distube.on("finishSong", async (queue, song) => {
     // Fire-and-forget so the next song starts immediately (these do heavy DB/network work)
     client.editPlayerMessage(queue.textChannel).catch(() => {});
+    // La canción que terminó: el panel la usa para saber que lo que suena
+    // AHORA es la siguiente (songs[0]) y no esperar a que DisTube termine de
+    // resolver el stream (10-20 s) para actualizar el CURRENT TRACK.
+    try { queue._endedSongUrl = song?.url || null; } catch (e) {}
     client.updatequeue(queue).catch(() => {});
     client.updateplayer(queue).catch(() => {});
 

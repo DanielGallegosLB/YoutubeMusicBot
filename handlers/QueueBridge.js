@@ -337,13 +337,21 @@ async function writeFavoritesSnapshot(client) {
           const canon = PlaylistStore.canonUrlKey(url);
           const likedBy = [...new Set((e.likedBy || []).map(String))];
           const dislikedBy = [...new Set((e.dislikedBy || []).map(String))];
-          const prev = statsByUrl[canon] || { url, plays: 0, likes: 0, dislikes: 0, likedBy: [], dislikedBy: [] };
+          const prev = statsByUrl[canon] || { url: canon, plays: 0, likes: 0, dislikes: 0, likedBy: [], dislikedBy: [] };
           prev.plays = Math.max(prev.plays, Number(e.plays) || 0);
           // Volumen acumulado: se SUMAN los votos de cada variante de URL.
           prev.likes += (e.likedBy || []).length;
           prev.dislikes += (e.dislikedBy || []).length;
           prev.likedBy = [...new Set([...prev.likedBy, ...likedBy])];
           prev.dislikedBy = [...new Set([...prev.dislikedBy, ...dislikedBy])];
+          if (e.name && !prev.name) prev.name = e.name;
+          if (e.title && !prev.name) prev.name = e.title;
+          if (e.thumbnail && !prev.thumbnail) prev.thumbnail = e.thumbnail;
+          if (e.uploader && !prev.uploader) prev.uploader = e.uploader;
+          if (e.duration && !prev.duration) prev.duration = e.duration;
+          if (e.formattedDuration && !prev.formattedDuration) prev.formattedDuration = e.formattedDuration;
+          if (e.source && !prev.source) prev.source = e.source;
+          if (e.artist && !prev.artist) prev.artist = e.artist;
           statsByUrl[canon] = prev;
         }
       } catch {}
