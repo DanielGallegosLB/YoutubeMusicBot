@@ -843,16 +843,16 @@ module.exports = async (client) => {
           guild?.members?.cache?.get(currentSong.autoDjUserId)?.user?.tag) ||
         (currentOwners ? currentOwners.split(",")[0].trim() : null);
       // Rótulo del AutoDJ: ícono según la LÓGICA usada + nombre del usuario.
-      //   rec        🛸  favoritas/historial del usuario
-      //   liked      👍  canciones con like/⭐ del usuario ("le gusta sí o sí")
+      //   rec        🛸  recomendaciones
+      //   liked      🛸  recomendaciones
       //   pedidas    📝  canciones que ese usuario pidió
-      //   aleatorias 🎰  aleatoria de las pedidas menos escuchadas del usuario
-      //   artistas   🎤  artistas del perfil de ese usuario
+      //   aleatorias 🎲  aleatoria de las pedidas del usuario
+      //   artistas   🎤  novedades por artistas del perfil
       //   random     🎲  aleatoria de la lista
       const autoDjIcon = (type) =>
-        type === "liked" ? "👍" : type === "pedidas" ? "📝" : type === "aleatorias" ? "🎰" : type === "artistas" ? "🎤" : type === "random" ? "🎲" : "🛸";
+        type === "liked" ? "🛸" : type === "rec" ? "🛸" : type === "pedidas" ? "📝" : type === "aleatorias" ? "🎲" : type === "artistas" ? "🎤" : type === "random" ? "🎲" : "🛸";
       const autoDjTypeName = (type) =>
-        type === "liked" ? "Le gusta" : type === "pedidas" ? "Pedida" : type === "aleatorias" ? "Aleatoria de pedidas" : type === "artistas" ? "Artista del perfil" : type === "random" ? "Aleatoria de la lista" : "Recomendación";
+        type === "liked" ? "Recomendación" : type === "rec" ? "Recomendación" : type === "pedidas" ? "Pedida" : type === "aleatorias" ? "Aleatoria de pedidas" : type === "artistas" ? "Artistas del perfil" : type === "random" ? "Aleatoria" : "Recomendación";
       const currentReq =
         currentIsAutoDj
           ? (currentSong?.autoDjType === "random"
@@ -876,8 +876,7 @@ module.exports = async (client) => {
       const upNextStats = await Promise.all(upNextTracks.map((track) =>
         track.url ? statsWithCache(client, guildId, track.url, allPlaylists, guild) : Promise.resolve({ likes: 0, dislikes: 0, plays: 0 })
       ));
-      // Rótulo para canciones puestas por el AutoDJ: SOLO el nombre de la persona
-      // usada para recomendar (para "rec"), o 🎲 Aleatoria. Nada de listas largas.
+      // Rótulo para canciones puestas por el AutoDJ: ícono + usuario cuando aplica.
       const autodjLabel = (track, firstOwner) => {
         if (!track || (!track.autoDj && !track._autoDj)) return null;
         if (track.autoDjType === "random") return "🎲 Aleatoria";
@@ -905,7 +904,14 @@ module.exports = async (client) => {
         const tIsAutoDj = !!(track?.autoDj || track?._autoDj);
         const tOwners = (tStats.owners || []).slice(0, 3).join(", ");
         const tOwnersStr = tIsAutoDj || !tOwners ? "" : ` | 👤 ${tOwners}`;
-        const tReq = autodjLabel(track, (tStats.owners || [])[0]) || track.user?.tag || "Auto DJ";
+        // Para temas pedidos MANUALMENTE con /play o botón (no por AutoDJ), poner
+        // un icono claro para distinguirlos.
+        let tReq = autodjLabel(track, (tStats.owners || [])[0]);
+        if (!tReq) {
+          if (track.requestedBy?.tag) tReq = `🎵 ${track.requestedBy.tag}`;
+          else if (track.user?.tag) tReq = `🎵 ${track.user.tag}`;
+          else tReq = "Auto DJ";
+        }
         queueString += `\`${index}.\` **${client.getTitle(track)}** - ${
           track.isLive ? "LIVE STREAM" : track.formattedDuration.split(" | ")[0]
         } - \`${tReq}\`${tStatsStr}${tOwnersStr}\n`;

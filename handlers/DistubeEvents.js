@@ -792,19 +792,47 @@ module.exports = async (client) => {
     } catch (e) {}
 
     // Patrón de intercalado (dashboard / comando): [rec:user, random, ...].
-    const rawPattern =
+    let rawPattern =
       (await PlaylistStore.getAutoDjPattern(client, guildId).catch(() => null)) ||
       PlaylistStore.DEFAULT_AUTODJ_PATTERN;
-    // REACTIVO A LOS PRESENTES: los pasos "rec de fulano" SOLO cuentan si fulano
-    // sigue en el canal. Si se va, su recomendación desaparece del ciclo (y
-    // vuelve sola si regresa). Los pasos "rec:*" (cualquiera) y 🎲 siempre valen.
-    // Si al filtrar no queda ningún paso (todos se fueron), se usa 🎲 para no
-    // dejar el AutoDJ sin nada que intercalar.
+    // Patrón por rondas: 1 recomendación para CADA usuario en voz -> 1 aleatoria
+    // de sus pedidas para CADA usuario -> 1 novedad por artistas de su perfil
+    // para CADA usuario. Al final una aleatoria global de la lista.
+    if (listeners.length >= 1) {
+      const order = listeners.slice();
+      const built = [];
+      // Ronda 1: 1 recomendación por CADA usuario en voz (en orden)
+      for (const uid of order) built.push({ type: "liked", userId: uid });
+      // Ronda 2: 1 aleatoria de sus PEDIDAS por CADA usuario en voz (en orden)
+      for (const uid of order) built.push({ type: "aleatorias", userId: uid });
+      // Ronda 3: 1 novedad por ARTISTAS de su perfil por CADA usuario en voz (en orden)
+      for (const uid of order) built.push({ type: "artistas", userId: uid });
+      // Al final: 1 canción aleatoria global
+      built.push({ type: "random" });
+      rawPattern = built;
+    }
+    // Mantener orden estricto por rondas
     const listenerSet = new Set(listeners);
-    const filteredPattern = rawPattern.filter(
-      (p) => p.type === "random" || !p.userId || p.userId === "*" || listenerSet.has(p.userId)
-    );
-    const pattern = filteredPattern.length ? filteredPattern : [{ type: "random" }];
+    let pattern = Array.isArray(rawPattern) ? rawPattern.slice() : [];
+    // Asegurar que TODOS los oyentes en voz estén en las 3 rondas
+    if (listeners.length >= 1 && pattern.length) {
+      const seenU = new Set(pattern.filter((p) => p && p.userId && p.userId !== "*").map((p) => p.userId));
+      const toAdd = listeners.filter((uid) => !seenU.has(uid));
+      if (toAdd.length) {
+        const endLiked = [], endAleat = [], endArt = [];
+        for (const uid of toAdd) {
+          endLiked.push({ type: "liked", userId: uid });
+          endAleat.push({ type: "aleatorias", userId: uid });
+          endArt.push({ type: "artistas", userId: uid });
+        }
+        const likes = pattern.filter((p) => p && p.type === "liked" && p.userId && p.userId !== "*");
+        const aleats = pattern.filter((p) => p && p.type === "aleatorias" && p.userId && p.userId !== "*");
+        const arts = pattern.filter((p) => p && p.type === "artistas" && p.userId && p.userId !== "*");
+        const others = pattern.filter((p) => !p || p.type === "random" || !p.userId || p.userId === "*");
+        pattern = [...likes, ...endLiked, ...aleats, ...endAleat, ...arts, ...endArt, ...others];
+      }
+    }
+    if (!Array.isArray(pattern) || !pattern.length) pattern = [{ type: "random" }];
 
     // Exclusiones: lo que cada oyente pidió NO volver a escuchar con AutoDJ
     // (botón "🚫 No AutoDJ" / 2+ skips).
@@ -1091,7 +1119,7 @@ module.exports = async (client) => {
     // Etiqueta corta de un paso del patrón para logs.
     const stepShort = (p) => {
       if (!p || p.type === "random") return "🎲";
-      const icon = p.type === "liked" ? "👍" : p.type === "pedidas" ? "📝" : p.type === "aleatorias" ? "🎰" : p.type === "artistas" ? "🎤" : "🛸";
+      const icon = p.type === "liked" ? "🛸" : p.type === "rec" ? "🛸" : p.type === "pedidas" ? "📝" : p.type === "aleatorias" ? "🎲" : p.type === "artistas" ? "🎤" : "🛸";
       return `${icon}:${p.userId}`;
     };
     // Si el paso trae userId "*" y un tipo que necesita destinatario, se reparte
@@ -1502,33 +1530,22 @@ module.exports = async (client) => {
     const LOOKAHEAD_CYCLES = Math.max(1, Number(process.env.AUTODJ_LOOKAHEAD_CYCLES) || 2);
     const targetBot = pattern.length * LOOKAHEAD_CYCLES;
     const upNext = queue.songs.length - 1;
-    // Huecos objetivo (índices sobre toda la cola, 1 = el primero que sigue).
-    //
-    // MEZCLA DESDE EL FRENTE: el PRIMER ciclo del patrón va consecutivo al
-    // principio (posiciones 1,2,3,4,… = rec A, 🎲, rec B, 🎲, …), así los
-    // primeros temas ya son las recomendaciones de los presentes alternadas con
-    // aleatorias de la lista. Después sigue el intercalado normal (un tema tuyo
-    // entre cada dos del bot). Con AUTODJ_FRONT_MIX=0 se vuelve al comportamiento
-    // viejo (2,5,8…: el bot recién a partir de la 2ª y todo al final).
+    // MEZCLA DESDE EL FRENTE: el primer ciclo del patrón ocupa consecutivamente
+    // las primeras posiciones en orden exacto por rondas:
+    // ronda1: (rec u1, rec u2, ...) / ronda2: (aleat u1, aleat u2, ...) / ronda3: (artistas u1,...)
+    // para que la PRIMERA PÁGINA del embed se vea SIEMPRE en ese orden.
     const frontMix = process.env.AUTODJ_FRONT_MIX !== "0";
     const SLOT_GAP = Math.max(1, Number(process.env.AUTODJ_SLOT_GAP) || (frontMix ? 2 : 3));
     const frontCycle = frontMix ? Math.min(pattern.length, targetBot) : 0;
+    // Cantidad de canciones del bot que YA están en la cola (sin contar la actual).
+    const botNow = queue.songs.slice(1).filter((s) => s && (s.autoDj || s._autoDj)).length;
+    let toAdd = Math.max(0, targetBot - botNow);
     const botSlots = [];
     for (let k = 0; k < targetBot; k++) {
-      if (k < frontCycle) botSlots.push(1 + k); // 1,2,…,pattern.length
-      else botSlots.push(frontCycle + (k - frontCycle + 1) * SLOT_GAP); // luego con separación
+      if (k < frontCycle) botSlots.push(1 + k);
+      else botSlots.push(frontCycle + (k - frontCycle + 1) * SLOT_GAP);
     }
-    const occupiedBot = new Set();
-    for (let i = 1; i < queue.songs.length; i++) {
-      const s = queue.songs[i];
-      if (s && (s.autoDj || s._autoDj)) occupiedBot.add(i);
-    }
-    // Huecos que faltan llenar. Tolerancia ±1: al ir sonando, las del bot avanzan
-    // un puesto y siguen contando (no reinsertar de más mientras se consumen).
-    const missingSlots = botSlots.filter(
-      (p) => p < queue.songs.length && ![...occupiedBot].some((o) => o >= 1 && Math.abs(o - p) <= 1)
-    );
-    let toAdd = missingSlots.length;
+    const missingSlots = botSlots.slice(0, toAdd);
     if (upNext < 4) {
       // Cola muy corta: rellena con 1, pero solo si NO hay ya una del bot
       // esperando (evita encadenar 🛸 seguidas mientras carga la lista).
@@ -1550,6 +1567,14 @@ module.exports = async (client) => {
       AutoDjSource.markUsed(client, guildId, pick.url);
       block.push({ track: pick, step, existing: !!pick.existing });
       inQueue.add(pick.url);
+      // Evitar repetir la MISMA canción inmediatamente (ej: "Call your name" se colaba
+      // 2-3 veces seguidas). Si el siguiente paso vuelve a sacar la misma URL, se
+      // salta esa repetición y se intenta con otro paso en el próximo refill.
+      if (block.length >= 2 && block[block.length - 1]?.track?.url && block[block.length - 2]?.track?.url &&
+        block[block.length - 1].track.url === block[block.length - 2].track.url) {
+        const last = block.pop();
+        if (last?.track?.url) taken.delete(last.track.url);
+      }
     }
     if (!block.length) {
       client.logger.log(
@@ -1589,7 +1614,7 @@ module.exports = async (client) => {
     // Para "rec de fulano" se usa el member de ESE usuario (la canción queda a
     // su nombre en la cola); para "random" el fallback es el que pidió la cola
     // o el bot. Se guarda de dónde vino cada una (tipo + usuario).
-    const fallbackMember = queue.songs[0]?.member || vc?.guild?.members?.me;
+    const fallbackMember = queue.songs[0]?.member || (listeners.length === 1 ? (vc?.guild?.members?.cache?.get(listeners[0]) || vc?.guild?.members?.me) : (listeners.length > 0 ? (vc?.guild?.members?.cache?.get(listeners[0]) || vc?.guild?.members?.me) : (vc?.guild?.members?.me)));
     const addedMeta = new Map(); // url -> { type, userId }
     const movedByUrl = new Map(); // url -> Song que ya estaba en la cola y se movió
     for (const item of block) {
@@ -1603,12 +1628,33 @@ module.exports = async (client) => {
       const step = item.step;
       // El usuario EFECTIVO (tras la rotación cíclica) y el TIPO real vienen en el
       // pick; así el embed fijo puede mostrar qué lógica se usó y para quién.
-      const effectiveUser = item.track.autoDjUserId || (step.userId && step.userId !== "*" ? step.userId : null);
+      let effectiveUser = item.track.autoDjUserId || (step.userId && step.userId !== "*" ? step.userId : null);
+      if (item.track?.fromList && !effectiveUser) {
+        // si es aleatoria de lista, intentar repartir entre oyentes
+        if (listeners.length) effectiveUser = listeners[(si + addedMeta.size) % listeners.length];
+      }
+      if (!effectiveUser && step.userId && step.userId !== "*") effectiveUser = step.userId;
+      if (!effectiveUser && listeners.length) {
+        // distribuir por orden
+        effectiveUser = listeners[Math.floor(Math.random() * listeners.length)];
+      }
       const effectiveType = item.track.autoDjType || (step.type === "random" ? "random" : "rec");
       const meta = { type: effectiveType, userId: effectiveUser };
       let member = fallbackMember;
       if (effectiveUser) {
-        member = vc?.guild?.members?.cache?.get(effectiveUser) || fallbackMember;
+        member = vc?.guild?.members?.cache?.get(effectiveUser)
+          || vc?.guild?.members?.me
+          || fallbackMember;
+        const m2 = vc?.guild?.members?.cache?.get(effectiveUser);
+        if (m2) member = m2;
+      } else if (listeners.length === 1) {
+        const only = vc?.guild?.members?.cache?.get(listeners[0]);
+        if (only) member = only;
+      } else if (listeners.length > 1) {
+        // repartir entre todos
+        const idx = (addedMeta.size) % listeners.length;
+        const m2 = vc?.guild?.members?.cache?.get(listeners[idx]);
+        if (m2) { member = m2; effectiveUser = effectiveUser || listeners[idx]; }
       }
       try {
         if (item.existing) {
@@ -1719,6 +1765,12 @@ module.exports = async (client) => {
     // después de la que suena. Las recién encoladas con play() están al final de
     // la cola; las movidas ya se sacaron de su lugar.
     const blockSongs = [];
+    // El contador de secuencia sigue desde el máximo ya presente (por si la cola
+    // sobrevivió a un reinicio): las nuevas SIEMPRE quedan detrás de las viejas.
+    q._autoDjSeqCounter = Math.max(
+      Number(q._autoDjSeqCounter) || 0,
+      ...q.songs.map((s) => Number(s && s._autoDjSeq) || 0)
+    );
     for (const item of block) {
       // Para listas aisladas la url que QUEDÓ en la cola es la del single
       // (item.playUrl), no la de la lista original.
@@ -1734,34 +1786,56 @@ module.exports = async (client) => {
       song.autoDj = true;
       song._autoDj = true;
       song.autoDjType = meta.type;
-      song.autoDjUserId = meta.userId || null;
+      song.autoDjUserId = meta.userId || song.autoDjUserId || null;
       // `_autoDjAdded`: la canción la ENCOLÓ el bot para este usuario. Si ya
       // estaba en la cola (la puso el usuario con su propia lista) NO se marca:
       // así, al irse él, no se le borra su propia canción de la cola.
       song._autoDjAdded = item.existing ? song._autoDjAdded === true : true;
+      // Secuencia global: define el ORDEN VISUAL del bloque del bot. Las movidas
+      // conservan la que ya tenían (así no se cuelan delante de las nuevas).
+      if (!Number.isFinite(song._autoDjSeq)) {
+        q._autoDjSeqCounter = (q._autoDjSeqCounter || 0) + 1;
+        song._autoDjSeq = q._autoDjSeqCounter;
+      }
       blockSongs.push(song);
     }
     if (blockSongs.length) {
-      // Se reparten en los HUECOS fijos (2, 5, 8…) para quedar entre medio de la
-      // lista y nunca amontonadas ni robándole el turno a tus temas.
+      // Reconstruir el tramo del bot SIEMPRE en orden de patrón:
+      //   1..pattern.length  -> canciones del bot CONSECUTIVAS (primera página del
+      //                         embed fija: rec u1, rec u2, aleat u1, aleat u2,
+      //                         novedad u1, novedad u2, 🎲)
+      //   resto              -> un tema del usuario entre cada canción del bot
+      // Las canciones del bot se ordenan por `_autoDjSeq` (orden en que las eligió
+      // el patrón), NO por posición actual: así un refill chico no desarma el
+      // orden y la primera página queda estable.
+      const cur = q.songs[0] || null;
+      const rest = q.songs.slice(1);
+      const userSongs = rest.filter((s) => !(s && (s.autoDj || s._autoDj)));
+      const botSongs = rest
+        .filter((s) => s && (s.autoDj || s._autoDj))
+        .sort((a, b) => (Number(a._autoDjSeq) || 0) - (Number(b._autoDjSeq) || 0));
+      const rebuilt = cur ? [cur] : [];
       let bi = 0;
-      for (const slot of missingSlots) {
-        if (bi >= blockSongs.length) break;
-        q.songs.splice(Math.min(slot, q.songs.length), 0, blockSongs[bi++]);
+      let ui = 0;
+      while (bi < botSongs.length || ui < userSongs.length) {
+        const pos = rebuilt.length; // 0-based: 1 = primera después de la actual
+        const isFront = frontMix && pos <= frontCycle;
+        const botSlot = isFront || (((pos - frontCycle - 1) % SLOT_GAP) === 0);
+        if (botSlot && bi < botSongs.length) { rebuilt.push(botSongs[bi++]); continue; }
+        if (ui < userSongs.length) { rebuilt.push(userSongs[ui++]); continue; }
+        if (bi < botSongs.length) { rebuilt.push(botSongs[bi++]); continue; }
+        break;
       }
-      // Sobrantes (cola muy corta sin hueco disponible): se paden al final para
-      // no robarle el turno a los pocos temas que quedan por sonar.
-      while (bi < blockSongs.length) {
-        q.songs.push(blockSongs[bi++]);
-      }
-      // Sin urls repetidas en la cola (deja la primera aparición).
-      const finalSeen = new Set();
-      q.songs = q.songs.filter((x) => {
-        if (!x?.url) return true;
-        if (finalSeen.has(x.url)) return false;
-        finalSeen.add(x.url);
-        return true;
-      });
+      q.songs = rebuilt;
+    // Sin urls repetidas en la cola (deja la primera aparición). Limpiar TODO lo
+    // que se repita, incluyendo las que acaba de meter el bot.
+    const finalSeen = new Set();
+    q.songs = q.songs.filter((x) => {
+      if (!x?.url) return true;
+      if (finalSeen.has(x.url)) return false;
+      finalSeen.add(x.url);
+      return true;
+    });
       // Pre-resolver el stream de las canciones del AutoDJ en segundo plano.
       // El warm del playSong corre ANTES de que el AutoDJ las agregue, así que
       // la que queda en la posición 1 (la siguiente a sonar) llegaba a la
