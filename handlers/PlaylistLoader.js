@@ -80,6 +80,7 @@ async function streamPlaylist({ client, channel, playlistUrl, playOpts, onStatus
   }
   AutoDjSource.register(client, guildId, [firstUrl]);
   try {
+    AutoDjSource.expectListSong(client, guildId, firstUrl);
     await client.distube.play(channel, firstUrl, playOpts);
     loaded++;
     allUrls.push(firstUrl);
@@ -129,6 +130,7 @@ async function streamPlaylist({ client, channel, playlistUrl, playOpts, onStatus
             // Adaptive pacing: hurry when the queue is about to run dry.
             const q = queueCount(client, guildId);
             try {
+              AutoDjSource.expectListSong(client, guildId, url);
               await client.distube.play(channel, url, { ...playOpts, skip: false });
               loaded++;
               allUrls.push(url);
@@ -218,6 +220,7 @@ async function shufflePlay({ client, channel, urls, playOpts, onStatus }) {
       // El AutoDJ ya eligió / ya sonó esta url: no se encola de nuevo.
       if (AutoDjSource.isUsed(client, guildId, unique[i])) { loaded++; continue; }
       try {
+        AutoDjSource.expectListSong(client, guildId, unique[i]);
         await client.distube.play(channel, unique[i], {
           ...playOpts,
           skip: i === 0 ? undefined : false,

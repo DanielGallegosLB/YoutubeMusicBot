@@ -33,6 +33,12 @@ async function removeUserRecommendations(client, guild, userId) {
   const guildId = guild?.id;
   if (!guildId || !userId) return 0;
 
+  // POR DEFECTO ya no se borran: esas canciones ya estaban elegidas dentro del
+  // ciclo y quitarlas hacía que la cola "parpadeara" (el bot las agregaba para
+  // alguien y a los minutos desaparecían). El ciclo futuro solo usa a los que
+  // siguen en el canal. Con AUTODJ_REMOVE_ON_LEAVE=1 vuelve al comportamiento viejo.
+  if (process.env.AUTODJ_REMOVE_ON_LEAVE !== "1") return 0;
+
   const queue = client.distube?.getQueue(guildId);
   if (!queue || !queue.songs?.length) return 0;
 

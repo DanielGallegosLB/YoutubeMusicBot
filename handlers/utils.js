@@ -19,6 +19,23 @@ const AutoDjSource = require("./Autodjsource");
  *
  * @param {MusicBot} client
  */
+// ── Origen de cada canción: UNA sola fuente de verdad (AutoDjOrder.js) ───────
+//   🛸 Rec · <usuario>       recomendación (sus likes / favoritas)
+//   🎲 Pedidas · <usuario>   aleatoria de lo que ESE usuario pidió
+//   🎤 Novedad · <usuario>   novedosa: artistas de su perfil
+//   🎲 Aleat. lista          aleatoria de la lista que se cargó
+//   📋 Lista · <usuario>     canción de la lista que cargó alguien
+//   🙋 Manual · <usuario>    la pidió una persona (comando / botón)
+//   (sufijo ↩ sala / reciclada / rescate = ese paso no encontró lo suyo y cayó a otra fuente)
+const AutoDjOrder = require("./AutoDjOrder");
+const ORIGIN_LEGEND = AutoDjOrder.LEGEND;
+
+// Rótulo "icono + tipo + nombre" para una canción (cola y reproductor).
+function originLabelFor(track, guild) {
+  const nameOf = (uid) => guild?.members?.cache?.get(uid)?.user?.tag || null;
+  return AutoDjOrder.originLabel(track, nameOf);
+}
+
 module.exports = async (client) => {
   // code
   client.QUEUE_PER_PAGE = 10;
@@ -842,23 +859,8 @@ module.exports = async (client) => {
         (currentSong?.autoDjUserId &&
           guild?.members?.cache?.get(currentSong.autoDjUserId)?.user?.tag) ||
         (currentOwners ? currentOwners.split(",")[0].trim() : null);
-      // Rótulo del AutoDJ: ícono según la LÓGICA usada + nombre del usuario.
-      //   rec        🛸  recomendaciones
-      //   liked      🛸  recomendaciones
-      //   pedidas    📝  canciones que ese usuario pidió
-      //   aleatorias 🎲  aleatoria de las pedidas del usuario
-      //   artistas   🎤  novedades por artistas del perfil
-      //   random     🎲  aleatoria de la lista
-      const autoDjIcon = (type) =>
-        type === "liked" ? "🛸" : type === "rec" ? "🛸" : type === "pedidas" ? "📝" : type === "aleatorias" ? "🎲" : type === "artistas" ? "🎤" : type === "random" ? "🎲" : "🛸";
-      const autoDjTypeName = (type) =>
-        type === "liked" ? "Recomendación" : type === "rec" ? "Recomendación" : type === "pedidas" ? "Pedida" : type === "aleatorias" ? "Aleatoria de pedidas" : type === "artistas" ? "Artistas del perfil" : type === "random" ? "Aleatoria" : "Recomendación";
-      const currentReq =
-        currentIsAutoDj
-          ? (currentSong?.autoDjType === "random"
-              ? "🎲 Aleatoria"
-              : `${autoDjIcon(currentSong?.autoDjType)} ${currentRecName || autoDjTypeName(currentSong?.autoDjType)}`)
-          : (currentSong?.user?.tag || "Auto DJ");
+      // Rótulo de la canción actual (misma función que la cola y el reproductor).
+      const currentReq = originLabelFor(currentSong, guild);
 
       const storedLimit = await client.music.get(`${guild.id}.qlimit`).catch(() => undefined);
       const maxTracks = Number.isInteger(storedLimit) && storedLimit >= 1 && storedLimit <= 50 ? storedLimit : 10;
@@ -876,18 +878,6 @@ module.exports = async (client) => {
       const upNextStats = await Promise.all(upNextTracks.map((track) =>
         track.url ? statsWithCache(client, guildId, track.url, allPlaylists, guild) : Promise.resolve({ likes: 0, dislikes: 0, plays: 0 })
       ));
-      // Rótulo para canciones puestas por el AutoDJ: ícono + usuario cuando aplica.
-      const autodjLabel = (track, firstOwner) => {
-        if (!track || (!track.autoDj && !track._autoDj)) return null;
-        if (track.autoDjType === "random") return "🎲 Aleatoria";
-        const icon = autoDjIcon(track.autoDjType);
-        const uid = track.autoDjUserId;
-        const name = uid
-          ? (guild?.members?.cache?.get(uid)?.user?.tag || track.user?.nickname || null)
-          : (firstOwner || null);
-        return name ? `${icon} ${name}` : `${icon} ${autoDjTypeName(track.autoDjType)}`;
-      };
-
       let queueString = "";
       upNextTracks.forEach((track, i) => {
         const index = from + i;
@@ -906,12 +896,7 @@ module.exports = async (client) => {
         const tOwnersStr = tIsAutoDj || !tOwners ? "" : ` | 👤 ${tOwners}`;
         // Para temas pedidos MANUALMENTE con /play o botón (no por AutoDJ), poner
         // un icono claro para distinguirlos.
-        let tReq = autodjLabel(track, (tStats.owners || [])[0]);
-        if (!tReq) {
-          if (track.requestedBy?.tag) tReq = `🎵 ${track.requestedBy.tag}`;
-          else if (track.user?.tag) tReq = `🎵 ${track.user.tag}`;
-          else tReq = "Auto DJ";
-        }
+        const tReq = originLabelFor(track, guild);
         queueString += `\`${index}.\` **${client.getTitle(track)}** - ${
           track.isLive ? "LIVE STREAM" : track.formattedDuration.split(" | ")[0]
         } - \`${tReq}\`${tStatsStr}${tOwnersStr}\n`;
@@ -924,7 +909,7 @@ module.exports = async (client) => {
           iconURL: guild.iconURL({ dynamic: true }),
         })
         .setFooter({
-          text: totalUpNext > 0 ? `Página ${page + 1}/${totalPages} · ${totalUpNext} canciones próximas` : `Página ${page + 1}/${totalPages} · Sin cola`,
+          text: `${totalUpNext > 0 ? `Página ${page + 1}/${totalPages} · ${totalUpNext} canciones próximas` : `Página ${page + 1}/${totalPages} · Sin cola`}\n${ORIGIN_LEGEND}`,
         })
         .addFields([
           {
@@ -936,6 +921,31 @@ module.exports = async (client) => {
             } - \`${currentReq}\`${currentStatsText}${currentOwnersText}`,
           },
         ]);
+
+      // Orden del AutoDJ: el ciclo con los oyentes actuales y ▶ en el paso de la
+      // PRÓXIMA canción del bot que va a sonar (así se ve el orden objetivo).
+      try {
+        if (client.autoDj?.get(guild.id)) {
+          const vcm = guild.members?.me?.voice?.channel;
+          const lis = vcm ? vcm.members.filter((m) => !m.user.bot).map((m) => m.id) : [];
+          if (lis.length) {
+            const cyc = AutoDjOrder.buildCycle(lis);
+            const nameOf = (uid) => guild.members.cache.get(uid)?.user?.username || null;
+            const firstBot = freshQueue.songs.slice(1).find((x) => x && (x.autoDj || x._autoDj));
+            let nextIdx = -1;
+            if (firstBot && (firstBot.autoDjType === "random" || lis.includes(firstBot.autoDjUserId))) {
+              const k = AutoDjOrder.stepKey({ type: firstBot.autoDjType, userId: firstBot.autoDjUserId }, lis);
+              nextIdx = cyc.findIndex((p) => AutoDjOrder.stepKey(p, lis) === k);
+            }
+            newQueueEmbed.addFields([
+              {
+                name: "🔁 Orden del AutoDJ (▶ = próxima del bot)",
+                value: AutoDjOrder.cycleLine(cyc, nextIdx, nameOf).slice(0, 1024),
+              },
+            ]);
+          }
+        }
+      } catch (_) {}
 
       if (queueString.length > 0) {
         newQueueEmbed.setDescription(queueString.substring(0, 2048));
@@ -1044,7 +1054,7 @@ module.exports = async (client) => {
           .addFields(
             {
               name: "**Requested By**",
-              value: `\`${track.user?.tag || "Unknown"}\``,
+              value: `\`${(track.user || track.requestedBy || track.autoDj || track._autoDj) ? originLabelFor(track, guild) : "Unknown"}\``,
               inline: true,
             },
             {

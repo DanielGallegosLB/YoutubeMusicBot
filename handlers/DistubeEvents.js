@@ -9,7 +9,8 @@ const UserRequests = require("./UserRequests");
 const PlaylistStore = require("./PlaylistStore");
 const AutoDjSource = require("./Autodjsource");
 const AutoDjLogger = require("./AutoDjLogger");
-const { fetchPlaylistFirstURL, validateSinglePlayable, isPlaylistURL, searchYoutubeVideos } = require("./PlaylistFetcher");
+const AutoDjOrder = require("./AutoDjOrder");
+const { fetchPlaylistFirstURL, probeSingleURL, validateSinglePlayable, isPlaylistURL, searchYoutubeVideos } = require("./PlaylistFetcher");
 const { isAgeGateError, friendlyPlaybackError } = require("./PlaybackError");
 const { startMarqueeActivity, stopMarqueeActivity } = require("./ActivityManager");
 
@@ -368,6 +369,82 @@ module.exports = async (client) => {
     }
     const recycled = usable.filter((t) => !seen.has(t.url));
     return pickFrom(recycled.length ? recycled : usable);
+  };
+
+  // ── Marca de "canción del AutoDJ" + orden de la cola ──────────────────────
+  // Se marca EN EL MOMENTO en que la canción entra a la cola (evento addSong), no
+  // al final del refill (que tarda ~10 s por canción). Antes, durante esos minutos
+  // las canciones del bot parecían pedidos manuales del oyente y, peor, el
+  // "Queue Priority" las trataba como pedidos de otra persona y las mandaba al frente.
+  const flagBotSong = (queue, song, meta, added) => {
+    if (!song || !meta) return;
+    song.autoDj = true;
+    song._autoDj = true;
+    song.autoDjType = meta.type;
+    song.autoDjUserId = meta.userId || null;
+    song.autoDjFallback = meta.fallback || null;
+    // `_autoDjAdded`: la ENCOLÓ el bot (no era de la lista de nadie).
+    if (added) song._autoDjAdded = true;
+    if (!Number.isFinite(song._autoDjSeq)) {
+      const base = Math.max(Number(queue._autoDjSeqCounter) || 0, Number(meta.seq) || 0);
+      if (Number.isFinite(meta.seq)) {
+        song._autoDjSeq = meta.seq;
+        queue._autoDjSeqCounter = base;
+      } else {
+        queue._autoDjSeqCounter = base + 1;
+        song._autoDjSeq = queue._autoDjSeqCounter;
+      }
+    }
+  };
+
+  // Registra "esta URL la va a poner el bot" mientras dura el play(): el handler de
+  // addSong la reconoce al instante.
+  const enqueueBot = async (queue, url, meta, fn) => {
+    const gid = queue.textChannel?.guildId || queue.guildId;
+    const key = `${gid}|${canonUrlKey(url)}`;
+    const map = client._autoDjPending || (client._autoDjPending = new Map());
+    map.set(key, meta);
+    try { return await fn(); } finally { map.delete(key); }
+  };
+
+  // Ordena la cola: [actual] + [pedidos de otras personas (prioridad de siempre)] +
+  // el tramo del bot en ORDEN DE ELECCIÓN (_autoDjSeq = el ciclo) intercalado con las
+  // canciones de la lista. Es idempotente: se puede llamar después de cada addSong.
+  const relayoutQueue = (q) => {
+    if (!q?.songs?.length) return;
+    const isBot = (x) => !!(x && (x.autoDj || x._autoDj));
+    if (!q.songs.some((x, i) => i > 0 && isBot(x))) return;
+    const lay = q._autoDjLayout || { frontMix: true, frontCycle: 4, gap: 2 };
+    const ownerId = process.env.OWNER_ID;
+    const cur = q.songs[0] || null;
+    const rest = q.songs.slice(1);
+    const head = [];
+    let k = 0;
+    while (k < rest.length && !isBot(rest[k]) && isOtherRequester(rest[k]?.user, ownerId)) head.push(rest[k++]);
+    const tail = rest.slice(k);
+    const userSongs = tail.filter((x) => !isBot(x));
+    const botSongs = tail.filter(isBot).sort((a, b) => (Number(a._autoDjSeq) || 0) - (Number(b._autoDjSeq) || 0));
+    const rebuilt = cur ? [cur, ...head] : [...head];
+    const base = rebuilt.length;
+    let bi = 0;
+    let ui = 0;
+    while (bi < botSongs.length || ui < userSongs.length) {
+      const rel = rebuilt.length - base + 1; // 1 = primera después de la actual (y los pedidos)
+      const isFront = lay.frontMix && rel <= lay.frontCycle;
+      const botSlot = isFront || (((rel - lay.frontCycle - 1) % lay.gap) === 0);
+      if (botSlot && bi < botSongs.length) { rebuilt.push(botSongs[bi++]); continue; }
+      if (ui < userSongs.length) { rebuilt.push(userSongs[ui++]); continue; }
+      if (bi < botSongs.length) { rebuilt.push(botSongs[bi++]); continue; }
+      break;
+    }
+    const seenUrl = new Set();
+    const finalList = rebuilt.filter((x) => {
+      if (!x?.url) return true;
+      if (seenUrl.has(x.url)) return false;
+      seenUrl.add(x.url);
+      return true;
+    });
+    q.songs.splice(0, q.songs.length, ...finalList);
   };
 
   client.autoDjRefillInner = async (queue, { channel, force = false } = {}) => {
@@ -791,48 +868,13 @@ module.exports = async (client) => {
       }
     } catch (e) {}
 
-    // Patrón de intercalado (dashboard / comando): [rec:user, random, ...].
-    let rawPattern =
-      (await PlaylistStore.getAutoDjPattern(client, guildId).catch(() => null)) ||
-      PlaylistStore.DEFAULT_AUTODJ_PATTERN;
-    // Patrón por rondas: 1 recomendación para CADA usuario en voz -> 1 aleatoria
-    // de sus pedidas para CADA usuario -> 1 novedad por artistas de su perfil
-    // para CADA usuario. Al final una aleatoria global de la lista.
-    if (listeners.length >= 1) {
-      const order = listeners.slice();
-      const built = [];
-      // Ronda 1: 1 recomendación por CADA usuario en voz (en orden)
-      for (const uid of order) built.push({ type: "liked", userId: uid });
-      // Ronda 2: 1 aleatoria de sus PEDIDAS por CADA usuario en voz (en orden)
-      for (const uid of order) built.push({ type: "aleatorias", userId: uid });
-      // Ronda 3: 1 novedad por ARTISTAS de su perfil por CADA usuario en voz (en orden)
-      for (const uid of order) built.push({ type: "artistas", userId: uid });
-      // Al final: 1 canción aleatoria global
-      built.push({ type: "random" });
-      rawPattern = built;
-    }
-    // Mantener orden estricto por rondas
-    const listenerSet = new Set(listeners);
-    let pattern = Array.isArray(rawPattern) ? rawPattern.slice() : [];
-    // Asegurar que TODOS los oyentes en voz estén en las 3 rondas
-    if (listeners.length >= 1 && pattern.length) {
-      const seenU = new Set(pattern.filter((p) => p && p.userId && p.userId !== "*").map((p) => p.userId));
-      const toAdd = listeners.filter((uid) => !seenU.has(uid));
-      if (toAdd.length) {
-        const endLiked = [], endAleat = [], endArt = [];
-        for (const uid of toAdd) {
-          endLiked.push({ type: "liked", userId: uid });
-          endAleat.push({ type: "aleatorias", userId: uid });
-          endArt.push({ type: "artistas", userId: uid });
-        }
-        const likes = pattern.filter((p) => p && p.type === "liked" && p.userId && p.userId !== "*");
-        const aleats = pattern.filter((p) => p && p.type === "aleatorias" && p.userId && p.userId !== "*");
-        const arts = pattern.filter((p) => p && p.type === "artistas" && p.userId && p.userId !== "*");
-        const others = pattern.filter((p) => !p || p.type === "random" || !p.userId || p.userId === "*");
-        pattern = [...likes, ...endLiked, ...aleats, ...endAleat, ...arts, ...endArt, ...others];
-      }
-    }
-    if (!Array.isArray(pattern) || !pattern.length) pattern = [{ type: "random" }];
+    // CICLO ESTRICTO e infinito (ver AutoDjOrder.js), con los oyentes presentes en
+    // orden de conexión:
+    //   🛸 rec A › 🛸 rec B › 🎲 aleatoria de pedidas A › B › 🎤 novedosa de perfil A › B › 🎲 aleatoria de la lista
+    // Ya no depende del patrón guardado en el dashboard: el orden es siempre este.
+    const rawPattern = AutoDjOrder.buildCycle(listeners);
+    const pattern = rawPattern.slice();
+    if (!pattern.length) pattern.push({ type: "random" });
 
     // Exclusiones: lo que cada oyente pidió NO volver a escuchar con AutoDJ
     // (botón "🚫 No AutoDJ" / 2+ skips).
@@ -894,14 +936,13 @@ module.exports = async (client) => {
     for (const uid of listeners) {
       try {
         requestsByUser[uid] = await UserRequests.getUserRequests(client, guildId, uid) || [];
-        // Artistas del perfil REAL: Spotify (socialprofiles, "Artistas que
-        // escucha") + reproducciones JUGNU (MusicPlay) + pedidas (KV). El de
-        // Spotify es la fuente principal. Se fusiona por nombre con el conteo
-        // máximo (Spotify x371 domina sobre pedidas x1).
-        const [spotify, perfil, pedidas] = await Promise.all([
-          MusicTracker.spotifyTopArtists(guildId, uid, 20).catch(() => []),
-          MusicTracker.topArtists(guildId, uid, 20).catch(() => []),
-          UserRequests.getUserArtists(client, guildId, uid).catch(() => []),
+        // Artistas del PERFIL = exactamente lo que muestra /miperfil en "Artistas que
+        // escucha": Spotify (socialprofiles.music) + reproducciones JUGNU (MusicPlay),
+        // SUMADOS por nombre (mismo criterio que el comando). Ya no se mezclan las
+        // "pedidas" (uploaders de YouTube): metían ruido que no es del perfil.
+        const [spotify, perfil] = await Promise.all([
+          MusicTracker.spotifyTopArtists(guildId, uid, 40).catch(() => []),
+          MusicTracker.topArtists(guildId, uid, 40).catch(() => []),
         ]);
         const merged = new Map();
         const put = (name, count) => {
@@ -910,11 +951,10 @@ module.exports = async (client) => {
           const c = Math.max(1, Number(count) || 1);
           const prev = merged.get(k);
           if (!prev) merged.set(k, { name: String(name).trim(), count: c });
-          else prev.count = Math.max(prev.count, c);
+          else prev.count += c;
         };
         for (const a of (spotify || [])) put(a.name, a.count);
         for (const a of (perfil || [])) put(a.name, a.count);
-        for (const a of (pedidas || [])) put(a.name, a.count);
         artistsByUser[uid] = [...merged.values()].sort((a, b) => (b.count || 0) - (a.count || 0));
       } catch {
         requestsByUser[uid] = [];
@@ -942,7 +982,7 @@ module.exports = async (client) => {
     // `topN` > 0, se queda SOLO con los N artistas más escuchados (ej: milo j y
     // kidd voodoo), ignorando el resto (Kanye/uni/...). Así el paso 🎤 recomienda
     // únicamente canciones de los artistas TOP del perfil.
-    const ARTIST_TOP_N = Math.max(0, Number(process.env.AUTODJ_ARTIST_TOP_N ?? 2) || 0);
+    const ARTIST_TOP_N = Math.max(0, Number(process.env.AUTODJ_ARTIST_TOP_N ?? 16) || 0);
     const artistWeightMap = (list, topN = ARTIST_TOP_N) => {
       const acc = new Map();
       for (const a of (Array.isArray(list) ? list : [])) {
@@ -1108,9 +1148,12 @@ module.exports = async (client) => {
     const artistasPoolByUser = {};
     for (const uid of listeners) {
       const pool = poolsByUser[uid] || [];
+      // 🛸 "le gusta SÍ O SÍ": su 👍 propio o guardada a mano por él (⭐), y nunca
+      // algo que él haya marcado con 👎. Un 👍 de OTRA persona no cuenta.
       likedPoolByUser[uid] = pool.filter(
         (t) => t?.url && !t._fromRequest && !t._fromArtist &&
-          ((t.likedBy || []).length > 0 || t.manual === true)
+          !(t.dislikedBy || []).includes(uid) &&
+          ((t.likedBy || []).includes(uid) || t.manual === true)
       );
       pedidasPoolByUser[uid] = pool.filter((t) => t?.url && t._fromRequest);
       aleatoriasPoolByUser[uid] = pool.filter((t) => t?.url && t._fromRequest);
@@ -1229,7 +1272,7 @@ module.exports = async (client) => {
       }, entry.origen === "random" ? "pick.random" : "pick.rec");
     };
 
-    const pickForStep = async (step, taken, inQueue) => {
+    const pickForStepInner = async (step, taken, inQueue) => {
       // Destinatario efectivo del paso: si es "*" y el tipo necesita un usuario,
       // se reparte de forma cíclica entre los oyentes (orden de conexión).
       const effUser = cycleUser(step.type, step.userId);
@@ -1238,11 +1281,26 @@ module.exports = async (client) => {
       // Sin reposición: cada una sale una sola vez por sesión. Si la lista ya no
       // tiene candidatas, cae al pool de favoritas/historial/picks de siempre.
       if (step.type === "random") {
-        const cand = AutoDjSource.candidates(client, guildId, {
+        let cand = AutoDjSource.candidates(client, guildId, {
           excluded: excludedUrls,
           taken,
           currentUrl: queue.songs[0]?.url,
         }).filter((u) => !excludedCanon.has(canonUrlKey(u)));
+        // Lista agotada: se vuelve a empezar por lo que MÁS tiempo hace que sonó
+        // (infinito, pero siempre de la lista cargada).
+        if (!cand.length) {
+          const old = AutoDjSource.recyclable(client, guildId, {
+            excluded: excludedUrls,
+            taken,
+            currentUrl: queue.songs[0]?.url,
+            inQueue,
+          }).filter((u) => !excludedCanon.has(canonUrlKey(u)));
+          if (old.length) {
+            cand = [old[0]];
+            AutoDjSource.unuse(client, guildId, old[0]);
+            dbgLine(`🎲 random: lista agotada -> se recicla la más antigua ${old[0]}`);
+          }
+        }
         if (cand.length) {
           const url = pickLeastPlayed(cand, (u) => skipWeight(u, "*"), playsOfUrl);
           taken.add(url);
@@ -1261,7 +1319,11 @@ module.exports = async (client) => {
           });
           return { url, name: null, existing: inQueue.has(url), fromList: true };
         }
-        dbgLine(`🎲 random: candidatas=${cand.length} -> SIN (lista agotada, cae a favoritas)`);
+        // Sin canciones de la lista (no hay lista cargada): este paso se SALTA. Antes
+        // caía al pool de favoritas/historial/pedidas y la 🎲 "de la lista" sonaba algo
+        // que no era de la lista.
+        dbgLine(`🎲 random: sin canciones de la lista -> paso omitido`);
+        return null;
       }
       // Una PLAYLIST no puede ser candidata de rec (el pool trae URLs de listas
       // del historial: recomendarlas = "revivir otra lista", y la 1ª canción
@@ -1319,8 +1381,8 @@ module.exports = async (client) => {
             return { url: chosen.url, name: chosen.name || null, existing: inQueue.has(chosen.url), fromList: false, autoDjType: "aleatorias", autoDjUserId: effUser || null };
           }
         }
-        dbgLine(`🎰 aleatorias: candidatas=0 -> cae a favoritas/recicladas`);
-        pool = [];
+        dbgLine(`🎲 pedidas: el usuario no tiene pedidas -> paso omitido`);
+        return null;
       } else if (step.type === "artistas") {
         // 🎤 "novedosa de artistas del perfil": candidatas cuyo artista está en
         // el perfil del usuario (los _fromArtist). Selección DIRECTA priorizando
@@ -1371,7 +1433,7 @@ module.exports = async (client) => {
         // (ej. milo j/kidd voodoo). Se BUSCAN en YouTube al vuelo y se elige una
         // NUEVA (no vista, no en cola, no ya escuchada por el usuario).
         {
-          const tops = topArtistNames(artistsByUser[effUser]);
+          const tops = shuffleWeighted(topArtistNames(artistsByUser[effUser]), (a) => a.count);
           if (tops.length) {
             const ownPool = new Set((poolsByUser[effUser] || []).map((t) => t.url));
             const ownHist = new Set((historyByUser.get(effUser) || []).map((t) => t?.url).filter(Boolean));
@@ -1409,8 +1471,8 @@ module.exports = async (client) => {
             }
           }
         }
-        dbgLine(`🎤 artistas: candidatas=${src.length} -> cae a favoritas/recicladas`);
-        pool = [];
+        dbgLine(`🎤 novedad: sin canciones nuevas de los artistas del perfil -> paso omitido`);
+        return null;
       } else if (step.type === "rec" && effUser) {
         const own = (poolsByUser[effUser] || []).filter((t) => isSafeCand(t));
         const ownUrls = new Set(own.map((t) => t.url));
@@ -1443,6 +1505,41 @@ module.exports = async (client) => {
         }
         if (picks.length) pool = pool.concat(shuffleWeighted(picks.filter((t) => isSafeCand(t)), (t) => skipWeight(t.url, "*")));
       }
+
+      // ── Pool de la SALA para oyentes sin contenido propio ──────────────────
+      // Quien está en la llamada pero NO tiene favoritas/likes/pedidas propias
+      // antes se quedaba sin turno (el paso salía "SIN" y todo caía a quien sí
+      // tenía datos). Ahora, cuando el pool propio no da canciones nuevas, se le
+      // recomienda de lo que les gusta a los OTROS oyentes (sin lo que él haya
+      // 👎), y la canción queda a su nombre (🛸 <usuario>).
+      const roomPoolFor = (uid) => {
+        if (!uid) return [];
+        const out = [];
+        const have = new Set();
+        const add = (t) => {
+          if (!t?.url || !isSafeCand(t)) return;
+          if ((t.dislikedBy || []).includes(uid)) return;
+          const k = canonUrlKey(t.url);
+          if (have.has(k)) return;
+          have.add(k);
+          out.push(t);
+        };
+        for (const other of listeners) {
+          if (other === uid) continue;
+          (likedPoolByUser[other] || []).forEach(add);
+        }
+        allPool.forEach(add);
+        return shuffleWeighted(out, (t) => skipWeight(t.url, uid));
+      };
+      // Orden por antigüedad de uso: lo que el bot puso hace MÁS tiempo primero
+      // (lo nunca puesto, antes que todo). Evita que un pool chico gire siempre
+      // sobre las mismas 2-3 canciones al reciclar.
+      const rankByRecency = (arr) => {
+        const rec = queue._autoDjRecent || [];
+        const idxOf = (t) => rec.lastIndexOf(canonUrlKey(t.url));
+        const sorted = arr.slice().sort((a, b) => idxOf(a) - idxOf(b));
+        return sorted.slice(0, Math.max(1, Math.ceil(sorted.length / 2)));
+      };
 
       // No recomendar lo que ya está en la cola y PRÓXIMO a sonar (ni la canción
       // que está sonando): se descartan los primeros ~REC_MIN_GAP de la lista.
@@ -1481,13 +1578,34 @@ module.exports = async (client) => {
           motivo = "rescate-sin-like";
         }
       }
-      // 3) No queda nada sin ver: se recyclinga (olvida la mitad más vieja).
-      if (!found) { found = pickUnseen(pool, seen, excludedCanon, nearQueue, weightOf); motivo = "reciclada"; }
+      // 2.5) Sin nada nuevo en SU pool: lo que les gusta a los demás oyentes,
+      //      a nombre de este usuario (nunca para 🎲 random, que es global).
+      if (!found && effUser && step.type === "rec") {
+        const roomFresh = freshOf(roomPoolFor(effUser));
+        if (roomFresh.length) {
+          found = pickMostLiked(roomFresh, weightOf);
+          motivo = "sala-nueva";
+        }
+      }
+      // 3) No queda nada sin ver: se recicla, pero rotando por ANTIGÜEDAD (lo que
+      //    hace más tiempo que el bot no pone), no al azar. Con pool propio chico
+      //    se mezclan también las de la sala para que no giren las mismas 2-3.
+      if (!found) {
+        const base = (effUser && step.type === "rec" && pool.length < 8)
+          ? pool.concat(roomPoolFor(effUser).filter((t) => !pool.some((p) => canonUrlKey(p.url) === canonUrlKey(t.url))))
+          : pool;
+        found = pickUnseen(rankByRecency(base), seen, excludedCanon, nearQueue, weightOf);
+        motivo = "reciclada";
+      }
       if (found && !taken.has(found.url)) {
         taken.add(found.url);
         found.existing = inQueue.has(found.url);
         found.autoDjType = step.type;
         found.autoDjUserId = effUser || null;
+        // Si el paso no encontró lo suyo y cayó a otra fuente, el rótulo lo dice.
+        found.autoDjFallback = motivo === "sala-nueva" ? "sala"
+          : motivo === "reciclada" ? "reciclada"
+          : motivo === "rescate-sin-like" ? "rescate" : null;
         const icon = step.type === "random" ? "🎲" : step.type === "liked" ? "👍" : step.type === "pedidas" ? "📝" : step.type === "aleatorias" ? "🎰" : step.type === "artistas" ? "🎤" : "🛸";
         dbgLine(
           `${icon} ${step.type}: ${tag}` +
@@ -1520,6 +1638,24 @@ module.exports = async (client) => {
       return null;
     };
 
+    // Registro de lo que el bot puso (más reciente al final): alimenta la rotación
+    // por antigüedad de arriba. Va en un wrapper para cubrir TODOS los pasos
+    // (random, aleatorias, artistas, liked…) sin tocar cada return.
+    const noteRecent = (url) => {
+      const k = canonUrlKey(url);
+      if (!k) return;
+      const r = queue._autoDjRecent || (queue._autoDjRecent = []);
+      const i = r.indexOf(k);
+      if (i >= 0) r.splice(i, 1);
+      r.push(k);
+      if (r.length > 150) r.splice(0, r.length - 150);
+    };
+    const pickForStep = async (step, taken, inQueue) => {
+      const res = await pickForStepInner(step, taken, inQueue);
+      if (res?.url) noteRecent(res.url);
+      return res;
+    };
+
     // ---- Sumar siguiendo el patrón, intercalado EN MEDIO de la lista ----
     // Las canciones del bot viven en HUECOS fijos de la cola. El primer ciclo del
     // patrón va consecutivo al frente (1,2,3,4…) para que la mezcla se vea desde
@@ -1537,6 +1673,8 @@ module.exports = async (client) => {
     const frontMix = process.env.AUTODJ_FRONT_MIX !== "0";
     const SLOT_GAP = Math.max(1, Number(process.env.AUTODJ_SLOT_GAP) || (frontMix ? 2 : 3));
     const frontCycle = frontMix ? Math.min(pattern.length, targetBot) : 0;
+    // El reacomodo de la cola (relayoutQueue) usa estos mismos parámetros.
+    queue._autoDjLayout = { frontMix, frontCycle, gap: SLOT_GAP };
     // Cantidad de canciones del bot que YA están en la cola (sin contar la actual).
     const botNow = queue.songs.slice(1).filter((s) => s && (s.autoDj || s._autoDj)).length;
     let toAdd = Math.max(0, targetBot - botNow);
@@ -1556,12 +1694,22 @@ module.exports = async (client) => {
 
     const inQueue = new Set(queue.songs.map((s) => s?.url).filter(Boolean));
     const taken = new Set();
-    const si = typeof queue._autoDjStep === "number" ? queue._autoDjStep : 0;
+    // El ciclo SIGUE desde el último paso intentado (aunque esa canción ya haya
+    // sonado o el oyente haya cambiado): nunca se reinicia ni se desfasa.
+    const si = AutoDjOrder.nextStepIndex(pattern, queue._autoDjLast, listeners);
     const block = [];
     for (let i = 0; i < toAdd; i++) {
       const step = pattern[(si + i) % pattern.length];
+      queue._autoDjLast = { type: step.type, userId: step.userId || null };
       const pick = await pickForStep(step, taken, inQueue);
       if (!pick) continue;
+      // Secuencia de ELECCIÓN: define el orden visual del bloque del bot (no el
+      // orden en que terminen de resolverse las canciones).
+      queue._autoDjSeqCounter = Math.max(
+        Number(queue._autoDjSeqCounter) || 0,
+        ...queue.songs.map((x) => Number(x && x._autoDjSeq) || 0)
+      ) + 1;
+      pick.autoDjSeq = queue._autoDjSeqCounter;
       seenMark(seen, pick.url);
       // Usada: el loader no la encola de nuevo y la 🎲 no la repite.
       AutoDjSource.markUsed(client, guildId, pick.url);
@@ -1589,7 +1737,7 @@ module.exports = async (client) => {
     // cola. Antes avanzaba por `block.length`, o sea que un paso que fallaba
     // se saltaba y el patrón se desfasaba respecto de los huecos (el hueco
     // que quedó vacío lo llenaba otro paso al refill siguiente).
-    queue._autoDjStep = (si + toAdd) % pattern.length;
+    // (el avance del ciclo ya quedó en queue._autoDjLast, paso por paso)
     client.logger.log(
       `[AutoDJ] G:${guildId} refill: patrón=${pattern.map((p) => stepShort(p)).join(">")}` +
       ` huecos=${botSlots.join(",")} faltan=${missingSlots.join(",")} toAdd=${toAdd} oyentes=${listeners.join(",")} turno=${JSON.stringify(queue._autoDjTurn || {})}`
@@ -1639,7 +1787,12 @@ module.exports = async (client) => {
         effectiveUser = listeners[Math.floor(Math.random() * listeners.length)];
       }
       const effectiveType = item.track.autoDjType || (step.type === "random" ? "random" : "rec");
-      const meta = { type: effectiveType, userId: effectiveUser };
+      const meta = {
+        type: effectiveType,
+        userId: effectiveType === "random" ? null : effectiveUser,
+        seq: item.track.autoDjSeq,
+        fallback: item.track.autoDjFallback || null,
+      };
       let member = fallbackMember;
       if (effectiveUser) {
         member = vc?.guild?.members?.cache?.get(effectiveUser)
@@ -1656,6 +1809,11 @@ module.exports = async (client) => {
         const m2 = vc?.guild?.members?.cache?.get(listeners[idx]);
         if (m2) { member = m2; effectiveUser = effectiveUser || listeners[idx]; }
       }
+      // La 🎲 de la lista no es de NINGÚN oyente: queda a nombre del bot (así no
+      // cuenta como "pedida" de nadie ni recibe prioridad de pedido).
+      if (effectiveType === "random") {
+        member = vc?.guild?.members?.me || member;
+      }
       try {
         if (item.existing) {
           // Ya está en la cola (el loader la cargó antes): se MUEVE al hueco del
@@ -1666,6 +1824,8 @@ module.exports = async (client) => {
             const [song] = live.songs.splice(idx, 1);
             movedByUrl.set(url, song);
             addedMeta.set(url, meta);
+            flagBotSong(live, song, meta, false);
+            live.songs.splice(idx, 0, song);
           }
           continue;
         }
@@ -1692,7 +1852,8 @@ module.exports = async (client) => {
             }
             item.playUrl = single;
             const t0 = Date.now();
-            await enqueueSong(client, vc, single, { member, textChannel: queue.textChannel, selfDeaf: true, skip: false });
+            await enqueueBot(queue, single, meta, () =>
+              enqueueSong(client, vc, single, { member, textChannel: queue.textChannel, selfDeaf: true, skip: false }));
             client.logger.log(`[AutoDJ] G:${guildId} añadida ${single} (1ª de la lista ${url}, ${Date.now() - t0}ms)`);
             addedMeta.set(single, meta);
           } else {
@@ -1718,7 +1879,7 @@ module.exports = async (client) => {
         const probe =
           cachedOk && Date.now() - cachedOk < NEXT_VALIDATE_TTL
             ? cleanUrl
-            : await fetchPlaylistFirstURL(cleanUrl, { timeoutMs: 12000 });
+            : await probeSingleURL(cleanUrl, 12000); // oEmbed (instantáneo); yt-dlp solo si no es concluyente
         const single = probe && isSafeSingle(probe) ? cleanYtUrl(probe) : null;
         if (single && excludedCanon.has(canonUrlKey(single))) {
           seenMark(seen, url);
@@ -1732,8 +1893,9 @@ module.exports = async (client) => {
           client.logger.warn(`[AutoDJ] G:${guildId} ${url} no se pudo pre-validar (yt-dlp / no es single): se descarta`);
           continue;
         }
-        await enqueueSong(client, vc, single, { member, textChannel: queue.textChannel, selfDeaf: true, skip: false });
-        client.logger.log(`[AutoDJ] G:${guildId} añadida ${single} (${Date.now() - t0}ms)`);
+        await enqueueBot(queue, single, meta, () =>
+          enqueueSong(client, vc, single, { member, textChannel: queue.textChannel, selfDeaf: true, skip: false }));
+        client.logger.log(`[AutoDJ] G:${guildId} añadida ${single} (${Date.now() - t0}ms) · ${AutoDjOrder.infoOf(meta.type).icon} ${meta.type}${meta.userId ? ":" + meta.userId : ""}${meta.fallback ? " [" + meta.fallback + "]" : ""}`);
         addedMeta.set(single, meta);
       } catch (e) {
         if (/timeout/i.test(e?.message || "")) {
@@ -1765,86 +1927,26 @@ module.exports = async (client) => {
     // después de la que suena. Las recién encoladas con play() están al final de
     // la cola; las movidas ya se sacaron de su lugar.
     const blockSongs = [];
-    // El contador de secuencia sigue desde el máximo ya presente (por si la cola
-    // sobrevivió a un reinicio): las nuevas SIEMPRE quedan detrás de las viejas.
-    q._autoDjSeqCounter = Math.max(
-      Number(q._autoDjSeqCounter) || 0,
-      ...q.songs.map((s) => Number(s && s._autoDjSeq) || 0)
-    );
     for (const item of block) {
-      // Para listas aisladas la url que QUEDÓ en la cola es la del single
-      // (item.playUrl), no la de la lista original.
+      // Para listas aisladas la url que QUEDÓ en la cola es la del single.
       const url = item.playUrl || item.track.url;
       if (!addedMeta.has(url)) continue;
-      let song = movedByUrl.get(url);
-      if (!song) {
-        const idx = q.songs.findIndex((x, i) => i > 0 && x?.url === url);
-        if (idx > 0) [song] = q.songs.splice(idx, 1);
-      }
-      if (!song) continue;
       const meta = addedMeta.get(url);
-      song.autoDj = true;
-      song._autoDj = true;
-      song.autoDjType = meta.type;
-      song.autoDjUserId = meta.userId || song.autoDjUserId || null;
-      // `_autoDjAdded`: la canción la ENCOLÓ el bot para este usuario. Si ya
-      // estaba en la cola (la puso el usuario con su propia lista) NO se marca:
-      // así, al irse él, no se le borra su propia canción de la cola.
-      song._autoDjAdded = item.existing ? song._autoDjAdded === true : true;
-      // Secuencia global: define el ORDEN VISUAL del bloque del bot. Las movidas
-      // conservan la que ya tenían (así no se cuelan delante de las nuevas).
-      if (!Number.isFinite(song._autoDjSeq)) {
-        q._autoDjSeqCounter = (q._autoDjSeqCounter || 0) + 1;
-        song._autoDjSeq = q._autoDjSeqCounter;
-      }
+      const song = q.songs.find((x, i) => i > 0 && x && (x.url === url || canonUrlKey(x.url) === canonUrlKey(url)));
+      if (!song) continue;
+      // Red de seguridad: normalmente ya se marcó en addSong / al mover.
+      flagBotSong(q, song, meta, !item.existing);
       blockSongs.push(song);
     }
     if (blockSongs.length) {
-      // Reconstruir el tramo del bot SIEMPRE en orden de patrón:
-      //   1..pattern.length  -> canciones del bot CONSECUTIVAS (primera página del
-      //                         embed fija: rec u1, rec u2, aleat u1, aleat u2,
-      //                         novedad u1, novedad u2, 🎲)
-      //   resto              -> un tema del usuario entre cada canción del bot
-      // Las canciones del bot se ordenan por `_autoDjSeq` (orden en que las eligió
-      // el patrón), NO por posición actual: así un refill chico no desarma el
-      // orden y la primera página queda estable.
-      const cur = q.songs[0] || null;
-      const rest = q.songs.slice(1);
-      const userSongs = rest.filter((s) => !(s && (s.autoDj || s._autoDj)));
-      const botSongs = rest
-        .filter((s) => s && (s.autoDj || s._autoDj))
-        .sort((a, b) => (Number(a._autoDjSeq) || 0) - (Number(b._autoDjSeq) || 0));
-      const rebuilt = cur ? [cur] : [];
-      let bi = 0;
-      let ui = 0;
-      while (bi < botSongs.length || ui < userSongs.length) {
-        const pos = rebuilt.length; // 0-based: 1 = primera después de la actual
-        const isFront = frontMix && pos <= frontCycle;
-        const botSlot = isFront || (((pos - frontCycle - 1) % SLOT_GAP) === 0);
-        if (botSlot && bi < botSongs.length) { rebuilt.push(botSongs[bi++]); continue; }
-        if (ui < userSongs.length) { rebuilt.push(userSongs[ui++]); continue; }
-        if (bi < botSongs.length) { rebuilt.push(botSongs[bi++]); continue; }
-        break;
-      }
-      q.songs = rebuilt;
-    // Sin urls repetidas en la cola (deja la primera aparición). Limpiar TODO lo
-    // que se repita, incluyendo las que acaba de meter el bot.
-    const finalSeen = new Set();
-    q.songs = q.songs.filter((x) => {
-      if (!x?.url) return true;
-      if (finalSeen.has(x.url)) return false;
-      finalSeen.add(x.url);
-      return true;
-    });
-      // Pre-resolver el stream de las canciones del AutoDJ en segundo plano.
-      // El warm del playSong corre ANTES de que el AutoDJ las agregue, así que
-      // la que queda en la posición 1 (la siguiente a sonar) llegaba a la
-      // transición SIN stream.url -> DisTube hacía la extracción de yt-dlp en ese
-      // momento (5-15 s de silencio). Ahora se resuelve con tiempo de sobra.
+      relayoutQueue(q);
+      // Pre-resolver el stream de las próximas en segundo plano (evita 5-15 s de
+      // silencio en la transición).
       try { client.warmStreamURLs?.(q, 3); } catch (e) {}
+      const _by = {};
+      for (const m of addedMeta.values()) _by[m.type] = (_by[m.type] || 0) + 1;
       client.logger.log(
-        `[AutoDJ] +${addedMeta.size} (${[...addedMeta.values()].filter((m) => m.type === "rec").length} 🛸 rec + ` +
-        `${[...addedMeta.values()].filter((m) => m.type === "random").length} 🎲 aleatorias) · patrón ` +
+        `[AutoDJ] +${addedMeta.size} (${Object.entries(_by).map(([t, n]) => `${n}×${AutoDjOrder.infoOf(t).icon}${t}`).join(" ")}) · ciclo ` +
         `${pattern.map((p) => stepShort(p)).join(" > ")} · cola ${q.songs.length}`
       );
     }
@@ -1856,7 +1958,7 @@ module.exports = async (client) => {
     try { await PlaylistStore.saveAutoDjSeen(client, guildId, seen); } catch (e) {}
 
     client.autoDjReport = client.autoDjReport || new Map();
-    const nRec = [...addedMeta.values()].filter((m) => m.type === "rec").length;
+    const nRec = [...addedMeta.values()].filter((m) => m.type !== "random").length;
     const nRnd = [...addedMeta.values()].filter((m) => m.type === "random").length;
     client.autoDjReport.set(guildId, { total: addedMeta.size, rec: nRec, random: nRnd, pattern: [...pattern] });
 
@@ -1985,7 +2087,9 @@ patchClock(queue, gid);
       }
     })();
 
-if (song.user?.id) {
+// Las canciones del AutoDJ NO son pedidos del oyente (antes se registraban a su
+    // nombre y contaminaban sus "pedidas": el AutoDJ terminaba "pidiéndose" a sí mismo).
+    if (song.user?.id && !(song.autoDj || song._autoDj)) {
     MusicTracker.logPlay(gid, song.user.id, song);
     UserRequests.recordRequest(client, gid, song.user.id, song).catch(() => {});
     }
@@ -2147,9 +2251,23 @@ if (song.user?.id) {
   client.distube.on("addSong", async (queue, song) => {
     console.log(`[DisTube] Song Added: ${song.name}`);
 
+    // ¿La puso el BOT (AutoDJ)? Se marca YA (síncrono, antes de cualquier await) y se
+    // acomoda en su lugar del ciclo. Así NO entra al "Queue Priority" de abajo, que
+    // es solo para pedidos de personas. Si la puso el loader de una lista, se anota
+    // como "de la lista cargada" (📋) para distinguirla de un pedido manual (🙋).
+    const _gidAdd = queue.textChannel?.guildId || queue.guildId;
+    const _botMeta = client._autoDjPending?.get(`${_gidAdd}|${canonUrlKey(song.url)}`);
+    if (_botMeta) {
+      flagBotSong(queue, song, _botMeta, true);
+      try { relayoutQueue(queue); } catch (e) { client.logger.error(`[AutoDJ] relayout:`, e?.message || e); }
+    } else if (AutoDjSource.takeListExpect(client, _gidAdd, song.url)) {
+      song._fromList = true;
+    }
+    const _isBotSong = !!(song.autoDj || song._autoDj);
+
     // Peticiones de otras personas al inicio de la cola (orden de llegada)
     const ownerId = process.env.OWNER_ID;
-    if (isOtherRequester(song.user, ownerId) && queue.songs.length > 1) {
+    if (!_isBotSong && isOtherRequester(song.user, ownerId) && queue.songs.length > 1) {
       try {
         const currentIndex = queue.songs.findIndex((s) => s === song);
         const insertIndex = getRequestsInsertIndex(queue, ownerId);
