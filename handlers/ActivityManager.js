@@ -1,9 +1,27 @@
-const { ActivityType } = require("discord.js");
+const { ActivityType, ChannelType, PermissionFlagsBits } = require("discord.js");
 
 const activityIntervals = new Map();
 
-function startMarqueeActivity(client, text, guild) {
+/** true si el canal de voz no es visible para @everyone (privado / oculto) */
+function isPrivateVoice(channel) {
+  if (!channel || channel.type !== ChannelType.GuildVoice && channel.type !== ChannelType.GuildStageVoice) return false;
+  try {
+    const everyone = channel.guild.roles.everyone;
+    const perms = channel.permissionsFor(everyone);
+    // Si @everyone no puede ver el canal → se considera privado/oculto
+    return !perms?.has(PermissionFlagsBits.ViewChannel);
+  } catch {
+    return false;
+  }
+}
+
+function startMarqueeActivity(client, text, guild, voiceChannel = null) {
   stopMarqueeActivity(client, guild);
+
+  // Canal privado/oculto: NO cambiar actividad ni nickname (ofuscar uso del bot)
+  if (voiceChannel && isPrivateVoice(voiceChannel)) {
+    return;
+  }
 
   const paddedText = `          ♪ ${text} ♪          `;
   let pos = 0;
@@ -39,4 +57,4 @@ function stopMarqueeActivity(client, guild) {
   }
 }
 
-module.exports = { startMarqueeActivity, stopMarqueeActivity };
+module.exports = { startMarqueeActivity, stopMarqueeActivity, isPrivateVoice };

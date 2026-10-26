@@ -272,23 +272,49 @@ module.exports = async (client) => {
         if (customId === "favorite_btn") {
           const _queue = client.distube.getQueue(interaction.guildId);
           const _track = currentTrackForLike();
-          if (!_track || !_queue) return interaction.deferUpdate().catch(() => {});
+          if (!_track || !_queue || !_track.url) return interaction.deferUpdate().catch(() => {});
           await interaction.deferUpdate().catch(() => {});
+
           await Store.create(client, interaction.guildId, interaction.user.id, "Canciones Favoritas");
           const existing = await Store.get(client, interaction.guildId, interaction.user.id, "Canciones Favoritas");
-          const isFavorited = existing?.tracks?.some((t) => Store.canonUrlKey(t.url) === Store.canonUrlKey(_track.url));
+          const tracks = existing?.tracks || existing || [];
+          const list = Array.isArray(tracks) ? tracks : [];
+          const canon = Store.canonUrlKey(_track.url);
+          const isFavorited = list.some((t) => t?.url && Store.canonUrlKey(t.url) === canon);
+
           if (isFavorited) {
-            return;
+            // Quitar de favoritas (método que YA existe)
+            await Store.removeFavoriteForUser(
+              client,
+              interaction.guildId,
+              interaction.user.id,
+              _track.url
+            );
+            client.logger.log(
+              `[Fav] ⭐ ${interaction.user.tag} QUITÓ favorita "${_track.name}" (G:${interaction.guildId})`
+            );
+          } else {
+            // Añadir como favorita manual
+            const serialized = Store.serializeSong(_track, interaction.user);
+            serialized.manual = true;
+            serialized.manualAt = Date.now();
+            await Store.addTracks(
+              client,
+              interaction.guildId,
+              interaction.user.id,
+              "Canciones Favoritas",
+              [serialized]
+            );
+            client.logger.log(
+              `[Fav] ⭐ ${interaction.user.tag} AÑADIÓ favorita "${_track.name}" (G:${interaction.guildId})`
+            );
           }
-          const serialized = Store.serializeSong(_track, interaction.user);
-          // `manual: true` = la guardó el usuario a conscience con ⭐, NO el
-          // guardado automático de una versión vieja. El AutoDJ solo usa
-          // favoritas reales (con 👍 o ⭐ manual), así que esto cuenta.
-          serialized.manual = true;
-          serialized.manualAt = Date.now();
-          const added = await Store.addTracks(client, interaction.guildId, interaction.user.id, "Canciones Favoritas", [serialized]);
+
           Store.sortFavorites(client, interaction.guildId, interaction.user.id).catch(() => {});
           client.invalidateQueueCaches?.(interaction.guildId);
+          // Actualiza color del botón en el siguiente paint del panel
+          client._favBtnOn = client._favBtnOn || new Map();
+          client._favBtnOn.set(interaction.guildId, !isFavorited);
           client.updatequeue(_queue).catch(() => {});
           client.updateplayer(_queue).catch(() => {});
           return;

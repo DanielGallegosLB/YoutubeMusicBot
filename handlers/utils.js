@@ -150,7 +150,6 @@ module.exports = async (client) => {
         .setDisabled(state),
     ]);
 
-    // Fila 3: sociales — Like 👍 • Dislike 👎 • Favorita ⭐
     const row3 = new ActionRowBuilder().addComponents([
       new ButtonBuilder()
         .setStyle(ButtonStyle.Secondary)
@@ -165,7 +164,12 @@ module.exports = async (client) => {
         .setLabel("Dislike")
         .setDisabled(dis(!track)),
       new ButtonBuilder()
-        .setStyle(ButtonStyle.Success)
+        .setStyle(
+          // Verde solo si el panel sabe que la canción actual tiene ⭐
+          (client._favBtnOn?.get?.(queue?.textChannel?.guildId || queue?.guildId)
+            ? ButtonStyle.Success
+            : ButtonStyle.Secondary)
+        )
         .setCustomId("favorite_btn")
         .setEmoji("⭐")
         .setLabel("Favorita")
@@ -1004,6 +1008,7 @@ module.exports = async (client) => {
           components: client.buttons(true),
         }).catch(() => {});
       }
+    
 
       // Si nos pasan el track real (p.ej. el emitido por playSong), confiar en él;
       // si no, usar songs[0]. songs[0] puede quedar desfasado si un skip() se
@@ -1103,7 +1108,8 @@ module.exports = async (client) => {
       // stats sea el mismo (el dedup del parpadeo no debe congelar el botón).
       const buttonsStateKey = () => {
         const gid = freshQueue?.textChannel?.guildId || freshQueue?.guildId;
-        return `${!!client.autoDj?.get(gid)}|${Number(freshQueue?.repeatMode || 0)}|${!!freshQueue?.autoplay}|${!!freshQueue?.paused}|${freshQueue?.songs?.length || 0}`;
+        const favOn = !!client._favBtnOn?.get?.(gid);
+        return `${!!client.autoDj?.get(gid)}|${Number(freshQueue?.repeatMode || 0)}|${!!freshQueue?.autoplay}|${!!freshQueue?.paused}|${freshQueue?.songs?.length || 0}|fav:${favOn}`;
       };
       const applyPanel = async (candidateText, useButtons) => {
         const cur = client._playerPanel.get(guildId);
@@ -1140,7 +1146,12 @@ module.exports = async (client) => {
           pendiente,
           new Promise((r) => setTimeout(() => r(null), 1200)),
         ]);
-        if (stats) firstText = buildStatsText(stats);
+        if (stats) {
+          firstText = buildStatsText(stats);
+          // Color del botón ⭐ según si alguien la tiene en favoritas
+          client._favBtnOn = client._favBtnOn || new Map();
+          client._favBtnOn.set(guildId, (stats.favorites || 0) > 0);
+        }
       } catch {}
 
       await applyPanel(firstText, false);

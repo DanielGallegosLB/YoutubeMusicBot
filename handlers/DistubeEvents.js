@@ -2153,7 +2153,8 @@ patchClock(queue, gid);
     const activityText = song.uploader?.name
       ? `${song.name} -${song.uploader.name}`
       : song.name;
-    startMarqueeActivity(client, activityText, queue.textChannel.guild);
+    const vc = queue.voice?.channel || queue.voiceChannel || client.distube.voices.get(queue)?.channel;
+    startMarqueeActivity(client, activityText, queue.textChannel.guild, vc);
 
     if (!queue._sessionSaved && queue.songs.length === 1 && !queue._sessionSourcePlaylist) {
       const session = createSession(queue, "song", song.name, song.url, song.user, [song]);
