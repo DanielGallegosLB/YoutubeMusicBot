@@ -33,11 +33,8 @@ async function removeUserRecommendations(client, guild, userId) {
   const guildId = guild?.id;
   if (!guildId || !userId) return 0;
 
-  // POR DEFECTO ya no se borran: esas canciones ya estaban elegidas dentro del
-  // ciclo y quitarlas hacía que la cola "parpadeara" (el bot las agregaba para
-  // alguien y a los minutos desaparecían). El ciclo futuro solo usa a los que
-  // siguen en el canal. Con AUTODJ_REMOVE_ON_LEAVE=1 vuelve al comportamiento viejo.
-  if (process.env.AUTODJ_REMOVE_ON_LEAVE !== "1") return 0;
+  // Quitar por defecto las canciones que el bot añadió para ese usuario al salir.
+  if (process.env.AUTODJ_REMOVE_ON_LEAVE === "0") return 0;
 
   const queue = client.distube?.getQueue(guildId);
   if (!queue || !queue.songs?.length) return 0;
@@ -47,15 +44,20 @@ async function removeUserRecommendations(client, guild, userId) {
   for (let i = 0; i < queue.songs.length; i++) {
     const s = queue.songs[i];
     // songs[0] es la que está sonando: no se puede quitar de la cola.
-    if (i === 0 || !isRecFor(s, userId) || s._autoDjAdded !== true) {
+    // Quitar todas las que el bot añadió para ese usuario (recomendación/aleatoria/artistas/pedidas)
+    if (i === 0 || !isRecFor(s, userId)) {
+      kept.push(s);
+      continue;
+    }
+    // Si ya estaba en cola (no la añadió el bot ahora), mantenerla pero sin rótulo
+    if (s._autoDjAdded !== true) {
       kept.push(s);
       continue;
     }
     removed++;
   }
 
-  // Lo que queda (la que suena, o canciones que ya estaban en la cola) deja de
-  // llevar el rótulo del que se fue: ya no es su recomendación.
+  // Lo que queda deja de llevar el rótulo del que se fue
   for (const s of queue.songs) if (isRecFor(s, userId)) s.autoDjUserId = null;
 
   if (!removed) return 0;

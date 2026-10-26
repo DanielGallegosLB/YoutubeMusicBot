@@ -90,15 +90,17 @@ if (embed) {
     }
   }
 
-  // --- AutoDJ: si la persona se va del canal del bot, sus recomendaciones
-  //     (las que el bot le encoló) se van con ella y los huecos que dejó se
-  //     rellenan con las de los que siguen en el canal. ---
+  // --- AutoDJ: si la persona se va del canal del bot, quitar SUS canciones
+  //     del AutoDJ de la cola (solo las que el bot le añadió para él) y
+  //     reabastecer con los que siguen.
   if (oldState.channelId !== newState.channelId) {
     try {
       const botChannel = guild.members.me?.voice?.channel;
       const wasWithBot = !!botChannel && oldState.channelId === botChannel.id;
       const stillWithBot = !!botChannel && newState.channelId === botChannel.id;
       if (wasWithBot && !stillWithBot) {
+        // Activar limpieza al salir (por defecto)
+        if (process.env.AUTODJ_REMOVE_ON_LEAVE !== "0") process.env.AUTODJ_REMOVE_ON_LEAVE = "1";
         const removed = await AutoDjPresence.removeUserRecommendations(
           client,
           guild,

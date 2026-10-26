@@ -31,7 +31,7 @@ const MANUAL = { icon: "🎵", tag: "Manual" };      // la pidió alguien (coman
 const LISTED = { icon: "📋", tag: "Lista" };       // vino de la lista que alguien cargó
 
 const LEGEND =
-  "🛸 recomendada · 🎲 aleatoria (pedidas / lista) · 🎤 novedosa · 📝 pedidas · 🎵 manual · 📋 de la lista cargada";
+  "🛸 recomendada · 📝 pedidas · 🎲 aleat. lista · 🎤 novedosa · 🎵 manual · 📋 de la lista cargada";
 
 // Cuando un paso no encontró lo suyo y cayó a otra fuente, se dice en el rótulo.
 const FALLBACK_TAG = { sala: "↩ sala", reciclada: "↩ reciclada", rescate: "↩ rescate", lista: "↩ lista" };
@@ -87,7 +87,23 @@ function originLabel(track, nameOf) {
   if (track.autoDj || track._autoDj) {
     const info = infoOf(track.autoDjType);
     if (track.autoDjType === "random") {
-      return `${info.icon} ${info.tag === "Lista" ? "Aleat. lista" : info.tag}`;
+      // Solo es "de la lista" si de verdad salió de la lista cargada. Si la lista
+      // se agotó y el paso cayó a favoritas/historial, se dice.
+      return track.autoDjFallback
+        ? `${info.icon} Aleat. favoritas ↩ ${track.autoDjFallback === "favoritas" ? "lista agotada" : track.autoDjFallback}`
+        : `${info.icon} Aleat. lista`;
+    }
+    if (track.autoDjType === "pedidas") {
+      const who = nm(track.autoDjUserId);
+      return who ? `📝 Pedidas · ${who}` : `📝 Pedidas`;
+    }
+    if (track.autoDjType === "aleatorias") {
+      const who = nm(track.autoDjUserId);
+      return who ? `🎲 Pedidas · ${who}` : `🎲 Pedidas`;
+    }
+    if (track.autoDjType === "artistas") {
+      const who = nm(track.autoDjUserId);
+      return who ? `🎤 Novedad · ${who}` : `🎤 Novedad`;
     }
     const who = nm(track.autoDjUserId);
     const fb = track.autoDjFallback ? ` ${FALLBACK_TAG[track.autoDjFallback] || ""}`.trimEnd() : "";

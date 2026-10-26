@@ -894,8 +894,6 @@ module.exports = async (client) => {
         const tIsAutoDj = !!(track?.autoDj || track?._autoDj);
         const tOwners = (tStats.owners || []).slice(0, 3).join(", ");
         const tOwnersStr = tIsAutoDj || !tOwners ? "" : ` | 👤 ${tOwners}`;
-        // Para temas pedidos MANUALMENTE con /play o botón (no por AutoDJ), poner
-        // un icono claro para distinguirlos.
         const tReq = originLabelFor(track, guild);
         queueString += `\`${index}.\` **${client.getTitle(track)}** - ${
           track.isLive ? "LIVE STREAM" : track.formattedDuration.split(" | ")[0]
@@ -1391,9 +1389,16 @@ module.exports = async (client) => {
 
       const parts = title.split("|");
 
-      const shortTitle = parts[0].trim() || "Unknown Track";
+      let shortTitle = parts[0].trim() || "Unknown Track";
+      // Limpiar ruido común sin acortar excesivamente
+      shortTitle = shortTitle
+        .replace(/\s*\((official|video|audio|lyric|lyrics|remaster|hd|4k|visualizer)[^\)]*\)/gi, " ")
+        .replace(/\s*\[[^\]]*(official|video|audio|lyric|lyrics|remaster|hd|4k|visualizer)[^\]]*\]/gi, " ")
+        .replace(/\s*-\s*(topic|official|vevo|records|music)$/i, " ")
+        .replace(/\s+/g, " ")
+        .trim();
 
-      return shortTitle.substring(0, 25);
+      return shortTitle.substring(0, 40);
     } catch (error) {
       console.error("Error while processing track title:", error);
       return "Unknown Track";

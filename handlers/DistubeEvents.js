@@ -218,6 +218,18 @@ module.exports = async (client) => {
     return queue._autoDjSeen;
   };
   const seenMark = (seen, url) => { if (url) seen.set(url, Date.now()); };
+  // Clave de TÍTULO: la misma canción con otra URL (video oficial, lyric, remaster,
+  // subida distinta) se detecta por nombre. Quita lo que va entre () [] y las
+  // etiquetas típicas, y deja solo letras/números.
+  const titleKey = (name) => {
+    let t = String(name || "").toLowerCase();
+    if (!t) return "";
+    t = t.replace(/[\(\[\{][^\)\]\}]*[\)\]\}]/g, " ")
+      .replace(/\b(official|video|music|audio|lyrics?|lyric video|hd|hq|4k|remaster(ed)?|visuali[sz]er|explicit|clean|ft\.?|feat\.?)\b/g, " ")
+      .normalize("NFKD").replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9]+/g, "");
+    return t.length >= 4 ? "t:" + t : "";
+  };
   // Olvida lo más viejo, pero NUNCA lo que está en cola ahora mismo (si no, el
   // AutoDJ metería dos veces la misma canción).
   const seenTrim = (seen, inQueue) => {
@@ -1284,6 +1296,14 @@ module.exports = async (client) => {
       }, entry.origen === "random" ? "pick.random" : "pick.rec");
     };
 
+    // Títulos ya usados: lo que está en cola + lo que el bot puso (persistido en
+    // `seen` con prefijo "t:"). Evita "Fade Into You" 3 veces con URLs distintas.
+    const queueTitleKeys = new Set(queue.songs.map((s) => titleKey(s?.name)).filter(Boolean));
+    const takenTitles = new Set();
+    const titleUsed = (name) => {
+      const k = titleKey(name);
+      return !!k && (queueTitleKeys.has(k) || seen.has(k) || takenTitles.has(k));
+    };
     const pickForStepInner = async (step, taken, inQueue) => {
       // Destinatario efectivo del paso: si es "*" y el tipo necesita un usuario,
       // se reparte de forma cíclica entre los oyentes (orden de conexión).
@@ -1406,7 +1426,7 @@ module.exports = async (client) => {
           // Excluir lo que el usuario ya conoce (su propio pool/historial) y lo
           // que ya está en cola/cerca, para que sea NOVEDOSA de verdad.
           const ownNow = new Set((poolsByUser[effUser] || []).map((t) => t.url));
-          src = src.filter((t) => !seen.has(t.url) && !taken.has(t.url) && !ownNow.has(t.url));
+          src = src.filter((t) => !seen.has(t.url) && !taken.has(t.url) && !ownNow.has(t.url) && !titleUsed(t.name || t.title));
         }
         if (src.length) {
           src = src.slice().sort((a, b) => {
@@ -1454,6 +1474,7 @@ module.exports = async (client) => {
                 const fresh = results.filter((r) => r?.url
                   && !seen.has(r.url) && !taken.has(r.url) && !inQueue.has(r.url)
                   && !ownPool.has(r.url) && !ownHist.has(r.url)
+                  && !titleUsed(r.name || r.title)
                   && isSafeCand(r)
                   && (Number(r.duration) || 0) > 0 && (Number(r.duration) || 0) <= 600);
                 if (!fresh.length) continue;
@@ -1565,7 +1586,7 @@ module.exports = async (client) => {
       const tag = `pool=${pool.length} (favs=${allPool.length} hist=${allHistory.length} picks=${picks.length}) near=${nearQueue.size}`;
       const weightOf = (t) => skipWeight(t.url, effUser || step.userId);
       const isUsableNow = (t) => t?.url && !excludedCanon.has(canonUrlKey(t.url)) && !nearQueue.has(t.url);
-      const freshOf = (arr) => arr.filter((t) => isUsableNow(t) && !seen.has(t.url) && !taken.has(t.url));
+      const freshOf = (arr) => arr.filter((t) => isUsableNow(t) && !seen.has(t.url) && !taken.has(t.url) && !titleUsed(t.name || t.title));
       // Tres escalones, en orden. Antes el paso 3 (reciclar) saltaba siempre al
       // final porque pickUnseen nunca devolvía null, y encima elegía SIEMPRE la
       // primera de la lista: por eso se repetían las mismas 2-3 canciones.
@@ -1618,6 +1639,8 @@ module.exports = async (client) => {
         found.autoDjFallback = motivo === "sala-nueva" ? "sala"
           : motivo === "reciclada" ? "reciclada"
           : motivo === "rescate-sin-like" ? "rescate" : null;
+        // 🎲 que NO salió de la lista cargada (se agotó y cayó a favoritas/historial).
+        if (step.type === "random" && !found.fromList && !found.autoDjFallback) found.autoDjFallback = "favoritas";
         const icon = step.type === "random" ? "🎲" : step.type === "liked" ? "👍" : step.type === "pedidas" ? "📝" : step.type === "aleatorias" ? "🎰" : step.type === "artistas" ? "🎤" : "🛸";
         dbgLine(
           `${icon} ${step.type}: ${tag}` +
@@ -1665,6 +1688,8 @@ module.exports = async (client) => {
     const pickForStep = async (step, taken, inQueue) => {
       const res = await pickForStepInner(step, taken, inQueue);
       if (res?.url) noteRecent(res.url);
+      const _tk = titleKey(res?.name || res?.title);
+      if (_tk) { takenTitles.add(_tk); seenMark(seen, _tk); }
       return res;
     };
 
