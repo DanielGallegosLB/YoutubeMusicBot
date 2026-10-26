@@ -19,8 +19,7 @@ const MAX_SESSION_SONGS = 150;
 // ── Búsqueda en YouTube al vuelo (paso 🎤 Artistas del perfil) ──────────────
 // Cuando el server no tiene canciones guardadas de los artistas TOP del perfil
 // (ej. milo j, kidd voodoo), se buscan en YouTube en el momento y se elige una
-// NUEVA (que el usuario no tenga en su historial/cola). Cache corto para no
-// martillar la API de YouTube ni resolver la misma búsqueda en cada refill.
+// NUEVA (que el usuario no tenga en su historial/cola).
 const _artistSearchCache = new Map(); // query -> { at, results:[{url,name,uploader,duration}] }
 const ARTIST_SEARCH_TTL = Math.max(
   60000,
@@ -28,16 +27,21 @@ const ARTIST_SEARCH_TTL = Math.max(
 );
 const ARTIST_SEARCH_LIMIT = Math.max(
   3,
-  Math.min(15, Number(process.env.AUTODJ_ARTIST_SEARCH_LIMIT) || 8)
+  Math.min(15, Number(process.env.AUTODJ_ARTIST_SEARCH_LIMIT) || 10)
 );
+// Filtrado estricto para evitar reuploads, mixes, OST completos o videos >10min
+const ARTIST_BAD_CHANNEL = /(aknoy|gta\s*(soundtracks?|ost|radio)|soundtrack\s*(archive|collection)|full\s*album|compilation|mega\s*mix|hour\s*mix|\b1\s*hour\b|24\/7|nonstop|best\s*of|greatest\s*hits|playlist|mix(es)?\b)/i;
 
 async function searchArtistSongs(client, query, limit = ARTIST_SEARCH_LIMIT) {
   if (!query) return [];
-  const key = String(query).trim().toLowerCase();
+  let q = String(query).trim();
+  // Casos especiales: buscar conjunto cuando son dos artistas
+  if (/zapp\s*&\s*roger/i.test(q)) q = "zapp roger";
+  const key = q.toLowerCase();
   const hit = _artistSearchCache.get(key);
   if (hit && (Date.now() - hit.at) < ARTIST_SEARCH_TTL) return hit.results;
   try {
-    const raw = await searchYoutubeVideos(String(query).trim(), limit);
+    const raw = await searchYoutubeVideos(q, limit);
     const results = (Array.isArray(raw) ? raw : [])
       .map((s) => ({
         url: s?.url || null,
@@ -45,12 +49,24 @@ async function searchArtistSongs(client, query, limit = ARTIST_SEARCH_LIMIT) {
         uploader: s?.uploader ? { name: String(s.uploader) } : null,
         duration: Number(s?.duration) || 0,
       }))
-      .filter((s) => s.url);
+      .filter((s) => s.url)
+      // Máximo 10 minutos
+      .filter((s) => s.duration > 0 && s.duration <= 600)
+      // Evitar canales claramente reupload/mix
+      .filter((s) => {
+        const up = String(s.uploader?.name || "").toLowerCase();
+        if (!up) return true;
+        if (ARTIST_BAD_CHANNEL.test(up)) return false;
+        // Descartar títulos que huelen a mix/compilación
+        const nm = String(s.name || "").toLowerCase();
+        if (/(full\s*album|compilation|best\s*of|greatest\s*hits|hour\s*mix|nonstop|24\/7)/i.test(nm)) return false;
+        return true;
+      });
     _artistSearchCache.set(key, { at: Date.now(), results });
-    client?.logger?.log?.(`[AutoDJ] 🔎 artistas "${query}" → ${results.length} resultados`);
+    client?.logger?.log?.(`[AutoDJ] 🔎 artistas "${q}" → ${results.length} resultados (<=10m)`);
     return results;
   } catch (err) {
-    client?.logger?.log?.(`[AutoDJ] búsqueda artistas falló ("${query}"): ${err?.message || err}`);
+    client?.logger?.log?.(`[AutoDJ] búsqueda artistas falló ("${q}"): ${err?.message || err}`);
     _artistSearchCache.set(key, { at: Date.now(), results: [] });
     return [];
   }
@@ -1136,29 +1152,25 @@ module.exports = async (client) => {
     const allPool = Object.values(poolsByUser).flat().filter((t) => t?.url);
 
     // ── Pools específicos de los pasos nuevos ────────────────────────────────
-    // liked      👍  → favoritas con 👍/⭐ del usuario (le gusta sí o sí).
-    // pedidas    📝  → canciones que ESE usuario pidió (sus requests).
-    // aleatorias 🎰  → al azar entre las pedidas de ESE usuario, priorizando las
-    //                  que MENOS se reprodujeron (no repite siempre las mismas).
-    // artistas   🎤  → canciones de OTROS cuyo artista está en el perfil del
-    //                  usuario (los "_fromArtist" que ya se armaron arriba).
-    const likedPoolByUser = {};
-    const pedidasPoolByUser = {};
-    const aleatoriasPoolByUser = {};
-    const artistasPoolByUser = {};
-    for (const uid of listeners) {
-      const pool = poolsByUser[uid] || [];
-      // 🛸 "le gusta SÍ O SÍ": su 👍 propio o guardada a mano por él (⭐), y nunca
-      // algo que él haya marcado con 👎. Un 👍 de OTRA persona no cuenta.
-      likedPoolByUser[uid] = pool.filter(
-        (t) => t?.url && !t._fromRequest && !t._fromArtist &&
-          !(t.dislikedBy || []).includes(uid) &&
-          ((t.likedBy || []).includes(uid) || t.manual === true)
-      );
-      pedidasPoolByUser[uid] = pool.filter((t) => t?.url && t._fromRequest);
-      aleatoriasPoolByUser[uid] = pool.filter((t) => t?.url && t._fromRequest);
-      artistasPoolByUser[uid] = pool.filter((t) => t?.url && t._fromArtist);
-    }
+      // liked      🛸  → recomendaciones: canciones que le gustan mucho al usuario
+      //                    (favoritas con like/⭐), ordenadas para evitar repetir
+      // pedidas    📝  → canciones que el usuario pidió MANUALMENTE
+      // aleatorias 🎲  → aleatoria de las pedidas del usuario (menos escuchadas)
+      // artistas   🎤  → novedades por artistas del perfil
+      const likedPoolByUser = {};
+      const pedidasPoolByUser = {};
+      const aleatoriasPoolByUser = {};
+      const artistasPoolByUser = {};
+      for (const uid of listeners) {
+        const pool = poolsByUser[uid] || [];
+        likedPoolByUser[uid] = pool.filter(
+          (t) => t?.url && !t._fromRequest && !t._fromArtist &&
+            ((t.likedBy || []).length > 0 || t.manual === true)
+        );
+        pedidasPoolByUser[uid] = pool.filter((t) => t?.url && t._fromRequest);
+        aleatoriasPoolByUser[uid] = pool.filter((t) => t?.url && t._fromRequest);
+        artistasPoolByUser[uid] = pool.filter((t) => t?.url && t._fromArtist);
+      }
     // Etiqueta corta de un paso del patrón para logs.
     const stepShort = (p) => {
       if (!p || p.type === "random") return "🎲";
@@ -1334,24 +1346,23 @@ module.exports = async (client) => {
       const isSafeCand = (t) => t?.url && !isPlaylistURL(t.url) && isSafeSingle(t.url);
       let pool;
       if (step.type === "liked") {
-        // 👍 "le gusta sí o sí": SOLO sus favoritas con like/⭐ (sin historial
-        // ajeno). Ordenadas por score; si se agotan se reciclan (abajo).
+        // 🛸 Recomendaciones: canciones que le gustan MUCHO al usuario (más likes
+        // primero), con menos repeticiones. Incluye solo las que realmente le gustan.
         const src = (likedPoolByUser[effUser] || []).filter(isSafeCand);
-        const score = (t) => ((t.likedBy || []).length - (t.dislikedBy || []).length) * 10 + (t.playCount || 0) - SKIP_WEIGHT * skipCountOf(t.url, effUser);
+        const score = (t) => ((t.likedBy || []).length - (t.dislikedBy || []).length) * 12 + (t.playCount || 0) - SKIP_WEIGHT * skipCountOf(t.url, effUser) - (queue._autoDjRecent?.lastIndexOf(canonUrlKey(t.url)) || -1);
         pool = src.slice().sort((a, b) => score(b) - score(a));
       } else if (step.type === "pedidas") {
-        // 📝 aleatoria de lo que ESE usuario pidió (con reposición, es corto).
+        // 📝 canciones pedidas MANUALMENTE por el usuario (singulares primero).
         const src = (pedidasPoolByUser[effUser] || []).filter(isSafeCand);
         const have = new Set(src.map((t) => canonUrlKey(t.url)));
         const extra = (requestsByUser[effUser] || [])
           .map((r) => ({ url: r.url, name: r.name || null, uploader: r.artist ? { name: r.artist } : null, likedBy: [], dislikedBy: [], playCount: Number(r.plays) || 0, _fromRequest: true }))
           .filter((t) => isSafeCand(t) && !have.has(canonUrlKey(t.url)));
-        pool = shuffleWeighted(src.concat(extra), (t) => skipWeight(t.url, effUser));
+        // Priorizar URLs sueltas/individuales; si todo viene de listas, usarlo igual
+        const all = src.concat(extra);
+        pool = shuffleWeighted(all, (t) => skipWeight(t.url, effUser));
       } else if (step.type === "aleatorias") {
-        // 🎰 aleatoria entre las pedidas de ESE usuario, priorizando las que
-        // MENOS se reprodujeron: se elige ponderado SOLO entre el cuartil menos
-        // escuchado (evita repetir siempre las mismas pedidas). Seleccion directa
-        // (como random), sin pasar por el orden "mas gustado".
+        // 🎲 aleatoria de las PEDIDAS del usuario, de las menos escuchadas.
         const src = (aleatoriasPoolByUser[effUser] || []).filter(isSafeCand);
         const have = new Set(src.map((t) => canonUrlKey(t.url)));
         const extra = (requestsByUser[effUser] || [])
@@ -1359,6 +1370,7 @@ module.exports = async (client) => {
           .filter((t) => isSafeCand(t) && !have.has(canonUrlKey(t.url)));
         const all = src.concat(extra);
         if (all.length) {
+          // Elegir entre las menos escuchadas para no repetir la misma
           const chosen = pickLeastPlayed(all, (t) => skipWeight(t.url, effUser));
           if (chosen?.url) {
             taken.add(chosen.url);
@@ -1381,7 +1393,7 @@ module.exports = async (client) => {
             return { url: chosen.url, name: chosen.name || null, existing: inQueue.has(chosen.url), fromList: false, autoDjType: "aleatorias", autoDjUserId: effUser || null };
           }
         }
-        dbgLine(`🎲 pedidas: el usuario no tiene pedidas -> paso omitido`);
+        dbgLine(`🎲 aleatorias: el usuario no tiene pedidas -> paso omitido`);
         return null;
       } else if (step.type === "artistas") {
         // 🎤 "novedosa de artistas del perfil": candidatas cuyo artista está en
@@ -1435,40 +1447,40 @@ module.exports = async (client) => {
         {
           const tops = shuffleWeighted(topArtistNames(artistsByUser[effUser]), (a) => a.count);
           if (tops.length) {
-            const ownPool = new Set((poolsByUser[effUser] || []).map((t) => t.url));
-            const ownHist = new Set((historyByUser.get(effUser) || []).map((t) => t?.url).filter(Boolean));
-            for (const top of tops) {
-              const results = await searchArtistSongs(client, top.name);
-              const fresh = results.filter((r) => r?.url
-                && !seen.has(r.url) && !taken.has(r.url) && !inQueue.has(r.url)
-                && !ownPool.has(r.url) && !ownHist.has(r.url)
-                && isSafeCand(r));
-              if (!fresh.length) continue;
-              // Distribución (aleatoria) dentro de lo nuevo para no repetir el
-              // mismo resultado siempre; se evita la primera posición trivial.
-              const pool2 = fresh.length > 1 ? fresh.slice(1) : fresh;
-              const chosen = pool2[Math.floor(Math.random() * pool2.length)];
-              if (!chosen?.url) continue;
-              taken.add(chosen.url);
-              logPick({
-                origen: "artistas",
-                motivo: "artista-perfil-youtube",
-                paso: `${step.type}:${effUser || "*"}`,
-                destinatario: effUser || null,
-                url: chosen.url,
-                nombre: chosen.name || null,
-                yaEnCola: false,
-                candidatas: fresh.length,
-                artistaBuscado: top.name,
-                skips: 0,
-                likes: 0,
-                dislikes: 0,
-                playsTotales: 0,
-                playsSesion: 0,
-                peso: 1,
-              });
-              return { url: chosen.url, name: chosen.name || null, existing: false, fromList: false, autoDjType: "artistas", autoDjUserId: effUser || null };
-            }
+              const ownPool = new Set((poolsByUser[effUser] || []).map((t) => t.url));
+              const ownHist = new Set((historyByUser.get(effUser) || []).map((t) => t?.url).filter(Boolean));
+              for (const top of tops) {
+                const results = await searchArtistSongs(client, top.name);
+                const fresh = results.filter((r) => r?.url
+                  && !seen.has(r.url) && !taken.has(r.url) && !inQueue.has(r.url)
+                  && !ownPool.has(r.url) && !ownHist.has(r.url)
+                  && isSafeCand(r)
+                  && (Number(r.duration) || 0) > 0 && (Number(r.duration) || 0) <= 600);
+                if (!fresh.length) continue;
+                // Elegir entre los resultados filtrados (evitar siempre el 1ro)
+                const pool2 = fresh.length > 1 ? fresh.slice(1) : fresh;
+                const chosen = pool2[Math.floor(Math.random() * pool2.length)];
+                if (!chosen?.url) continue;
+                taken.add(chosen.url);
+                logPick({
+                  origen: "artistas",
+                  motivo: "artista-perfil-youtube",
+                  paso: `${step.type}:${effUser || "*"}`,
+                  destinatario: effUser || null,
+                  url: chosen.url,
+                  nombre: chosen.name || null,
+                  yaEnCola: false,
+                  candidatas: fresh.length,
+                  artistaBuscado: top.name,
+                  skips: 0,
+                  likes: 0,
+                  dislikes: 0,
+                  playsTotales: 0,
+                  playsSesion: 0,
+                  peso: 1,
+                });
+                return { url: chosen.url, name: chosen.name || null, existing: false, fromList: false, autoDjType: "artistas", autoDjUserId: effUser || null };
+              }
           }
         }
         dbgLine(`🎤 novedad: sin canciones nuevas de los artistas del perfil -> paso omitido`);

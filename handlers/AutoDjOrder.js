@@ -23,15 +23,15 @@ const TYPE_INFO = {
   liked:      { icon: "🛸", tag: "Rec",     long: "recomendación" },
   rec:        { icon: "🛸", tag: "Rec",     long: "recomendación" },
   aleatorias: { icon: "🎲", tag: "Pedidas", long: "aleatoria de pedidas" },
-  pedidas:    { icon: "🎲", tag: "Pedidas", long: "aleatoria de pedidas" },
+  pedidas:    { icon: "📝", tag: "Pedidas", long: "pedidas" },
   artistas:   { icon: "🎤", tag: "Novedad", long: "novedosa de perfil" },
   random:     { icon: "🎲", tag: "Lista",   long: "aleatoria de la lista" },
 };
-const MANUAL = { icon: "🙋", tag: "Manual" };      // la pidió alguien (comando/botón)
+const MANUAL = { icon: "🎵", tag: "Manual" };      // la pidió alguien (comando/botón)
 const LISTED = { icon: "📋", tag: "Lista" };       // vino de la lista que alguien cargó
 
 const LEGEND =
-  "🛸 recomendada · 🎲 aleatoria (pedidas / lista) · 🎤 novedosa · 🙋 manual · 📋 de la lista cargada";
+  "🛸 recomendada · 🎲 aleatoria (pedidas / lista) · 🎤 novedosa · 📝 pedidas · 🎵 manual · 📋 de la lista cargada";
 
 // Cuando un paso no encontró lo suyo y cayó a otra fuente, se dice en el rótulo.
 const FALLBACK_TAG = { sala: "↩ sala", reciclada: "↩ reciclada", rescate: "↩ rescate", lista: "↩ lista" };
