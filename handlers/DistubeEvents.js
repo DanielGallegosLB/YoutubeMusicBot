@@ -1353,6 +1353,7 @@ module.exports = async (client) => {
     return !!k && (queueTitleKeys.has(k) || seen.has(k) || takenTitles.has(k));
 };
     const pickForStepInner = async (step, taken, inQueue) => {
+      const isSafeCand = (t) => t?.url && !isPlaylistURL(t.url) && isSafeSingle(t.url);
       // Destinatario efectivo del paso: si es "*" y el tipo necesita un usuario,
       // se reparte de forma cíclica entre los oyentes (orden de conexión).
       const effUser = cycleUser(step.type, step.userId);
@@ -1434,7 +1435,7 @@ module.exports = async (client) => {
       // relacionada"). Además SOLO entran candidatas que resuelven RÁPIDO como
       // single (isSafeSingle): los sets de SoundCloud hicieron que un play()
       // colgara 45-60s por candidata.
-      const isSafeCand = (t) => t?.url && !isPlaylistURL(t.url) && isSafeSingle(t.url);
+      
       let pool;
       if (step.type === "liked") {
         // 🛸 Recomendaciones: canciones que le gustan MUCHO al usuario (más likes
@@ -1966,6 +1967,39 @@ module.exports = async (client) => {
         // termina resolviendo en el fondo e inserta la lista igual (eso es lo
         // que "se añadió una lista y se saltaron 3 canciones" en los logs).
         const cleanUrl = cleanYtUrl(url);
+        const verdict = await validateSinglePlayable(cleanUrl, 12000).catch(() => ({ status: "invalid", reason: "error" }));
+        
+        if (verdict?.status === "invalid") {
+          client.logger.warn(`[AutoDJ] Video no disponible o caído (${cleanUrl}). Eliminando del AutoDJ y buscando alternativa...`);
+          
+          // 1. Quitar de la base de datos del AutoDJ / pools para que no vuelva a salir
+          try {
+            await PlaylistStore.removeAutoDjUrl?.(client, guildId, url);
+            seenMark(seen, url);
+            AutoDjSource.markUsed(client, guildId, url);
+          } catch (err) {}
+
+          // 2. Intentar buscar una alternativa en YouTube usando el nombre/título si está disponible
+          try {
+            const fallbackQuery = item.track.name || item.track.title;
+            if (fallbackQuery) {
+              const searchResults = await searchYoutubeVideos(fallbackQuery, 3);
+              const validAlternative = searchResults.find(r => r?.url && isSafeSingle(r.url));
+              if (validAlternative) {
+                client.logger.log(`[AutoDJ] 🔎 Alternativa encontrada para "${fallbackQuery}": ${validAlternative.url}`);
+                item.track.url = validAlternative.url;
+                item.track.name = validAlternative.name || fallbackQuery;
+                // Continuamos el flujo normal con la nueva url válida
+              } else {
+                continue;
+              }
+            } else {
+              continue;
+            }
+          } catch (searchErr) {
+            continue;
+          }
+        }
         if (!isSafeSingle(cleanUrl)) {
           // Es una lista/set: se intenta tocar SOLO su 1ª canción (rápido, sin
           // esperar el resto). Si no se puede aislar, se descarta la candidata.
@@ -2314,22 +2348,24 @@ module.exports = async (client) => {
       })();
     }, 1500);
 
-    let data = await client.music.get(`${gid}.music`);
-    if (data) {
-      if (data.channel !== queue.textChannel.id) {
-        // El bot fue movido a un nuevo canal (ej. de privado a público) con música sonando.
-        // Actualizamos automáticamente el canal del panel fijo para que el embed aparezca en el canal público.
-        data.channel = queue.textChannel.id;
-        await client.music.set(`${gid}.music`, data);
+    // ── VERIFICACIÓN ROBUSTA DEL PANEL FIJO (Corta el segundo embed) ──
+    let rawMusicData = await client.music.get(`${gid}.music`);
+    let panelChannelId = typeof rawMusicData === 'object' ? rawMusicData?.channel : rawMusicData;
+
+    if (panelChannelId) {
+      // Si existe un panel configurado, forzamos la sincronización de canal
+      const panelChan = queue.textChannel.guild.channels.cache.get(panelChannelId) || await queue.textChannel.guild.channels.fetch(panelChannelId).catch(() => null);
+      if (panelChan) {
+        queue.textChannel = panelChan;
       }
-      // Forzar siempre al canal configurado/actual sin hacer return anticipado
-      const configuredChannel = queue.textChannel.guild.channels.cache.get(data.channel);
-      if (configuredChannel) {
-        queue.textChannel = configuredChannel;
-      }
+      
+      // Actualizamos el panel fijo existente y HACEMOS RETURN para NO enviar el embed flotante
+      await client.updatequeue(queue).catch(() => {});
+      await client.updateplayer(queue, song).catch(() => {});
+      return; 
     }
 
-    // Delete the previous "now playing" message before sending a fresh one
+    // ── (SOLO SI NO HAY PANEL CONFIGURADO) Envía el mensaje flotante tradicional ──
     const prevId = client.temp.get(gid);
     if (prevId) {
       try {
@@ -2535,6 +2571,9 @@ module.exports = async (client) => {
       // Check if auto-joining is enabled in the database
       const db = await client.music?.get(`${guildId}.vc`);
       const data = await client.music.get(`${guildId}.music`);
+
+      // Restaura el panel al canal público si el bot se desconecta (ej. saliendo de un voice privado)
+      await client.restorePublicPanel(queue.textChannel.guild).catch(() => {});
 
       if (!db?.enable && data && data.channel !== queue.textChannel.id) {
         // If auto-joining is disabled and the current queue channel does not match the disconnected channel

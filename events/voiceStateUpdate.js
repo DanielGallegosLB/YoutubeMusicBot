@@ -15,8 +15,9 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
   const guildId = guild.id;
 
   // --- The bot's own voice state changes ---
+ // --- The bot's own voice state changes ---
   if (newState.member.id === client.user.id) {
-    // Bot salió del voice
+    // Bot salió del voice o se desconectó completamente
     if (oldState.channelId && !newState.channelId) {
       try {
         cancelLeave(client, guildId);
@@ -24,6 +25,16 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
       try {
         stopMarqueeActivity(client, guild);
       } catch {}
+      
+      // Restaurar panel público si salió de un canal privado
+      try {
+        const { isPrivateVoice } = require("../handlers/ActivityManager");
+        const oldVc = oldState.channel;
+        if (oldVc && isPrivateVoice(oldVc) && typeof client.restorePublicPanel === "function") {
+          await client.restorePublicPanel(guild);
+        }
+      } catch (e) {}
+
       return;
     }
 
@@ -37,7 +48,6 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
         const nowInPrivate   = !!newVc && isPrivateVoice(newVc);
 
         if (nowInPrivate && typeof client.resolvePanelChannel === "function") {
-          // Privado: mover panel al chat del canal de voz privado (ofuscar uso del bot)
           await client.resolvePanelChannel(guild);
           await client.updateembed(client, guild).catch(() => {});
           const q = client.distube?.getQueue?.(guildId);
@@ -56,7 +66,7 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
       }
     }
     return;
-  }
+}
 
   // Ignore other bots entirely
   if (newState.member.user.bot) return;
