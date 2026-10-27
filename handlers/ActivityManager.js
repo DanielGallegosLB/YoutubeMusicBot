@@ -4,11 +4,11 @@ const activityIntervals = new Map();
 
 /** true si el canal de voz no es visible para @everyone (privado / oculto) */
 function isPrivateVoice(channel) {
-  if (!channel || channel.type !== ChannelType.GuildVoice && channel.type !== ChannelType.GuildStageVoice) return false;
+  if (!channel) return false;
+  const t = channel.type;
+  if (t !== ChannelType.GuildVoice && t !== ChannelType.GuildStageVoice) return false;
   try {
-    const everyone = channel.guild.roles.everyone;
-    const perms = channel.permissionsFor(everyone);
-    // Si @everyone no puede ver el canal → se considera privado/oculto
+    const perms = channel.permissionsFor(channel.guild.roles.everyone);
     return !perms?.has(PermissionFlagsBits.ViewChannel);
   } catch {
     return false;

@@ -201,43 +201,46 @@ module.exports = async (client) => {
           return interaction.editReply({ embeds: [], components: [] }).catch(() => {});
         }
 
-        if (customId === "player_like") {
+                if (customId === "player_like") {
           const t0 = Date.now();
+          let _track = null;
           try {
             const _queue = client.distube.getQueue(interaction.guildId);
-            const _track = currentTrackForLike();
+            _track = currentTrackForLike();
             if (!_track || !_queue) {
               client.logger.warn(`[Like] sin cola/cancion para ${interaction.user.tag}: no se pudo registrar`);
               return interaction.deferUpdate().catch(() => {});
             }
             await interaction.deferUpdate().catch(() => {});
-            await Store.create(client, interaction.guildId, interaction.user.id, "Canciones Favoritas");
-            const existing = await Store.get(client, interaction.guildId, interaction.user.id, "Canciones Favoritas");
-            const trackExists = existing?.tracks?.some((t) => Store.canonUrlKey(t.url) === Store.canonUrlKey(_track.url));
-            if (!trackExists) {
-              const serialized = Store.serializeSong(_track, interaction.user);
-              await Store.addTracks(client, interaction.guildId, interaction.user.id, "Canciones Favoritas", [serialized]);
-            }
-            // Sin tope por reproducción: cada 👍 SUMA (el contador se acumula por
-            // usuario en la DB), igual que el like manual del dashboard.
-            const result = await Store.likeTrackByUrl(client, interaction.guildId, interaction.user.id, "Canciones Favoritas", _track.url);
+            const result = await Store.likeForUser(
+              client,
+              interaction.guildId,
+              interaction.user.id,
+              {
+                url: _track.url,
+                name: _track.name,
+                title: _track.name,
+                thumbnail: _track.thumbnail,
+                uploader: _track.uploader,
+                duration: _track.duration,
+                formattedDuration: _track.formattedDuration,
+                source: _track.source,
+              },
+              null
+            );
             if (!result) {
-              client.logger.warn(`[Like] likeTrackByUrl devolvio null para "${_track.name}"`);
+              client.logger.warn(`[Like] likeForUser devolvió null para "${_track.name}"`);
               return;
             }
-            client.logger.log(`[Like] 👍 ${interaction.user.tag} dio like a "${_track.name}" (G:${interaction.guildId}) → total ${result.likeCount}👍 ${result.dislikeCount}👎 (${Date.now() - t0}ms)`);
-            const vLike = await Store.verifyLike(client, interaction.guildId, interaction.user.id, "Canciones Favoritas", _track.url).catch(() => null);
-            if (vLike) client.logger.log(`[Like] ${interaction.user.tag} check "${_track.name}": fav.likedBy=${vLike.favLikes} fav.dislikedBy=${vLike.favDislikes} gStat.likedBy=${vLike.gStatLikes} gStat.dislikedBy=${vLike.gStatDislikes}`);
-            Store.sortFavorites(client, interaction.guildId, interaction.user.id).catch(() => {});
-            // El like ya se guardó en la DB; invalidar la caché de stats (20s)
-            // para que el embed fijo muestre el 👍 al instante.
+            client.logger.log(
+              `[Like] 👍 ${interaction.user.tag} dio like a "${_track.name}" (G:${interaction.guildId}) ` +
+              `→ inFav=${!!result.inFavorites} (${Date.now() - t0}ms)`
+            );
             client.invalidateQueueCaches?.(interaction.guildId);
             client.updatequeue(_queue).catch(() => {});
             client.updateplayer(_queue).catch(() => {});
             return;
           } catch (e) {
-            // Antes este bloque no tenía catch: cualquier fallo se comía en
-            // silencio y el usuario solo veía "interacción fallida".
             client.logger.error(`[Like] ERROR de ${interaction.user.tag} en "${_track?.name || "?"}": ${e?.message || e}`);
             if (e?.stack) client.logger.error(e.stack.split("\n").slice(1, 4).join("\n"));
             return;
@@ -249,20 +252,35 @@ module.exports = async (client) => {
           const _track = currentTrackForLike();
           if (!_track || !_queue) return interaction.deferUpdate().catch(() => {});
           await interaction.deferUpdate().catch(() => {});
-          await Store.create(client, interaction.guildId, interaction.user.id, "Canciones Favoritas");
+
           const existing = await Store.get(client, interaction.guildId, interaction.user.id, "Canciones Favoritas");
-          const trackExists = existing?.tracks?.some((t) => Store.canonUrlKey(t.url) === Store.canonUrlKey(_track.url));
-          if (!trackExists) {
-            const serialized = Store.serializeSong(_track, interaction.user);
-            await Store.addTracks(client, interaction.guildId, interaction.user.id, "Canciones Favoritas", [serialized]);
+          const tracks = existing?.tracks || existing || [];
+          const list = Array.isArray(tracks) ? tracks : [];
+          const inFav = list.some(
+            (t) => t?.url && Store.canonUrlKey(t.url) === Store.canonUrlKey(_track.url)
+          );
+
+          let result = null;
+          if (inFav) {
+            result = await Store.dislikeTrackByUrl(
+              client,
+              interaction.guildId,
+              interaction.user.id,
+              "Canciones Favoritas",
+              _track.url
+            );
+          } else {
+            result = await Store.trackDislike(
+              client,
+              interaction.guildId,
+              _track.url,
+              interaction.user.id
+            );
           }
-          // Sin tope por reproducción: cada 👎 SUMA (se acumula por usuario).
-          const result = await Store.dislikeTrackByUrl(client, interaction.guildId, interaction.user.id, "Canciones Favoritas", _track.url);
           if (!result) return;
-          client.logger.log(`[Like] 👎 ${interaction.user.tag} dio dislike a "${_track.name}" (G:${interaction.guildId}) → total ${result.likeCount}👍 ${result.dislikeCount}👎`);
-          const vDislike = await Store.verifyLike(client, interaction.guildId, interaction.user.id, "Canciones Favoritas", _track.url).catch(() => null);
-          if (vDislike) client.logger.log(`[Like] ${interaction.user.tag} check "${_track.name}": fav.likedBy=${vDislike.favLikes} fav.dislikedBy=${vDislike.favDislikes} gStat.likedBy=${vDislike.gStatLikes} gStat.dislikedBy=${vDislike.gStatDislikes}`);
-          Store.sortFavorites(client, interaction.guildId, interaction.user.id).catch(() => {});
+          client.logger.log(
+            `[Like] 👎 ${interaction.user.tag} dio dislike a "${_track.name}" (G:${interaction.guildId})`
+          );
           client.invalidateQueueCaches?.(interaction.guildId);
           client.updatequeue(_queue).catch(() => {});
           client.updateplayer(_queue).catch(() => {});
@@ -276,45 +294,96 @@ module.exports = async (client) => {
           await interaction.deferUpdate().catch(() => {});
 
           await Store.create(client, interaction.guildId, interaction.user.id, "Canciones Favoritas");
-          const existing = await Store.get(client, interaction.guildId, interaction.user.id, "Canciones Favoritas");
-          const tracks = existing?.tracks || existing || [];
-          const list = Array.isArray(tracks) ? tracks : [];
+          const all = await Store.getAll(client, interaction.guildId, interaction.user.id);
+          const favKey =
+            Object.keys(all || {}).find((n) => String(n).toLowerCase() === "canciones favoritas") ||
+            "Canciones Favoritas";
+          const list = Array.isArray(all[favKey]) ? all[favKey] : [];
           const canon = Store.canonUrlKey(_track.url);
-          const isFavorited = list.some((t) => t?.url && Store.canonUrlKey(t.url) === canon);
+          const existingTrack = list.find((t) => t?.url && Store.canonUrlKey(t.url) === canon);
+          const isFavorited = !!(existingTrack && existingTrack.manual === true);
 
           if (isFavorited) {
-            // Quitar de favoritas (método que YA existe)
-            await Store.removeFavoriteForUser(
-              client,
-              interaction.guildId,
-              interaction.user.id,
-              _track.url
-            );
-            client.logger.log(
-              `[Fav] ⭐ ${interaction.user.tag} QUITÓ favorita "${_track.name}" (G:${interaction.guildId})`
-            );
+            if (existingTrack && (existingTrack.likedBy || []).length > 0) {
+              existingTrack.manual = false;
+              delete existingTrack.manualAt;
+              all[favKey] = list;
+              await client.music.set(`${interaction.guildId}.playlists.${interaction.user.id}`, all);
+            } else {
+              await Store.removeFavoriteForUser(
+                client, interaction.guildId, interaction.user.id, _track.url
+              );
+            }
+            client.logger.log(`[Fav] ⭐ ${interaction.user.tag} QUITÓ favorita "${_track.name}" (G:${interaction.guildId})`);
+            client._favBtnOn = client._favBtnOn || new Map();
+            client._favBtnOn.set(interaction.guildId, false);
+          } else if (existingTrack) {
+            existingTrack.manual = true;
+            existingTrack.manualAt = Date.now();
+            all[favKey] = list;
+            await client.music.set(`${interaction.guildId}.playlists.${interaction.user.id}`, all);
+            client.logger.log(`[Fav] ⭐ ${interaction.user.tag} MARCÓ manual "${_track.name}" (G:${interaction.guildId})`);
+            client._favBtnOn = client._favBtnOn || new Map();
+            client._favBtnOn.set(interaction.guildId, true);
           } else {
-            // Añadir como favorita manual
             const serialized = Store.serializeSong(_track, interaction.user);
             serialized.manual = true;
             serialized.manualAt = Date.now();
             await Store.addTracks(
-              client,
-              interaction.guildId,
-              interaction.user.id,
-              "Canciones Favoritas",
-              [serialized]
+              client, interaction.guildId, interaction.user.id, "Canciones Favoritas", [serialized]
             );
-            client.logger.log(
-              `[Fav] ⭐ ${interaction.user.tag} AÑADIÓ favorita "${_track.name}" (G:${interaction.guildId})`
-            );
+            client.logger.log(`[Fav] ⭐ ${interaction.user.tag} AÑADIÓ favorita "${_track.name}" (G:${interaction.guildId})`);
+            client._favBtnOn = client._favBtnOn || new Map();
+            client._favBtnOn.set(interaction.guildId, true);
           }
 
           Store.sortFavorites(client, interaction.guildId, interaction.user.id).catch(() => {});
           client.invalidateQueueCaches?.(interaction.guildId);
-          // Actualiza color del botón en el siguiente paint del panel
-          client._favBtnOn = client._favBtnOn || new Map();
-          client._favBtnOn.set(interaction.guildId, !isFavorited);
+          client.updatequeue(_queue).catch(() => {});
+          client.updateplayer(_queue).catch(() => {});
+          return;
+        }
+
+        if (customId === "player_dislike") {
+          const _queue = client.distube.getQueue(interaction.guildId);
+          const _track = currentTrackForLike();
+          if (!_track || !_queue) return interaction.deferUpdate().catch(() => {});
+          await interaction.deferUpdate().catch(() => {});
+          // 👎 en trackstats. Si está en Favoritas (⭐), también marca dislike ahí.
+          // Si no está, NO la crea en Favoritas.
+          const existing = await Store.get(client, interaction.guildId, interaction.user.id, "Canciones Favoritas");
+          const tracks = existing?.tracks || existing || [];
+          const list = Array.isArray(tracks) ? tracks : [];
+          const inFav = list.some(
+            (t) => t?.url && Store.canonUrlKey(t.url) === Store.canonUrlKey(_track.url)
+          );
+          let result = null;
+          if (inFav) {
+            result = await Store.dislikeTrackByUrl(
+              client, interaction.guildId, interaction.user.id, "Canciones Favoritas", _track.url
+            );
+          } else {
+            // Solo stats globales (mismo espíritu que likeForUser sin crear lista)
+            result = await Store.trackDislike?.(
+              client, interaction.guildId, _track.url, interaction.user.id
+            );
+            if (!result && typeof Store.trackLike === "function") {
+              // Fallback: usa el store de stats si trackDislike no existe con ese nombre
+              const st = await Store.guildStats(client, interaction.guildId).catch(() => ({}));
+              const e = st[_track.url] || { plays: 0, likedBy: [], dislikedBy: [] };
+              e.dislikedBy = e.dislikedBy || [];
+              e.likedBy = (e.likedBy || []).filter((id) => id !== interaction.user.id);
+              if (!e.dislikedBy.includes(interaction.user.id)) e.dislikedBy.push(interaction.user.id);
+              st[_track.url] = e;
+              await Store.saveGuildStats(client, interaction.guildId, st).catch(() => {});
+              result = { likeCount: e.likedBy.length, dislikeCount: e.dislikedBy.length };
+            }
+          }
+          if (!result) return;
+          client.logger.log(
+            `[Like] 👎 ${interaction.user.tag} dio dislike a "${_track.name}" (G:${interaction.guildId})`
+          );
+          client.invalidateQueueCaches?.(interaction.guildId);
           client.updatequeue(_queue).catch(() => {});
           client.updateplayer(_queue).catch(() => {});
           return;

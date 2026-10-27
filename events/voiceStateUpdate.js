@@ -16,15 +16,38 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
 
   // --- The bot's own voice state changes ---
   if (newState.member.id === client.user.id) {
+    // Bot salió del voice
     if (oldState.channelId && !newState.channelId) {
-      // The bot left a voice channel (kicked, disconnected, or after stop/leave).
-      // Cancel any pending leave timer and reset the stuck activity/nickname.
       try {
         cancelLeave(client, guildId);
       } catch {}
       try {
         stopMarqueeActivity(client, guild);
       } catch {}
+      return;
+    }
+
+    // Bot entró o se movió a un voice (incluye join inicial)
+    if (newState.channelId && newState.channelId !== oldState.channelId) {
+      try {
+        const { isPrivateVoice } = require("../handlers/ActivityManager");
+        const vc = newState.channel;
+        if (vc && isPrivateVoice(vc) && typeof client.resolvePanelChannel === "function") {
+          // Panel fijo → chat de este voice privado (ofuscar uso del bot)
+          await client.resolvePanelChannel(guild);
+          await client.updateembed(client, guild).catch(() => {});
+          // Si ya hay cola, refrescar embeds en el canal nuevo
+          const q = client.distube?.getQueue?.(guildId);
+          if (q) {
+            client.updateplayer?.(q).catch(() => {});
+            client.updatequeue?.(q).catch(() => {});
+          }
+        }
+      } catch (e) {
+        client.logger?.warn?.(
+          `[Voice] No se pudo mover el panel al voice privado: ${e?.message || e}`
+        );
+      }
     }
     return;
   }

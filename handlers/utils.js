@@ -30,6 +30,7 @@ const AutoDjSource = require("./Autodjsource");
 const AutoDjOrder = require("./AutoDjOrder");
 const ORIGIN_LEGEND = AutoDjOrder.LEGEND;
 
+
 // Rótulo "icono + tipo + nombre" para una canción (cola y reproductor).
 function originLabelFor(track, guild) {
   const nameOf = (uid) => guild?.members?.cache?.get(uid)?.user?.tag || null;
@@ -679,7 +680,9 @@ module.exports = async (client) => {
         const data = await client.music.get(`${guild.id}.music`);
         if (!data || !data.channel) return;
 
-        const musicchannel = guild.channels.cache.get(data.channel) || await guild.channels.fetch(data.channel).catch(() => null);
+        const musicchannel = (await client.resolvePanelChannel(guild))
+        || guild.channels.cache.get(data.channel)
+        || await guild.channels.fetch(data.channel).catch(() => null);
         if (!musicchannel) return;
 
         const [playmsg, queuemsg] = await Promise.all([
@@ -783,8 +786,9 @@ module.exports = async (client) => {
       const data = await client.music.get(`${guild.id}.music`);
       if (!data || !data.channel) return;
 
-      const musicchannel = guild.channels.cache.get(data.channel) || await guild.channels.fetch(data.channel).catch(() => null);
-      if (!musicchannel) return;
+      const musicchannel = (await client.resolvePanelChannel(guild))
+      || guild.channels.cache.get(data.channel)
+      || await guild.channels.fetch(data.channel).catch(() => null);
 
       let queueembed = await client.fetchPanelMessage(musicchannel, data.qmsg);
       if (queueembed === undefined) return; // fallo transitorio: no recrear
@@ -989,8 +993,9 @@ module.exports = async (client) => {
       const data = await client.music.get(`${guild.id}.music`);
       if (!data || !data.channel) return;
 
-      const musicchannel = guild.channels.cache.get(data.channel) || await guild.channels.fetch(data.channel).catch(() => null);
-      if (!musicchannel) return;
+      const musicchannel = (await client.resolvePanelChannel(guild))
+      || guild.channels.cache.get(data.channel)
+      || await guild.channels.fetch(data.channel).catch(() => null);
 
       let playembed = await client.fetchPanelMessage(musicchannel, data.pmsg);
       if (playembed === undefined) return; // fallo transitorio: no recrear
@@ -1415,4 +1420,31 @@ module.exports = async (client) => {
       return "Unknown Track";
     }
   };
+  
+const { isPrivateVoice } = require("./ActivityManager");
+
+/** Si el bot está en un voice privado, el panel debe vivir en ese mismo canal (chat del voice). */
+client.resolvePanelChannel = async (guild) => {
+  const data = await client.music.get(`${guild.id}.music`).catch(() => null);
+  const vc = guild.members?.me?.voice?.channel;
+  if (vc && isPrivateVoice(vc)) {
+    // GuildVoice admite mensajes de texto: usar el propio voice como canal del panel
+    if (!data?.channel || data.channel !== vc.id) {
+      const next = {
+        channel: vc.id,
+        pmsg: data?.pmsg || null,
+        qmsg: data?.qmsg || null,
+      };
+      await client.music.set(`${guild.id}.music`, next).catch(() => {});
+      client._musicMetaCache?.delete(guild.id);
+      client._channelPolicyCache?.delete(guild.id);
+    }
+    return guild.channels.cache.get(vc.id) || vc;
+  }
+  if (data?.channel) {
+    return guild.channels.cache.get(data.channel)
+      || await guild.channels.fetch(data.channel).catch(() => null);
+  }
+  return null;
+};
 };

@@ -1424,6 +1424,45 @@ module.exports = {
     return true;
   },
 
+  async stripNonManualFavorites(client, guildId, userId = null) {
+    const runUser = async (uid) => {
+      const key = `${guildId}.playlists.${uid}`;
+      const all = (await client.music.get(key).catch(() => null)) || {};
+      const { list, key: favKey } = this._favoritesListOf(all);
+      if (!list.length || !favKey) return { uid, removed: 0, kept: 0 };
+
+      const st = await this.guildStats(client, guildId);
+      let removed = 0;
+      const kept = [];
+      for (const t of list) {
+        if (!t?.url) continue;
+        if (t.manual === true) {
+          kept.push(t);
+          continue;
+        }
+        const e = st[t.url] || { plays: 0, likedBy: [], dislikedBy: [] };
+        e.likedBy = Array.isArray(e.likedBy) ? e.likedBy.slice() : [];
+        e.dislikedBy = Array.isArray(e.dislikedBy) ? e.dislikedBy.slice() : [];
+        for (const id of t.likedBy || []) if (!e.likedBy.includes(id)) e.likedBy.push(id);
+        for (const id of t.dislikedBy || []) if (!e.dislikedBy.includes(id)) e.dislikedBy.push(id);
+        if (Number(t.playCount) > (e.plays || 0)) e.plays = Number(t.playCount) || 0;
+        if (t.name && !e.name) e.name = t.name;
+        st[t.url] = e;
+        removed++;
+      }
+      all[favKey] = kept;
+      await client.music.set(key, all);
+      await this.saveGuildStats(client, guildId, st);
+      return { uid, removed, kept: kept.length };
+    };
+
+    if (userId) return { users: [await runUser(String(userId))] };
+    const root = (await client.music.get(`${guildId}.playlists`).catch(() => null)) || {};
+    const out = [];
+    for (const uid of Object.keys(root || {})) out.push(await runUser(uid));
+    return { users: out };
+  },
+
   /** Serialize a DisTube Song to a plain Track object */
   serializeSong(song, user) {
     if (!song) return null;
@@ -1484,6 +1523,7 @@ const _LOCKED_METHODS = new Set([
   "removeAutoDjPick",
   "setAutoDjPattern",
   "saveAutoDjSeen",
+  "stripNonManualFavorites",
 ]);
 for (const name of _LOCKED_METHODS) {
   const orig = module.exports[name];

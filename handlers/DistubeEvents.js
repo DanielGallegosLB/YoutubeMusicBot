@@ -32,11 +32,37 @@ const ARTIST_SEARCH_LIMIT = Math.max(
 // Filtrado estricto para evitar reuploads, mixes, OST completos o videos >10min
 const ARTIST_BAD_CHANNEL = /(aknoy|gta\s*(soundtracks?|ost|radio)|soundtrack\s*(archive|collection)|full\s*album|compilation|mega\s*mix|hour\s*mix|\b1\s*hour\b|24\/7|nonstop|best\s*of|greatest\s*hits|playlist|mix(es)?\b)/i;
 
+function looksLikeArtistChannel(uploader, artistQuery) {
+  const up = String(uploader || "").toLowerCase().trim();
+  const q = String(artistQuery || "").toLowerCase().trim();
+  if (!up) return false;
+  const words = q.split(/\s+/).filter((w) => w.length > 2);
+  const matchesQuery = (q && up.includes(q)) || words.some((w) => up.includes(w));
+  const looksOfficial =
+    matchesQuery ||
+    / - topic$/i.test(up) ||
+    /\bvevo\b/i.test(up) ||
+    /\bofficial\b/i.test(up) ||
+    (/\s/.test(up) && up.length >= 3);
+  const looksLikeRandomUser =
+    /^[a-z][a-z0-9_]{2,}$/i.test(up) &&
+    /\d{2,}/.test(up) &&
+    !/\s/.test(up);
+  if (looksLikeRandomUser && !looksOfficial) return false;
+  if (!looksOfficial) return false;
+  return true;
+}
+
+// Tope de duración para novedosas YT (evita 9+ min tipo “Remember the Time” extendida)
+const ARTIST_MAX_DURATION = 420; // 7 minutos
+
 async function searchArtistSongs(client, query, limit = ARTIST_SEARCH_LIMIT) {
   if (!query) return [];
   let q = String(query).trim();
   // Casos especiales: buscar conjunto cuando son dos artistas
   if (/zapp\s*&\s*roger/i.test(q)) q = "zapp roger";
+  // "audio" al final → prioriza cortes limpios (sin intro/visualizer/live largo)
+  if (!/\baudio\b/i.test(q)) q = `${q} audio`;
   const key = q.toLowerCase();
   const hit = _artistSearchCache.get(key);
   if (hit && (Date.now() - hit.at) < ARTIST_SEARCH_TTL) return hit.results;
@@ -50,16 +76,35 @@ async function searchArtistSongs(client, query, limit = ARTIST_SEARCH_LIMIT) {
         duration: Number(s?.duration) || 0,
       }))
       .filter((s) => s.url)
-      // Máximo 10 minutos
-      .filter((s) => s.duration > 0 && s.duration <= 600)
-      // Evitar canales claramente reupload/mix
+      .filter((s) => s.duration > 0 && s.duration <= ARTIST_MAX_DURATION)
       .filter((s) => {
-        const up = String(s.uploader?.name || "").toLowerCase();
-        if (!up) return true;
-        if (ARTIST_BAD_CHANNEL.test(up)) return false;
-        // Descartar títulos que huelen a mix/compilación
+        const up = String(s.uploader?.name || "").toLowerCase().trim();
         const nm = String(s.name || "").toLowerCase();
+        const artistQ = String(query).trim().toLowerCase();
+
+        if (ARTIST_BAD_CHANNEL.test(up)) return false;
         if (/(full\s*album|compilation|best\s*of|greatest\s*hits|hour\s*mix|nonstop|24\/7)/i.test(nm)) return false;
+
+        // ¿Parece canal de artista de verdad?
+        // OK: contiene el nombre buscado, " - Topic", VEVO, Official, o tiene espacios (nombre real)
+        const looksOfficial =
+          !up ||
+          up.includes(artistQ) ||
+          artistQ.split(/\s+/).filter(Boolean).some((w) => w.length > 2 && up.includes(w)) ||
+          / - topic$/i.test(up) ||
+          /\bvevo\b/i.test(up) ||
+          /\bofficial\b/i.test(up) ||
+          (/\s/.test(up) && up.length >= 3);
+
+        // NO: handle tipo usuario (penguinmaster2008, user_12345, xyz99)
+        const looksLikeRandomUser =
+          /^[a-z][a-z0-9_]{2,}$/i.test(up) &&
+          /\d{2,}/.test(up) &&
+          !/\s/.test(up);
+
+        if (looksLikeRandomUser && !looksOfficial) return false;
+        if (!looksOfficial && up.length > 0) return false;
+
         return true;
       });
     _artistSearchCache.set(key, { at: Date.now(), results });
@@ -1099,8 +1144,11 @@ module.exports = async (client) => {
             ];
             for (const t of others) {
               if (!t?.url) continue;
-              const w = artistMatchWeight(weightMap, artistNameOf(t));
+              const rawArtist = artistNameOf(t);
+              const w = artistMatchWeight(weightMap, rawArtist);
               if (!w) continue;
+              // Mismo filtro automático: no meter canales tipo reuploader
+              if (!looksLikeArtistChannel(rawArtist, rawArtist)) continue;
               const k = canonUrlKey(t.url);
               if (have.has(k)) continue;
               have.add(k);
@@ -1476,11 +1524,25 @@ module.exports = async (client) => {
                   && !ownPool.has(r.url) && !ownHist.has(r.url)
                   && !titleUsed(r.name || r.title)
                   && isSafeCand(r)
-                  && (Number(r.duration) || 0) > 0 && (Number(r.duration) || 0) <= 600);
+                  && (Number(r.duration) || 0) > 0 && (Number(r.duration) || 0) <= ARTIST_MAX_DURATION);
                 if (!fresh.length) continue;
-                // Elegir entre los resultados filtrados (evitar siempre el 1ro)
-                const pool2 = fresh.length > 1 ? fresh.slice(1) : fresh;
-                const chosen = pool2[Math.floor(Math.random() * pool2.length)];
+                // Preferir títulos con "audio" / "official audio" y la más corta
+                const scored = fresh
+                  .map((r) => {
+                    const nm = String(r.name || "").toLowerCase();
+                    let score = 0;
+                    if (/\bofficial\s*audio\b/.test(nm)) score += 30;
+                    else if (/\baudio\b/.test(nm)) score += 20;
+                    if (/\b(lyrics?|live|extended|remix|slowed|reverb|hour|mix)\b/.test(nm)) score -= 15;
+                    // Más corta = mejor (castigo por segundo sobre 4 min)
+                    const dur = Number(r.duration) || 999;
+                    score -= Math.max(0, dur - 240) / 10;
+                    return { r, score };
+                  })
+                  .sort((a, b) => b.score - a.score);
+                // Entre las 3 mejores, una al azar (evita siempre la misma)
+                const topN = scored.slice(0, Math.min(3, scored.length));
+                const chosen = topN[Math.floor(Math.random() * topN.length)].r;
                 if (!chosen?.url) continue;
                 taken.add(chosen.url);
                 logPick({
