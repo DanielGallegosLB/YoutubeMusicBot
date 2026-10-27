@@ -1349,13 +1349,26 @@ module.exports = async (client) => {
     const queueTitleKeys = new Set(queue.songs.map((s) => titleKey(s?.name)).filter(Boolean));
     const takenTitles = new Set();
     const titleUsed = (name) => {
-      const k = titleKey(name);
-      return !!k && (queueTitleKeys.has(k) || seen.has(k) || takenTitles.has(k));
-    };
+    const k = titleKey(name);
+    return !!k && (queueTitleKeys.has(k) || seen.has(k) || takenTitles.has(k));
+};
     const pickForStepInner = async (step, taken, inQueue) => {
       // Destinatario efectivo del paso: si es "*" y el tipo necesita un usuario,
       // se reparte de forma cíclica entre los oyentes (orden de conexión).
       const effUser = cycleUser(step.type, step.userId);
+
+      const titleKey = (n) => String(n||"")
+        .toLowerCase()
+        .replace(/\(\s*(official\s*)?(audio|video|lyric(?:s)?|music\s*video|visualizer|animated)\s*\)/gi, " ")
+        .replace(/\|\s*(official\s*)?(audio|video|lyric(?:s)?)\s*/gi, " ")
+        .replace(/\b(stone|radio|single|clean|explicit)\s+(?:version|ver\.?|edit)\b/gi, " ")
+        .replace(/[^a-z0-9\s]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+      const titleSeen = new Set();
+      const titleUsed = (n) => { const k=titleKey(n); if(!k||k.length<4) return false; if(titleSeen.has(k)) return true; titleSeen.add(k); return false; };
+      const weightOf = (t) => skipWeight(t.url, effUser || step.userId);
+
       // 🎲 → al azar entre TODAS las canciones de la lista ingresada que aún no
       // sonaron ni se eligieron (aunque el loader no las haya encolado todavía).
       // Sin reposición: cada una sale una sola vez por sesión. Si la lista ya no
@@ -1397,13 +1410,23 @@ module.exports = async (client) => {
             playsSesion: sessionPlaysOf(url),
             peso: Number(skipWeight(url, "*").toFixed(3)),
           });
-          return { url, name: null, existing: inQueue.has(url), fromList: true };
+          return { url, name: null, existing: inQueue.has(url), fromList: true, autoDjType: "random", _autoDjFromList: true };
         }
-        // Sin canciones de la lista (no hay lista cargada): este paso se SALTA. Antes
-        // caía al pool de favoritas/historial/pedidas y la 🎲 "de la lista" sonaba algo
-        // que no era de la lista.
-        dbgLine(`🎲 random: sin canciones de la lista -> paso omitido`);
-        return null;
+      // Sin canciones de la lista: caer a favoritas/aleatorias para no quedar en silencio,
+      // pero marcar como fallback.
+      if (ALLOW_UNLIKED) {
+        const cand2 = Object.values(fallbackPools).flat().filter(isSafeCand);
+        if (cand2.length) {
+          const chosen = pickLeastPlayed(cand2, (t) => skipWeight(t.url, "*"), playsOf);
+          if (chosen?.url) {
+            taken.add(chosen.url);
+            logPick({ origen: "random", motivo: "lista-fallback-favoritas", url: chosen.url, nombre: chosen.name || null, yaEnCola: inQueue.has(chosen.url), skips: skipCountOf(chosen.url, "*"), peso: Number(skipWeight(chosen.url, "*").toFixed(3)) });
+            return { url: chosen.url, name: chosen.name || null, existing: inQueue.has(chosen.url), fromList: false, autoDjType: "random", autoDjFallback: "favoritas" };
+          }
+        }
+      }
+      dbgLine(`🎲 random: sin canciones de la lista -> sin fallback usable`);
+      return null;
       }
       // Una PLAYLIST no puede ser candidata de rec (el pool trae URLs de listas
       // del historial: recomendarlas = "revivir otra lista", y la 1ª canción
@@ -1517,32 +1540,41 @@ module.exports = async (client) => {
           if (tops.length) {
               const ownPool = new Set((poolsByUser[effUser] || []).map((t) => t.url));
               const ownHist = new Set((historyByUser.get(effUser) || []).map((t) => t?.url).filter(Boolean));
+              // titleSeen already defined globally for this refill
               for (const top of tops) {
-                const results = await searchArtistSongs(client, top.name);
+                const results = await searchArtistSongs(client, top.name + " audio");
                 const fresh = results.filter((r) => r?.url
                   && !seen.has(r.url) && !taken.has(r.url) && !inQueue.has(r.url)
                   && !ownPool.has(r.url) && !ownHist.has(r.url)
                   && !titleUsed(r.name || r.title)
                   && isSafeCand(r)
-                  && (Number(r.duration) || 0) > 0 && (Number(r.duration) || 0) <= ARTIST_MAX_DURATION);
+                  && (Number(r.duration) || 0) > 0 && (Number(r.duration) || 0) <= 600);
                 if (!fresh.length) continue;
-                // Preferir títulos con "audio" / "official audio" y la más corta
+                // Preferir "audio", versión corta, evitar mixes/longs
                 const scored = fresh
                   .map((r) => {
                     const nm = String(r.name || "").toLowerCase();
+                    const up = String(r.uploader?.name || "").toLowerCase();
                     let score = 0;
-                    if (/\bofficial\s*audio\b/.test(nm)) score += 30;
-                    else if (/\baudio\b/.test(nm)) score += 20;
-                    if (/\b(lyrics?|live|extended|remix|slowed|reverb|hour|mix)\b/.test(nm)) score -= 15;
-                    // Más corta = mejor (castigo por segundo sobre 4 min)
+                    if (/\bofficial\s*audio\b/.test(nm)) score += 40;
+                    else if (/\baudio\b/.test(nm)) score += 30;
+                    if (/\blyric\b/.test(nm)) score += 10;
+                    if (/\b(radio edit|single edit)\b/.test(nm)) score += 15;
+                    if (/\b(lyrics?|live|extended|remix|slowed|reverb|hour|mix|compilation|ost|soundtrack)\b/.test(nm)) score -= 25;
+                    // Penalizar canales que NO son artistas (reuploads genéricos)
+                    // Penalizar canales que no parecen artistas reales (lógica automática)
+                    if (ARTIST_BAD_CHANNEL.test(up) || !looksLikeArtistChannel(up, top.name)) score -= 30;
                     const dur = Number(r.duration) || 999;
-                    score -= Math.max(0, dur - 240) / 10;
+                    if (dur < 240) score += 10;
+                    if (dur > 360) score -= 15;
+                    if (dur > 600) score -= 40;
                     return { r, score };
                   })
                   .sort((a, b) => b.score - a.score);
-                // Entre las 3 mejores, una al azar (evita siempre la misma)
-                const topN = scored.slice(0, Math.min(3, scored.length));
-                const chosen = topN[Math.floor(Math.random() * topN.length)].r;
+                // Filtrar lo que quedó muy mal puntuado
+                const good = scored.filter(x=>x.score >= -5);
+                const pool = (good.length ? good : scored).slice(0, Math.min(4, scored.length));
+                const chosen = pool[Math.floor(Math.random() * pool.length)].r;
                 if (!chosen?.url) continue;
                 taken.add(chosen.url);
                 logPick({
@@ -1646,7 +1678,6 @@ module.exports = async (client) => {
         if (s?.url && (i === 0 || i <= REC_MIN_GAP)) nearQueue.add(s.url);
       }
       const tag = `pool=${pool.length} (favs=${allPool.length} hist=${allHistory.length} picks=${picks.length}) near=${nearQueue.size}`;
-      const weightOf = (t) => skipWeight(t.url, effUser || step.userId);
       const isUsableNow = (t) => t?.url && !excludedCanon.has(canonUrlKey(t.url)) && !nearQueue.has(t.url);
       const freshOf = (arr) => arr.filter((t) => isUsableNow(t) && !seen.has(t.url) && !taken.has(t.url) && !titleUsed(t.name || t.title));
       // Tres escalones, en orden. Antes el paso 3 (reciclar) saltaba siempre al
@@ -2082,6 +2113,17 @@ module.exports = async (client) => {
     // Identificador del gremio unificado
     const gid = queue.textChannel?.guildId || queue.guildId || queue.textChannel?.guild?.id || queue.guild?.id;
 
+    // ── Bloquear y sincronizar al canal fijo configurado del panel de música ──
+    try {
+      let panelData = await client.music.get(`${gid}.music`);
+      if (panelData?.channel) {
+        const configuredChannel = queue.textChannel.guild.channels.cache.get(panelData.channel);
+        if (configuredChannel && queue.textChannel.id !== panelData.channel) {
+          queue.textChannel = configuredChannel;
+        }
+      }
+    } catch (e) {}
+
     // Conteo único y seguro de la reproducción
     if (gid && song?.url) {
       try {
@@ -2124,7 +2166,7 @@ module.exports = async (client) => {
     client._voiceLastPos?.delete(gid);
 
     // Reloj corregido para esta guild + reinicia el desfase (tema nuevo).
-patchClock(queue, gid);
+    patchClock(queue, gid);
     resetClockDrift(gid);
     applyNormalizeDefault(queue, gid);
       // Pre-resolver las siguientes canciones: hace que el skip sea instantáneo.
@@ -2186,11 +2228,11 @@ patchClock(queue, gid);
       }
     })();
 
-// Las canciones del AutoDJ NO son pedidos del oyente (antes se registraban a su
+    // Las canciones del AutoDJ NO son pedidos del oyente (antes se registraban a su
     // nombre y contaminaban sus "pedidas": el AutoDJ terminaba "pidiéndose" a sí mismo).
     if (song.user?.id && !(song.autoDj || song._autoDj)) {
-    MusicTracker.logPlay(gid, song.user.id, song);
-    UserRequests.recordRequest(client, gid, song.user.id, song).catch(() => {});
+      MusicTracker.logPlay(gid, song.user.id, song);
+      UserRequests.recordRequest(client, gid, song.user.id, song).catch(() => {});
     }
 
     // El audioPlayer se recrea en cada reconexión: hay que reaplicarle la
@@ -2273,7 +2315,19 @@ patchClock(queue, gid);
     }, 1500);
 
     let data = await client.music.get(`${gid}.music`);
-    if (data && data.channel === queue.textChannel.id) return;
+    if (data) {
+      if (data.channel !== queue.textChannel.id) {
+        // El bot fue movido a un nuevo canal (ej. de privado a público) con música sonando.
+        // Actualizamos automáticamente el canal del panel fijo para que el embed aparezca en el canal público.
+        data.channel = queue.textChannel.id;
+        await client.music.set(`${gid}.music`, data);
+      }
+      // Forzar siempre al canal configurado/actual sin hacer return anticipado
+      const configuredChannel = queue.textChannel.guild.channels.cache.get(data.channel);
+      if (configuredChannel) {
+        queue.textChannel = configuredChannel;
+      }
+    }
 
     // Delete the previous "now playing" message before sending a fresh one
     const prevId = client.temp.get(gid);
@@ -3305,13 +3359,24 @@ patchClock(queue, gid);
 
     client.distube.on("initQueue", async (queue) => {
     queue.volume = client.config.options.defaultVolume;
+    const guildId = queue.textChannel?.guildId || queue.guildId;
+
+    // ── Forzar siempre el canal del panel de música configurado si existe ──
+    try {
+      let data = await client.music?.get(`${guildId}.music`);
+      if (data?.channel) {
+        const configuredChannel = queue.textChannel.guild.channels.cache.get(data.channel);
+        if (configuredChannel) {
+          queue.textChannel = configuredChannel;
+        }
+      }
+    } catch (e) {}
 
     // Reset Auto DJ to off by default on every new play session.
     // El Auto DJ NUNCA se reactiva solo: solo arranca si el usuario lo pidió
     // explícitamente (autoDjIntent=true) y sigue apagado si lo apagó, aunque la
     // cola se reinicie por errores/Stop (antes se re-enableaba solo y parecía
     // que los controles de skip/pausa "no hacían caso" tras quitar el AutoDJ).
-    const guildId = queue.textChannel?.guildId || queue.guildId;
     AutoDjSource.resetUnlessLoading(client, guildId);
     if (client.autoDjIntent?.get(guildId) === true) {
       client.autoDj?.set(guildId, true);

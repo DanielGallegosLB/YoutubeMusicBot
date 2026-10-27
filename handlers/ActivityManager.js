@@ -20,6 +20,8 @@ function startMarqueeActivity(client, text, guild, voiceChannel = null) {
 
   // Canal privado/oculto: NO cambiar actividad ni nickname (ofuscar uso del bot)
   if (voiceChannel && isPrivateVoice(voiceChannel)) {
+    // Limpiar por si ya había algo
+    try { client.user.setActivity(null); } catch {}
     return;
   }
 

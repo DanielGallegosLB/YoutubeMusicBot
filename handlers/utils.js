@@ -902,10 +902,41 @@ module.exports = async (client) => {
         const tIsAutoDj = !!(track?.autoDj || track?._autoDj);
         const tOwners = (tStats.owners || []).slice(0, 3).join(", ");
         const tOwnersStr = tIsAutoDj || !tOwners ? "" : ` | 👤 ${tOwners}`;
-        const tReq = originLabelFor(track, guild);
-        queueString += `\`${index}.\` **${client.getTitle(track)}** - ${
-          track.isLive ? "LIVE STREAM" : track.formattedDuration.split(" | ")[0]
-        } - \`${tReq}\`${tStatsStr}${tOwnersStr}\n`;
+        try {
+          const AutoDjOrder = require("./AutoDjOrder");
+          const nameOf = (uid) => {
+            if (!uid || !guild?.members?.cache) return null;
+            return guild.members.cache.get(uid)?.user?.tag || null;
+          };
+          const tReq = AutoDjOrder.originLabel(track, nameOf);
+          queueString += `\`${index}.\` **${client.getTitle(track)}** - ${
+            track.isLive ? "LIVE STREAM" : track.formattedDuration.split(" | ")[0]
+          } - \`${tReq}\`${tStatsStr}${tOwnersStr}\n`;
+        } catch (e) {
+          const who = track.requestedBy?.tag || track.user?.tag || track.member?.user?.tag || null;
+          if (track.autoDj || track._autoDj) {
+            if (track.autoDjType === "random") queueString += `\`${index}.\` **${client.getTitle(track)}** - ${
+              track.isLive ? "LIVE STREAM" : track.formattedDuration.split(" | ")[0]
+            } - \`🎲 Aleat. lista\`${tStatsStr}${tOwnersStr}\n`;
+            else if (track.autoDjType === "artistas") queueString += `\`${index}.\` **${client.getTitle(track)}** - ${
+              track.isLive ? "LIVE STREAM" : track.formattedDuration.split(" | ")[0]
+            } - \`🎤 Novedad${who ? " · " + who : ""}\`${tStatsStr}${tOwnersStr}\n`;
+            else if (track.autoDjType === "aleatorias") queueString += `\`${index}.\` **${client.getTitle(track)}** - ${
+              track.isLive ? "LIVE STREAM" : track.formattedDuration.split(" | ")[0]
+            } - \`🎲 Pedidas${who ? " · " + who : ""}\`${tStatsStr}${tOwnersStr}\n`;
+            else if (track.autoDjType === "pedidas") queueString += `\`${index}.\` **${client.getTitle(track)}** - ${
+              track.isLive ? "LIVE STREAM" : track.formattedDuration.split(" | ")[0]
+            } - \`📝 Pedidas${who ? " · " + who : ""}\`${tStatsStr}${tOwnersStr}\n`;
+            else queueString += `\`${index}.\` **${client.getTitle(track)}** - ${
+              track.isLive ? "LIVE STREAM" : track.formattedDuration.split(" | ")[0]
+            } - \`🛸 Rec${who ? " · " + who : ""}\`${tStatsStr}${tOwnersStr}\n`;
+          } else if (who) queueString += `\`${index}.\` **${client.getTitle(track)}** - ${
+            track.isLive ? "LIVE STREAM" : track.formattedDuration.split(" | ")[0]
+          } - \`🎵 Manual · ${who}\`${tStatsStr}${tOwnersStr}\n`;
+          else queueString += `\`${index}.\` **${client.getTitle(track)}** - ${
+            track.isLive ? "LIVE STREAM" : track.formattedDuration.split(" | ")[0]
+          } - \`🎵 Manual\`${tStatsStr}${tOwnersStr}\n`;
+        }
       });
 
       const newQueueEmbed = new EmbedBuilder()
@@ -972,7 +1003,11 @@ module.exports = async (client) => {
 
       await queueembed.edit({ embeds: [newQueueEmbed], components }).catch(() => {});
     } catch (error) {
-      console.error("Error updating queue:", error);
+      if (error?.code === "10008" || /unknown message|missing permission/i.test(String(error?.message))) {
+        // Embed fijo borrado/recreado o sin permisos; evitar spam
+        return;
+      }
+      console.error("Error updating queue:", error?.message || error);
     }
   };
 
@@ -1432,6 +1467,8 @@ client.resolvePanelChannel = async (guild) => {
     if (!data?.channel || data.channel !== vc.id) {
       const next = {
         channel: vc.id,
+        // Guardar el canal público original para restaurarlo al volver a un canal público
+        publicChannel: data?.publicChannel || data?.channel || null,
         pmsg: data?.pmsg || null,
         qmsg: data?.qmsg || null,
       };
@@ -1447,4 +1484,36 @@ client.resolvePanelChannel = async (guild) => {
   }
   return null;
 };
+
+/**
+ * Restaura el embed fijo al canal público original después de que el bot sale
+ * de un canal de voz privado y entra a uno público.
+ */
+client.restorePublicPanel = async (guild) => {
+  try {
+    const data = await client.music.get(`${guild.id}.music`).catch(() => null);
+    if (!data) return;
+    const pubChannel = data.publicChannel || null;
+    if (!pubChannel || pubChannel === data.channel) return; // ya está en el canal correcto
+    client.logger?.log?.(`[Panel] Restaurando panel al canal público ${pubChannel}`);
+    const next = {
+      channel: pubChannel,
+      pmsg: null,   // los mensajes del canal privado ya no sirven; se recrean en el público
+      qmsg: null,
+      publicChannel: null, // limpiamos el marcador
+    };
+    await client.music.set(`${guild.id}.music`, next).catch(() => {});
+    client._musicMetaCache?.delete(guild.id);
+    client._channelPolicyCache?.delete(guild.id);
+    // Re-crear embeds en el canal público (self-repair se encarga de crear los mensajes)
+    await client.updateembed(client, guild).catch(() => {});
+    const q = client.distube?.getQueue?.(guild.id);
+    if (q) {
+      await client.updateplayer?.(q).catch(() => {});
+      await client.updatequeue?.(q).catch(() => {});
+    }
+  } catch (e) {
+    client.logger?.warn?.(`[Panel] Error restaurando panel público: ${e?.message || e}`);
+  }
 };
+};

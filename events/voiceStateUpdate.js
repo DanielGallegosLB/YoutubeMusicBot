@@ -31,21 +31,27 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
     if (newState.channelId && newState.channelId !== oldState.channelId) {
       try {
         const { isPrivateVoice } = require("../handlers/ActivityManager");
-        const vc = newState.channel;
-        if (vc && isPrivateVoice(vc) && typeof client.resolvePanelChannel === "function") {
-          // Panel fijo → chat de este voice privado (ofuscar uso del bot)
+        const oldVc = oldState.channel;
+        const newVc = newState.channel;
+        const movedFromPrivate = !!oldVc && isPrivateVoice(oldVc);
+        const nowInPrivate   = !!newVc && isPrivateVoice(newVc);
+
+        if (nowInPrivate && typeof client.resolvePanelChannel === "function") {
+          // Privado: mover panel al chat del canal de voz privado (ofuscar uso del bot)
           await client.resolvePanelChannel(guild);
           await client.updateembed(client, guild).catch(() => {});
-          // Si ya hay cola, refrescar embeds en el canal nuevo
           const q = client.distube?.getQueue?.(guildId);
           if (q) {
             client.updateplayer?.(q).catch(() => {});
             client.updatequeue?.(q).catch(() => {});
           }
+        } else if (movedFromPrivate && !nowInPrivate && typeof client.restorePublicPanel === "function") {
+          // Salió de privado → público: restaurar panel en el canal público original
+          await client.restorePublicPanel(guild);
         }
       } catch (e) {
         client.logger?.warn?.(
-          `[Voice] No se pudo mover el panel al voice privado: ${e?.message || e}`
+          `[Voice] Error al gestionar panel al cambiar de canal: ${e?.message || e}`
         );
       }
     }

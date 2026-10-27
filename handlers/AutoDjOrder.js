@@ -87,11 +87,13 @@ function originLabel(track, nameOf) {
   if (track.autoDj || track._autoDj) {
     const info = infoOf(track.autoDjType);
     if (track.autoDjType === "random") {
-      // Solo es "de la lista" si de verdad salió de la lista cargada. Si la lista
-      // se agotó y el paso cayó a favoritas/historial, se dice.
-      return track.autoDjFallback
-        ? `${info.icon} Aleat. favoritas ↩ ${track.autoDjFallback === "favoritas" ? "lista agotada" : track.autoDjFallback}`
-        : `${info.icon} Aleat. lista`;
+      if (track.autoDjFallback === "favoritas" || track.autoDjFallback === "reciclada") {
+        return `🎲 Aleat. favoritos`;
+      }
+      if (track.fromList === false && !track._autoDjFromList) {
+        return `🎲 Aleat. lista`;
+      }
+      return `🎲 Aleat. lista`;
     }
     if (track.autoDjType === "pedidas") {
       const who = nm(track.autoDjUserId);
