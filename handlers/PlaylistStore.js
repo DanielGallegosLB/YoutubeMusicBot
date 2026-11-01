@@ -1255,6 +1255,23 @@ module.exports = {
     return data.exclude[userId];
   },
 
+  /** 🚫 sobre canciones de NOVEDAD: cuenta por usuario y artista/canal. Devuelve el total. */
+  async bumpAutodjArtistBan(client, guildId, userId, key) {
+    if (!key) return 0;
+    const data = (await client.music.get(`${guildId}.autodj`).catch(() => null)) || {};
+    data.artistBans = data.artistBans || {};
+    data.artistBans[userId] = data.artistBans[userId] || {};
+    data.artistBans[userId][key] = (Number(data.artistBans[userId][key]) || 0) + 1;
+    await client.music.set(`${guildId}.autodj`, data);
+    return data.artistBans[userId][key];
+  },
+
+  /** { [userId]: { [artistKey]: veces } } */
+  async getAutodjArtistBans(client, guildId) {
+    const data = (await client.music.get(`${guildId}.autodj`).catch(() => null)) || {};
+    return data?.artistBans || {};
+  },
+
   /** Get the AutoDJ skip counters per user: { [url]: { [userId]: count } } */
   async getAutodjSkips(client, guildId) {
     const data = (await client.music.get(`${guildId}.autodj`).catch(() => null)) || {};
@@ -1352,10 +1369,15 @@ module.exports = {
       // pantalla en cuanto la lista tenía un solo elemento, y el contador "daba
       // un paso atrás" al primer click. Ahora se suman SOLO los usuarios que no
       // estén ya representados en las favoritas.
-      const yaLiked = new Set(likedByIds);
-      for (const uid of gStat.likedBy || []) if (!yaLiked.has(uid)) likedByIds.push(uid);
-      const yaDisliked = new Set(dislikedByIds);
-      for (const uid of gStat.dislikedBy || []) if (!yaDisliked.has(uid)) dislikedByIds.push(uid);
+      // Conteo por usuario = el MAYOR entre favoritas y stats del gremio (ambos
+      // acumulan por reproducción); así no se duplica ni se pierde el total.
+      const mergeMax = (arr, extra) => {
+        const cnt = (a) => a.reduce((m, x) => ((m[x] = (m[x] || 0) + 1), m), {});
+        const A = cnt(arr), B = cnt(extra || []);
+        for (const id of Object.keys(B)) for (let i = (A[id] || 0); i < B[id]; i++) arr.push(id);
+      };
+      mergeMax(likedByIds, gStat.likedBy);
+      mergeMax(dislikedByIds, gStat.dislikedBy);
     }
     const resolveNames = (ids) => Promise.all(ids.map((id) => _resolveName(client, guild, id)));
     likedNames.push(...await resolveNames(likedByIds));
@@ -1443,8 +1465,13 @@ module.exports = {
         const e = st[t.url] || { plays: 0, likedBy: [], dislikedBy: [] };
         e.likedBy = Array.isArray(e.likedBy) ? e.likedBy.slice() : [];
         e.dislikedBy = Array.isArray(e.dislikedBy) ? e.dislikedBy.slice() : [];
-        for (const id of t.likedBy || []) if (!e.likedBy.includes(id)) e.likedBy.push(id);
-        for (const id of t.dislikedBy || []) if (!e.dislikedBy.includes(id)) e.dislikedBy.push(id);
+        const mergeMax = (dst, src) => {
+          const cnt = (a) => a.reduce((m, x) => ((m[x] = (m[x] || 0) + 1), m), {});
+          const A = cnt(dst);
+          for (const [id, n] of Object.entries(cnt(src || []))) for (let i = (A[id] || 0); i < n; i++) dst.push(id);
+        };
+        mergeMax(e.likedBy, t.likedBy);
+        mergeMax(e.dislikedBy, t.dislikedBy);
         if (Number(t.playCount) > (e.plays || 0)) e.plays = Number(t.playCount) || 0;
         if (t.name && !e.name) e.name = t.name;
         st[t.url] = e;
@@ -1488,6 +1515,7 @@ module.exports = {
 // set posterior pisaba el likedBy (el like quedaba solo en gStat, y el log de
 // diagnóstico mostraba `fav.likedBy=0` con `gStat.likedBy=1`).
 const _LOCKED_METHODS = new Set([
+  "bumpAutodjArtistBan",
   "create",
   "addTracks",
   "removeTrack",

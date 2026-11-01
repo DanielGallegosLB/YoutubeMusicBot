@@ -102,9 +102,15 @@ if (embed) {
           // Canal de previews configurable (settings/config.js channels.preview).
           const previewChannelId =
             client.config?.channels?.preview || "432435342738456590";
-          const textChannel = await newState.guild.channels
+          let textChannel = await newState.guild.channels
             .fetch(previewChannelId)
             .catch(() => null);
+          // Voice privado/oculto: "Tus listas guardadas" va al chat de ese voice,
+          // no al canal público (si no, delata quién usa el bot y qué escucha).
+          try {
+            const { isPrivateVoice } = require("../handlers/ActivityManager");
+            if (newState.channel && isPrivateVoice(newState.channel)) textChannel = newState.channel;
+          } catch (_) {}
           if (textChannel) {
             const components = await UserHistory.buildPreviewComponents(
               client,

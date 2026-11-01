@@ -14,6 +14,7 @@ const {
 const { Queue, Song } = require("distube");
 const PlaylistStore = require("./PlaylistStore");
 const AutoDjSource = require("./Autodjsource");
+const SongIdentity = require("./SongIdentity");
 
 /**
  *
@@ -897,11 +898,20 @@ module.exports = async (client) => {
       ));
 
       // ── CURRENT TRACK arriba con sus iconos/stats ──
+    // 🕒 = la vez ANTERIOR (la actual ya quedó registrada); 🆕 = nunca; 🕒s/d = sin dato (sonó antes del historial).
+    const lastTag = (song, st, current) => {
+      try {
+        const h = SongIdentity.history.lastFor(guildId, { url: song?.url, name: song?.name });
+        if (!h) return (st?.plays || 0) > 0 ? " | 🕒s/d" : " | 🆕";
+        const ts = current ? h.p : h.t;
+        return ts ? ` | 🕒${SongIdentity.formatAgoShort(Date.now() - ts)}` : " | 🆕";
+      } catch (_) { return ""; }
+    };
       let queueString = "";
       if (currentSong) {
         const currentOrigin = originLabelFor(currentSong, guild);
         const currentOriginText = currentOrigin ? ` | ${currentOrigin}` : "";
-        queueString += `**0. CURRENT TRACK**\n**[\`${client.getTitle(currentSong)}\`](${currentSong.url})** - \`${currentSong.formattedDuration}\`${currentOriginText}${currentStatsText}\n\n`;
+        queueString += `**0. CURRENT TRACK**\n**[\`${client.getTitle(currentSong)}\`](${currentSong.url})** - \`${currentSong.formattedDuration}\`${currentOriginText}${currentStatsText}${lastTag(currentSong, currentStats, true)}\n\n`;
       }
 
       // ── Próximas canciones con sus iconos de AutoDJ y stats ──
@@ -921,7 +931,7 @@ module.exports = async (client) => {
             const originLbl = originLabelFor(song, guild);
             const originText = originLbl ? ` | ${originLbl}` : "";
 
-            return `\` ${idx}. \` **${client.getTitle(song)}** - \`${song.formattedDuration}\`${originText}${statsText}`;
+            return `\` ${idx}. \` **${client.getTitle(song)}** - \`${song.formattedDuration}\`${originText}${statsText}${lastTag(song, stats, false)}`;
           })
           .join("\n");
       }
@@ -1070,6 +1080,15 @@ module.exports = async (client) => {
       // stats (lectura a Mongo) se aplican DESPUÉS en segundo plano; si Mongo
       // se demora, el embed fijo igual ya muestra la canción que suena.
       const rawStats = "Sin stats aún";
+      // "Antes": cuándo sonó la vez ANTERIOR (la actual ya está registrada).
+      const lastSeenText = (tr) => {
+        try {
+          const h = SongIdentity.history.lastFor(guildId, { url: tr?.url, name: tr?.name });
+          if (!h) return "—";
+          if (!h.p) return "primera vez";
+          return SongIdentity.formatAgo(Date.now() - h.p);
+        } catch (_) { return "—"; }
+      };
       const buildEmbed = (statsValue) =>
         new EmbedBuilder()
           .setColor(client.config.embed.color)
@@ -1095,6 +1114,11 @@ module.exports = async (client) => {
             {
               name: "**Stats**",
               value: `\`${statsValue}\``,
+              inline: true,
+            },
+            {
+              name: "**Última vez**",
+              value: `\`${lastSeenText(track)}\``,
               inline: true,
             }
           )
@@ -1485,7 +1509,12 @@ const afterPanelSwitch = (guild) => {
   client._playerPanel?.delete(guild.id); // el dedup no debe saltarse el primer pintado
 };
 
-/** Entra a un voice privado: guarda el canal público y manda el panel al chat del voice. */
+/**
+ * Entra a un voice privado. El panel PÚBLICO NO se toca (ni se edita ni se borra):
+ * queda congelado tal cual y solo vuelve a actualizarse cuando el bot se use en
+ * público. Se guarda su referencia (`publicPanel`) y el panel privado se crea
+ * aparte, en el chat del voice.
+ */
 const enterPrivatePanel = (guild, vc) => withPanelLock(guild.id, async () => {
   const data = await client.music.get(`${guild.id}.music`).catch(() => null);
   if (!data || !data.channel) return;
@@ -1493,69 +1522,76 @@ const enterPrivatePanel = (guild, vc) => withPanelLock(guild.id, async () => {
 
   const cur = await fetchGuildChannel(guild, data.channel);
   const curIsVoice = !!cur?.isVoiceBased?.();
-  // Canal público a recordar: el ya guardado, o el actual si es de texto.
-  const publicChannel =
-    data.publicChannel || client._publicPanelChannel.get(guild.id) || (!curIsVoice ? data.channel : null);
+  let publicPanel = data.publicPanel || null;
+  if (!publicPanel && !curIsVoice) {
+    publicPanel = { channel: data.channel, pmsg: data.pmsg || null, qmsg: data.qmsg || null };
+  } else if (!publicPanel && data.publicChannel) {
+    publicPanel = { channel: data.publicChannel, pmsg: null, qmsg: null };
+  }
+  const publicChannel = publicPanel?.channel || client._publicPanelChannel.get(guild.id) || null;
   if (publicChannel) client._publicPanelChannel.set(guild.id, publicChannel);
 
-  // El panel visible en el canal anterior (público u otro voice) se retira.
-  await deletePanelMessages(guild, data.channel, data.pmsg, data.qmsg);
+  // Venía de OTRO voice privado: ese panel privado sí se retira (el público no).
+  if (curIsVoice) await deletePanelMessages(guild, data.channel, data.pmsg, data.qmsg);
 
   await client.music.set(`${guild.id}.music`, {
     ...data,
     channel: vc.id,
-    publicChannel: publicChannel || null,
+    publicChannel,
+    publicPanel,
     pmsg: null,
     qmsg: null,
   }).catch((e) => client.logger?.warn?.(`[Panel] no se pudo guardar el canal privado: ${e?.message || e}`));
   afterPanelSwitch(guild);
 
-  // Los mensajes del bot sobre la cola también dejan de ir al canal público.
   const q = client.distube?.getQueue?.(guild.id);
   if (q) q.textChannel = vc;
-  client.logger?.log?.(`[Panel] Voice privado "${vc.name}": panel movido a su chat (público guardado: ${publicChannel || "ninguno"})`);
+  client.logger?.log?.(`[Panel] Voice privado "${vc.name}": panel propio en su chat; el panel público (${publicChannel || "ninguno"}) queda congelado`);
 });
 
-/** Vuelve al canal público guardado y republica el panel completo ahí. */
+/** Vuelve al canal público: reutiliza su panel (si existe) y lo actualiza con el estado actual. */
 client.restorePublicPanel = async (guild) => {
-  let publicCh = null;
   const done = await withPanelLock(guild.id, async () => {
     const data = await client.music.get(`${guild.id}.music`).catch(() => null);
     if (!data) return false;
-    const pubId = data.publicChannel || client._publicPanelChannel.get(guild.id);
+    const pp = data.publicPanel || null;
+    const pubId = pp?.channel || data.publicChannel || client._publicPanelChannel.get(guild.id);
     if (!pubId) return false;
 
-    publicCh = await fetchGuildChannel(guild, pubId);
+    const publicCh = await fetchGuildChannel(guild, pubId);
     if (!publicCh || !publicCh.isTextBased?.() || publicCh.isVoiceBased?.()) {
       client.logger?.warn?.(`[Panel] El canal público guardado (${pubId}) ya no existe o no es de texto: se deja de intentar volver.`);
       client._publicPanelChannel.delete(guild.id);
-      await client.music.set(`${guild.id}.music`, { ...data, publicChannel: null }).catch(() => {});
+      await client.music.set(`${guild.id}.music`, { ...data, publicChannel: null, publicPanel: null }).catch(() => {});
       return false;
     }
 
-    // Sin el panel viejo en el chat del voice (si no, queda ahí para siempre).
+    // El panel del chat privado ya no hace falta.
     if (data.channel && data.channel !== pubId) {
       await deletePanelMessages(guild, data.channel, data.pmsg, data.qmsg);
     }
 
-    // Mismo orden que el Self-Repair: reproductor arriba, cola abajo.
-    const playmsg = await publicCh.send({ embeds: [client.playembed(guild)], components: client.buttons(true) });
-    const queuemsg = await publicCh.send({ embeds: [client.queueembed(guild)] });
+    // Reutiliza los mensajes públicos que sigan existiendo; crea solo los que falten.
+    let playmsg = await client.fetchPanelMessage(publicCh, pp?.pmsg || null);
+    let queuemsg = await client.fetchPanelMessage(publicCh, pp?.qmsg || null);
+    if (playmsg === undefined || queuemsg === undefined) throw new Error("fetch transitorio del panel público");
+    if (!playmsg) playmsg = await publicCh.send({ embeds: [client.playembed(guild)], components: client.buttons(true) });
+    if (!queuemsg) queuemsg = await publicCh.send({ embeds: [client.queueembed(guild)] });
 
     await client.music.set(`${guild.id}.music`, {
       ...data,
       channel: pubId,
       publicChannel: null,
+      publicPanel: null,
       pmsg: playmsg.id,
       qmsg: queuemsg.id,
     });
     client._publicPanelChannel.delete(guild.id);
     afterPanelSwitch(guild);
 
-    // La cola vuelve a hablar en el canal público.
     const q = client.distube?.getQueue?.(guild.id);
     if (q) q.textChannel = publicCh;
-    client.logger?.log?.(`[Panel] Panel restaurado en el canal público ${pubId}`);
+    client.logger?.log?.(`[Panel] Panel público restaurado en ${pubId}`);
     return true;
   }).catch((e) => {
     client._panelRestoreFail.set(guild.id, Date.now());
@@ -1563,7 +1599,6 @@ client.restorePublicPanel = async (guild) => {
     return false;
   });
 
-  // Los refrescos van FUERA del lock (resolvePanelChannel los espera).
   if (done) {
     const q = client.distube?.getQueue?.(guild.id);
     if (q) {
@@ -1590,7 +1625,7 @@ client.resolvePanelChannel = async (guild) => {
     // Ya no está en un voice privado (voice público o desconectado): si quedó un
     // canal público guardado, volver a él (con 20 s de pausa tras un fallo).
     const data = await client.music.get(`${guild.id}.music`).catch(() => null);
-    const hasPublic = !!(data?.publicChannel || client._publicPanelChannel.get(guild.id));
+    const hasPublic = !!(data?.publicPanel || data?.publicChannel || client._publicPanelChannel.get(guild.id));
     if (hasPublic) {
       const failedAt = client._panelRestoreFail.get(guild.id) || 0;
       if (Date.now() - failedAt > 20000) await client.restorePublicPanel(guild);

@@ -10,6 +10,7 @@ const PlaylistStore = require("./PlaylistStore");
 const AutoDjSource = require("./Autodjsource");
 const AutoDjLogger = require("./AutoDjLogger");
 const AutoDjOrder = require("./AutoDjOrder");
+const SongIdentity = require("./SongIdentity");
 const { fetchPlaylistFirstURL, probeSingleURL, validateSinglePlayable, isPlaylistURL, searchYoutubeVideos } = require("./PlaylistFetcher");
 const { isAgeGateError, friendlyPlaybackError } = require("./PlaybackError");
 const { startMarqueeActivity, stopMarqueeActivity } = require("./ActivityManager");
@@ -456,6 +457,7 @@ module.exports = async (client) => {
     song.autoDjType = meta.type;
     song.autoDjUserId = meta.userId || null;
     song.autoDjFallback = meta.fallback || null;
+    song.autoDjArtist = meta.artist || null;
     // `_autoDjAdded`: la ENCOLÓ el bot (no era de la lista de nadie).
     if (added) song._autoDjAdded = true;
     if (!Number.isFinite(song._autoDjSeq)) {
@@ -1341,33 +1343,98 @@ module.exports = async (client) => {
         fuenteMomentanea: AutoDjSource.candidates(client, guildId, { currentUrl: queue.songs[0]?.url }).length,
         ...poolSnapshot,
         ...entry,
+        ...histFields(entry),
       }, entry.origen === "random" ? "pick.random" : "pick.rec");
     };
 
-    // Títulos ya usados: lo que está en cola + lo que el bot puso (persistido en
-    // `seen` con prefijo "t:"). Evita "Fade Into You" 3 veces con URLs distintas.
-    const queueTitleKeys = new Set(queue.songs.map((s) => titleKey(s?.name)).filter(Boolean));
-    const takenTitles = new Set();
-    const titleUsed = (name) => {
-    const k = titleKey(name);
-    return !!k && (queueTitleKeys.has(k) || seen.has(k) || takenTitles.has(k));
-};
+    // ── Identidad por PARECIDO de nombre + última vez que sonó (SongIdentity.js) ──
+    //   · titleUsed   : no repetir lo que ya está en la cola / se eligió en este refill
+    //                   (aunque tenga otra URL) ni lo que sonó hace menos de
+    //                   AUTODJ_MIN_REPLAY_HOURS (6 h por defecto).
+    //   · noveltyKnown: una "novedad" NO puede parecerse a nada que el bot ya conozca:
+    //                   lo que ya sonó alguna vez, lo del propio usuario (favoritas,
+    //                   historial, pedidas) y, en la búsqueda en YouTube, nada del
+    //                   catálogo del servidor.
+    await SongIdentity.history.load(client, guildId);
+    const REPLAY_MS = Math.max(0, Number(process.env.AUTODJ_MIN_REPLAY_HOURS ?? 6)) * 3600e3;
+    const sameUrl = (x, y) => SongIdentity.ytKey(x) === SongIdentity.ytKey(y);
+    const lastOf = (name, url) => SongIdentity.history.lastFor(guildId, { url, name });
+    const queueIdx = SongIdentity.createIndex();
+    for (const s of queue.songs) if (s?.name) queueIdx.add(s.name, { url: s.url });
+    const takenIdx = SongIdentity.createIndex();
+    const userKnown = {};
+    for (const uid of listeners) {
+      const ix = SongIdentity.createIndex();
+      for (const t of [...(poolsByUser[uid] || []).filter((x) => !x._fromArtist), ...(historyByUser.get(uid) || []), ...(requestsByUser[uid] || [])]) {
+        const n = t?.name || t?.title;
+        if (n) ix.add(n);
+      }
+      userKnown[uid] = ix;
+    }
+    // Catálogo conocido del servidor (todas las listas guardadas + stats). Cache 5 min.
+    const knownCache = client._knownTitleIdx || (client._knownTitleIdx = new Map());
+    let kc = knownCache.get(guildId);
+    if (!kc || Date.now() - kc.at > 300000) {
+      const idx = SongIdentity.createIndex();
+      try {
+        const pls = (await client.music.get(`${guildId}.playlists`)) || {};
+        for (const u of Object.values(pls)) {
+          for (const list of Object.values(u || {})) {
+            if (!Array.isArray(list)) continue;
+            for (const t of list) if (t?.name) idx.add(t.name);
+          }
+        }
+      } catch (_) {}
+      try {
+        const gs = (await PlaylistStore.guildStats(client, guildId)) || {};
+        for (const v of Object.values(gs)) if (v?.name) idx.add(v.name);
+      } catch (_) {}
+      kc = { at: Date.now(), idx };
+      knownCache.set(guildId, kc);
+    }
+    const knownGlobal = kc.idx;
+    const ARTIST_BAN_THR = Math.max(1, Number(process.env.AUTODJ_ARTIST_BAN_THRESHOLD) || 2);
+    const artistBans = await PlaylistStore.getAutodjArtistBans(client, guildId).catch(() => ({}));
+    const isArtistBanned = (uid, name) => !!name && (Number(artistBans?.[uid]?.[SongIdentity.artistKey(name)]) || 0) >= ARTIST_BAN_THR;
+    const titleUsed = (name, url) => {
+      if (!name) return false;
+      const q = queueIdx.find(name);
+      if (q && !sameUrl(q.meta.url, url)) return true;
+      const tk = takenIdx.find(name);
+      if (tk && !sameUrl(tk.meta.url, url)) return true;
+      if (REPLAY_MS > 0) {
+        const h = lastOf(name, url);
+        if (h && Date.now() - h.t < REPLAY_MS) return true;
+      }
+      return false;
+    };
+    const noveltyKnown = (name, url, uid, global) => {
+      if (!name) return false;
+      if (titleUsed(name, url)) return true;
+      if (lastOf(name, url)) return true;
+      if (uid && userKnown[uid]?.find(name)) return true;
+      if (global && knownGlobal.find(name)) return true;
+      return false;
+    };
+    const histFields = (entry) => {
+      try {
+        if (!entry?.url) return {};
+        const h = lastOf(entry.nombre || entry.name, entry.url);
+        if (!h) return { ultimaVez: "nunca", vecesReproducida: 0 };
+        return {
+          ultimaVez: SongIdentity.formatAgo(Date.now() - h.t),
+          ultimaVezTs: new Date(h.t).toISOString(),
+          vecesReproducida: h.c,
+          ...(h.exact ? {} : { parecidaA: h.n, similitud: Math.round(h.sim * 100) }),
+        };
+      } catch (_) { return {}; }
+    };
     const pickForStepInner = async (step, taken, inQueue) => {
       const isSafeCand = (t) => t?.url && !isPlaylistURL(t.url) && isSafeSingle(t.url);
       // Destinatario efectivo del paso: si es "*" y el tipo necesita un usuario,
       // se reparte de forma cíclica entre los oyentes (orden de conexión).
       const effUser = cycleUser(step.type, step.userId);
 
-      const titleKey = (n) => String(n||"")
-        .toLowerCase()
-        .replace(/\(\s*(official\s*)?(audio|video|lyric(?:s)?|music\s*video|visualizer|animated)\s*\)/gi, " ")
-        .replace(/\|\s*(official\s*)?(audio|video|lyric(?:s)?)\s*/gi, " ")
-        .replace(/\b(stone|radio|single|clean|explicit)\s+(?:version|ver\.?|edit)\b/gi, " ")
-        .replace(/[^a-z0-9\s]/g, " ")
-        .replace(/\s+/g, " ")
-        .trim();
-      const titleSeen = new Set();
-      const titleUsed = (n) => { const k=titleKey(n); if(!k||k.length<4) return false; if(titleSeen.has(k)) return true; titleSeen.add(k); return false; };
       const weightOf = (t) => skipWeight(t.url, effUser || step.userId);
 
       // 🎲 → al azar entre TODAS las canciones de la lista ingresada que aún no
@@ -1460,7 +1527,17 @@ module.exports = async (client) => {
         const extra = (requestsByUser[effUser] || [])
           .map((r) => ({ url: r.url, name: r.name || null, uploader: r.artist ? { name: r.artist } : null, likedBy: [], dislikedBy: [], playCount: Number(r.plays) || 0, _fromRequest: true }))
           .filter((t) => isSafeCand(t) && !have.has(canonUrlKey(t.url)));
-        const all = src.concat(extra);
+        const allRaw = src.concat(extra);
+        // Antes no se miraba lo ya visto/sonado: con pocas pedidas se repetían las mismas.
+        let all = allRaw.filter((t) => !seen.has(t.url) && !taken.has(t.url) && !excludedCanon.has(canonUrlKey(t.url)) && !titleUsed(t.name || t.title, t.url));
+        if (!all.length) {
+          // Todo visto: las que hace MÁS tiempo no suenan (sin repetir lo que ya está en cola).
+          all = allRaw
+            .filter((t) => !taken.has(t.url) && !excludedCanon.has(canonUrlKey(t.url))
+              && !(queueIdx.find(t.name || t.title || "") && !sameUrl(queueIdx.find(t.name || t.title || "").meta.url, t.url)))
+            .map((t) => ({ t, ts: lastOf(t.name || t.title, t.url)?.t || 0 }))
+            .sort((x, y) => x.ts - y.ts).slice(0, 5).map((x) => x.t);
+        }
         if (all.length) {
           // Elegir entre las menos escuchadas para no repetir la misma
           const chosen = pickLeastPlayed(all, (t) => skipWeight(t.url, effUser));
@@ -1498,7 +1575,7 @@ module.exports = async (client) => {
           // Excluir lo que el usuario ya conoce (su propio pool/historial) y lo
           // que ya está en cola/cerca, para que sea NOVEDOSA de verdad.
           const ownNow = new Set((poolsByUser[effUser] || []).map((t) => t.url));
-          src = src.filter((t) => !seen.has(t.url) && !taken.has(t.url) && !ownNow.has(t.url) && !titleUsed(t.name || t.title));
+          src = src.filter((t) => !seen.has(t.url) && !taken.has(t.url) && !ownNow.has(t.url) && !noveltyKnown(t.name || t.title, t.url, effUser, false) && !isArtistBanned(effUser, t.uploader?.name));
         }
         if (src.length) {
           src = src.slice().sort((a, b) => {
@@ -1537,7 +1614,7 @@ module.exports = async (client) => {
         // (ej. milo j/kidd voodoo). Se BUSCAN en YouTube al vuelo y se elige una
         // NUEVA (no vista, no en cola, no ya escuchada por el usuario).
         {
-          const tops = shuffleWeighted(topArtistNames(artistsByUser[effUser]), (a) => a.count);
+          const tops = shuffleWeighted(topArtistNames(artistsByUser[effUser]).filter((a) => !isArtistBanned(effUser, a.name)), (a) => a.count);
           if (tops.length) {
               const ownPool = new Set((poolsByUser[effUser] || []).map((t) => t.url));
               const ownHist = new Set((historyByUser.get(effUser) || []).map((t) => t?.url).filter(Boolean));
@@ -1547,12 +1624,15 @@ module.exports = async (client) => {
                 const fresh = results.filter((r) => r?.url
                   && !seen.has(r.url) && !taken.has(r.url) && !inQueue.has(r.url)
                   && !ownPool.has(r.url) && !ownHist.has(r.url)
-                  && !titleUsed(r.name || r.title)
+                  && !noveltyKnown(r.name || r.title, r.url, effUser, true)
+                  && !isArtistBanned(effUser, r.uploader?.name)
                   && isSafeCand(r)
                   && (Number(r.duration) || 0) > 0 && (Number(r.duration) || 0) <= 600);
                 if (!fresh.length) continue;
                 // Preferir "audio", versión corta, evitar mixes/longs
-                const scored = fresh
+                // Mismas canciones con distinta URL (video oficial / lyric / stone version…):
+                // se queda la de MENOR duración (sin intro ni relleno).
+                const scored = SongIdentity.dedupeShortest(fresh, (r) => r.name || r.title || "", (r) => r.duration)
                   .map((r) => {
                     const nm = String(r.name || "").toLowerCase();
                     const up = String(r.uploader?.name || "").toLowerCase();
@@ -1595,10 +1675,11 @@ module.exports = async (client) => {
                   playsSesion: 0,
                   peso: 1,
                 });
-                return { url: chosen.url, name: chosen.name || null, existing: false, fromList: false, autoDjType: "artistas", autoDjUserId: effUser || null };
+                return { url: chosen.url, name: chosen.name || null, existing: false, fromList: false, autoDjType: "artistas", autoDjUserId: effUser || null, autoDjArtist: top.name };
               }
           }
         }
+        // Una NOVEDAD siempre es novedosa: si no hay, el paso se omite (nunca se sustituye por un gusto).
         dbgLine(`🎤 novedad: sin canciones nuevas de los artistas del perfil -> paso omitido`);
         return null;
       } else if (step.type === "rec" && effUser) {
@@ -1665,7 +1746,10 @@ module.exports = async (client) => {
       const rankByRecency = (arr) => {
         const rec = queue._autoDjRecent || [];
         const idxOf = (t) => rec.lastIndexOf(canonUrlKey(t.url));
-        const sorted = arr.slice().sort((a, b) => idxOf(a) - idxOf(b));
+        // Primero lo que NUNCA sonó o hace más tiempo que no suena (historial
+        // persistente, por URL o nombre parecido); la sesión desempata.
+        const tOf = (t) => lastOf(t.name || t.title, t.url)?.t || 0;
+        const sorted = arr.slice().sort((a, b) => (tOf(a) - tOf(b)) || (idxOf(a) - idxOf(b)));
         return sorted.slice(0, Math.max(1, Math.ceil(sorted.length / 2)));
       };
 
@@ -1680,7 +1764,7 @@ module.exports = async (client) => {
       }
       const tag = `pool=${pool.length} (favs=${allPool.length} hist=${allHistory.length} picks=${picks.length}) near=${nearQueue.size}`;
       const isUsableNow = (t) => t?.url && !excludedCanon.has(canonUrlKey(t.url)) && !nearQueue.has(t.url);
-      const freshOf = (arr) => arr.filter((t) => isUsableNow(t) && !seen.has(t.url) && !taken.has(t.url) && !titleUsed(t.name || t.title));
+      const freshOf = (arr) => arr.filter((t) => isUsableNow(t) && !seen.has(t.url) && !taken.has(t.url) && !titleUsed(t.name || t.title, t.url));
       // Tres escalones, en orden. Antes el paso 3 (reciclar) saltaba siempre al
       // final porque pickUnseen nunca devolvía null, y encima elegía SIEMPRE la
       // primera de la lista: por eso se repetían las mismas 2-3 canciones.
@@ -1782,8 +1866,7 @@ module.exports = async (client) => {
     const pickForStep = async (step, taken, inQueue) => {
       const res = await pickForStepInner(step, taken, inQueue);
       if (res?.url) noteRecent(res.url);
-      const _tk = titleKey(res?.name || res?.title);
-      if (_tk) { takenTitles.add(_tk); seenMark(seen, _tk); }
+      if (res?.url && (res.name || res.title)) takenIdx.add(res.name || res.title, { url: res.url });
       return res;
     };
 
@@ -1923,6 +2006,7 @@ module.exports = async (client) => {
         userId: effectiveType === "random" ? null : effectiveUser,
         seq: item.track.autoDjSeq,
         fallback: item.track.autoDjFallback || null,
+        artist: item.track.autoDjArtist || null,
       };
       let member = fallbackMember;
       if (effectiveUser) {
@@ -2157,6 +2241,26 @@ module.exports = async (client) => {
         }
       }
     } catch (e) {}
+
+    // Historial: cuándo sonó por última vez (misma URL o nombre parecido) → logs.
+    if (gid && song?.url) {
+      try {
+        const h = await SongIdentity.history.record(client, gid, { url: song.url, name: song.name });
+        const cuando = h.first
+          ? "primera vez que suena"
+          : `última vez ${SongIdentity.formatAgo(Date.now() - h.prevT)}`;
+        const via = h.via === "parecida" ? ` (parecida al ${Math.round(h.sim * 100)}% a "${h.prevName}")` : "";
+        client.logger?.log?.(`[Historial] "${song.name}" · ${cuando}${via} · ${h.count}ª reproducción`);
+        AutoDjLogger.decision({
+          guildId: gid, nombre: song.name, url: song.url, autodj: !!(song.autoDj || song._autoDj),
+          tipo: song.autoDjType || null, primeraVez: h.first,
+          ultimaVez: h.first ? null : SongIdentity.formatAgo(Date.now() - h.prevT),
+          ultimaVezTs: h.prevT ? new Date(h.prevT).toISOString() : null,
+          via: h.via, similitud: h.via === "parecida" ? Math.round(h.sim * 100) : null,
+          parecidaA: h.prevName, vecesReproducida: h.count,
+        }, "play.hist");
+      } catch (e) {}
+    }
 
     // Conteo único y seguro de la reproducción
     if (gid && song?.url) {

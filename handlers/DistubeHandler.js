@@ -2,6 +2,7 @@ const { EmbedBuilder, Events, ChannelType, ActionRowBuilder, ButtonBuilder, Butt
 const MusicBot = require("./Client");
 const DashboardFeed = require("./DashboardFeed");
 const Store = require("./PlaylistStore");
+const SongIdentity = require("./SongIdentity");
 const UserHistory = require("./UserHistory");
 const { check_dj, skip, recordSkipSignal } = require("./functions");
 const { streamPlaylist, shufflePlay } = require("./PlaylistLoader");
@@ -413,6 +414,23 @@ module.exports = async (client) => {
               `url=${current.url} canon=${canon} seenSession=${_queue._autoDjExcludedSession instanceof Set ? _queue._autoDjExcludedSession.size : 0}`
             );
             await Store.addAutodjExclude(client, interaction.guildId, interaction.user.id, current.url);
+            // Umbral de 🚫 sobre NOVEDADES: al llegar a N veces con el mismo artista buscado
+            // (o el mismo canal que sube las canciones), ese artista deja de usarse en
+            // novedades para este usuario (AUTODJ_ARTIST_BAN_THRESHOLD, 2 por defecto).
+            try {
+              if (current.autoDjType === "artistas") {
+                const thr = Math.max(1, Number(process.env.AUTODJ_ARTIST_BAN_THRESHOLD) || 2);
+                const keys = new Map();
+                if (current.autoDjArtist) keys.set(SongIdentity.artistKey(current.autoDjArtist), `artista buscado "${current.autoDjArtist}"`);
+                const upl = current.uploader?.name;
+                if (upl) keys.set(SongIdentity.artistKey(upl), `canal "${upl}"`);
+                for (const [k, label] of keys) {
+                  if (!k) continue;
+                  const n = await Store.bumpAutodjArtistBan(client, interaction.guildId, interaction.user.id, k);
+                  client.logger.log(`[AutoDjBan] ${interaction.user.tag}: 🚫 sobre ${label} → ${n}/${thr}${n >= thr ? " · YA NO se usará en novedades" : ""}`);
+                }
+              }
+            } catch (e) {}
             // Esta sesión tampoco la vuelve a elegir mientras dure la cola.
             // _autoDjExcludedSession es un Set dedicado a los 🚫 de ESTA sesión:
             // a diferencia de _autoDjSeen (que pickUnseen recicla y puede volver
