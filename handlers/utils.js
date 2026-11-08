@@ -384,6 +384,7 @@ module.exports = async (client) => {
       if (client.temp?.get(message.guildId) === message.id) return true;
       if (client.previewMessages?.has?.(message.id)) return true;
       const meta = await musicMeta(message.guildId);
+      if (meta.publicPanel && (meta.publicPanel.pmsg === message.id || meta.publicPanel.qmsg === message.id)) return true;
       return meta.pmsg === message.id || meta.qmsg === message.id;
     };
 
@@ -956,11 +957,15 @@ module.exports = async (client) => {
           const vcm = guild.members?.me?.voice?.channel;
           const lis = vcm ? vcm.members.filter((m) => !m.user.bot).map((m) => m.id) : [];
           if (lis.length) {
-            const cyc = AutoDjOrder.buildCycle(lis);
+            const customPat = await PlaylistStore.getAutoDjPattern(client, guild.id).catch(() => null);
+            const cyc = customPat ? AutoDjOrder.canonPattern(customPat) : AutoDjOrder.buildCycle(lis);
             const nameOf = (uid) => guild.members.cache.get(uid)?.user?.username || null;
             const firstBot = freshQueue.songs.slice(1).find((x) => x && (x.autoDj || x._autoDj));
             let nextIdx = -1;
-            if (firstBot && (firstBot.autoDjType === "random" || lis.includes(firstBot.autoDjUserId))) {
+            if (customPat) {
+              const k = firstBot?._autoDjStep;
+              nextIdx = Number.isInteger(k) && k < cyc.length ? k : -1;
+            } else if (firstBot && (firstBot.autoDjType === "random" || lis.includes(firstBot.autoDjUserId))) {
               const k = AutoDjOrder.stepKey({ type: firstBot.autoDjType, userId: firstBot.autoDjUserId }, lis);
               nextIdx = cyc.findIndex((p) => AutoDjOrder.stepKey(p, lis) === k);
             }
@@ -1085,7 +1090,12 @@ module.exports = async (client) => {
         try {
           const h = SongIdentity.history.lastFor(guildId, { url: tr?.url, name: tr?.name });
           if (!h) return "—";
-          if (!h.p) return "primera vez";
+          if (!h.p) {
+            // Las stats (🔥) vienen de antes del historial: si ya sonó más veces,
+            // no es "primera vez", solo no hay fecha registrada.
+            const plays = Number(_statsCache.get(`${guildId}|${tr?.url}`)?.data?.plays) || 0;
+            return plays > 1 ? "sin fecha previa" : "primera vez";
+          }
           return SongIdentity.formatAgo(Date.now() - h.p);
         } catch (_) { return "—"; }
       };

@@ -458,6 +458,7 @@ module.exports = async (client) => {
     song.autoDjUserId = meta.userId || null;
     song.autoDjFallback = meta.fallback || null;
     song.autoDjArtist = meta.artist || null;
+    if (Number.isInteger(meta.stepIdx)) song._autoDjStep = meta.stepIdx;
     // `_autoDjAdded`: la ENCOLÓ el bot (no era de la lista de nadie).
     if (added) song._autoDjAdded = true;
     if (!Number.isFinite(song._autoDjSeq)) {
@@ -947,7 +948,11 @@ module.exports = async (client) => {
     // orden de conexión:
     //   🛸 rec A › 🛸 rec B › 🎲 aleatoria de pedidas A › B › 🎤 novedosa de perfil A › B › 🎲 aleatoria de la lista
     // Ya no depende del patrón guardado en el dashboard: el orden es siempre este.
-    const rawPattern = AutoDjOrder.buildCycle(listeners);
+    // Si el admin guardó un patrón en el dashboard, MANDA ese; si no, el ciclo por defecto.
+    const customPat = await PlaylistStore.getAutoDjPattern(client, guildId).catch(() => null);
+    const rawPattern = customPat ? AutoDjOrder.canonPattern(customPat) : AutoDjOrder.buildCycle(listeners);
+    const patSig = customPat ? JSON.stringify(rawPattern) : "";
+    if (queue._autoDjPatSig !== patSig) { queue._autoDjPatSig = patSig; queue._autoDjIdx = undefined; queue._autoDjTurn = {}; }
     const pattern = rawPattern.slice();
     if (!pattern.length) pattern.push({ type: "random" });
 
@@ -1385,14 +1390,31 @@ module.exports = async (client) => {
           }
         }
       } catch (_) {}
+      const names = new Map();
       try {
         const gs = (await PlaylistStore.guildStats(client, guildId)) || {};
-        for (const v of Object.values(gs)) if (v?.name) idx.add(v.name);
+        for (const [u, v] of Object.entries(gs)) if (v?.name) { idx.add(v.name); names.set(SongIdentity.ytKey(u), v.name); }
       } catch (_) {}
-      kc = { at: Date.now(), idx };
+      try {
+        const pls = (await client.music.get(`${guildId}.playlists`)) || {};
+        for (const u of Object.values(pls)) for (const list of Object.values(u || {})) {
+          if (Array.isArray(list)) for (const t of list) if (t?.url && t?.name && !names.has(SongIdentity.ytKey(t.url))) names.set(SongIdentity.ytKey(t.url), t.name);
+        }
+      } catch (_) {}
+      kc = { at: Date.now(), idx, names };
       knownCache.set(guildId, kc);
     }
     const knownGlobal = kc.idx;
+    const nameOfUrl = (u) => kc.names?.get(SongIdentity.ytKey(u)) || null;
+    // 🎲 lista: descarta lo que se parece (por nombre) a algo en cola/ya elegido o que
+    // sonó hace poco; si TODO está "caliente", elige lo que hace más tiempo que sonó.
+    const listFresh = (arr) => {
+      const ok = arr.filter((u) => !titleUsed(nameOfUrl(u), u));
+      if (ok.length) return ok;
+      const ts = (u) => lastOf(nameOfUrl(u), u)?.t || 0;
+      const oldest = Math.min(...arr.map(ts));
+      return arr.filter((u) => ts(u) === oldest).slice(0, 1);
+    };
     const ARTIST_BAN_THR = Math.max(1, Number(process.env.AUTODJ_ARTIST_BAN_THRESHOLD) || 2);
     const artistBans = await PlaylistStore.getAutodjArtistBans(client, guildId).catch(() => ({}));
     const isArtistBanned = (uid, name) => !!name && (Number(artistBans?.[uid]?.[SongIdentity.artistKey(name)]) || 0) >= ARTIST_BAN_THR;
@@ -1447,6 +1469,7 @@ module.exports = async (client) => {
           taken,
           currentUrl: queue.songs[0]?.url,
         }).filter((u) => !excludedCanon.has(canonUrlKey(u)));
+        if (cand.length) cand = listFresh(cand);
         // Lista agotada: se vuelve a empezar por lo que MÁS tiempo hace que sonó
         // (infinito, pero siempre de la lista cargada).
         if (!cand.length) {
@@ -1457,9 +1480,10 @@ module.exports = async (client) => {
             inQueue,
           }).filter((u) => !excludedCanon.has(canonUrlKey(u)));
           if (old.length) {
-            cand = [old[0]];
-            AutoDjSource.unuse(client, guildId, old[0]);
-            dbgLine(`🎲 random: lista agotada -> se recicla la más antigua ${old[0]}`);
+            const pick = listFresh(old)[0];
+            cand = [pick];
+            AutoDjSource.unuse(client, guildId, pick);
+            dbgLine(`🎲 random: lista agotada -> se recicla ${pick}`);
           }
         }
         if (cand.length) {
@@ -1910,13 +1934,17 @@ module.exports = async (client) => {
     const taken = new Set();
     // El ciclo SIGUE desde el último paso intentado (aunque esa canción ya haya
     // sonado o el oyente haya cambiado): nunca se reinicia ni se desfasa.
-    const si = AutoDjOrder.nextStepIndex(pattern, queue._autoDjLast, listeners);
+    const si = customPat
+      ? (Number.isInteger(queue._autoDjIdx) ? queue._autoDjIdx + 1 : 0) % pattern.length
+      : AutoDjOrder.nextStepIndex(pattern, queue._autoDjLast, listeners);
     const block = [];
     for (let i = 0; i < toAdd; i++) {
       const step = pattern[(si + i) % pattern.length];
       queue._autoDjLast = { type: step.type, userId: step.userId || null };
+      queue._autoDjIdx = (si + i) % pattern.length;
       const pick = await pickForStep(step, taken, inQueue);
       if (!pick) continue;
+      pick.autoDjStepIdx = queue._autoDjIdx;
       // Secuencia de ELECCIÓN: define el orden visual del bloque del bot (no el
       // orden en que terminen de resolverse las canciones).
       queue._autoDjSeqCounter = Math.max(
@@ -2007,6 +2035,7 @@ module.exports = async (client) => {
         seq: item.track.autoDjSeq,
         fallback: item.track.autoDjFallback || null,
         artist: item.track.autoDjArtist || null,
+        stepIdx: item.track.autoDjStepIdx,
       };
       let member = fallbackMember;
       if (effectiveUser) {

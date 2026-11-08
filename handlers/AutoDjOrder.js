@@ -31,10 +31,29 @@ const MANUAL = { icon: "🎵", tag: "Manual" };      // la pidió alguien (coman
 const LISTED = { icon: "📋", tag: "Lista" };       // vino de la lista que alguien cargó
 
 const LEGEND =
-  "🛸 recomendada · 📝 pedidas · 🎲 aleat. lista · 🎤 novedosa · 🎵 manual · 📋 de la lista cargada";
+  "🛸 recomendación · 🎲 aleatoria de pedidas · 🎤 novedad · 🎲 aleatoria de la lista · 🎵 manual · 📋 de la lista cargada";
 
 // Cuando un paso no encontró lo suyo y cayó a otra fuente, se dice en el rótulo.
-const FALLBACK_TAG = { sala: "↩ sala", reciclada: "↩ reciclada", rescate: "↩ rescate", lista: "↩ lista" };
+const FALLBACK_TAG = { "sin-novedad": "↩ sin novedad", sala: "↩ sala", reciclada: "↩ reciclada", rescate: "↩ rescate", lista: "↩ lista" };
+
+// Nombres ÚNICOS (embed fijo, logs y dashboard usan estos mismos).
+//   rec/liked → 🛸 Recomendación · pedidas/aleatorias → 🎲 Aleatoria de pedidas
+//   artistas → 🎤 Novedad · random → 🎲 Aleatoria de la lista
+const CANON = { rec: "liked", liked: "liked", pedidas: "aleatorias", aleatorias: "aleatorias", artistas: "artistas", random: "random" };
+const NAMES = {
+  liked: "🛸 Recomendación",
+  aleatorias: "🎲 Aleatoria de pedidas",
+  artistas: "🎤 Novedad",
+  random: "🎲 Aleatoria de la lista",
+};
+const canonType = (t) => CANON[t] || "liked";
+/** Patrón guardado (dashboard) → tipos canónicos. */
+function canonPattern(pattern) {
+  return (pattern || []).map((p) => {
+    const type = canonType(p?.type);
+    return type === "random" ? { type } : { type, userId: String(p?.userId || "*") };
+  });
+}
 
 /** Ciclo completo para estos oyentes (en el orden pedido). */
 function buildCycle(listeners) {
@@ -105,6 +124,7 @@ function originLabel(track, nameOf) {
     }
     if (track.autoDjType === "artistas") {
       const who = nm(track.autoDjUserId);
+      if (track.autoDjFallback === "sin-novedad") return who ? `🛸 Gusto · ${who} ↩ sin novedad` : `🛸 Gusto ↩ sin novedad`;
       return who ? `🎤 Novedad · ${who}` : `🎤 Novedad`;
     }
     const who = nm(track.autoDjUserId);
@@ -129,7 +149,7 @@ function cycleLine(pattern, nextIdx, nameOf) {
   return (pattern || [])
     .map((p, i) => {
       const info = infoOf(p.type);
-      const label = p.type === "random" ? `${info.icon}lista` : `${info.icon}${short(p.userId)}`;
+      const label = p.type === "random" ? `${info.icon}lista` : `${info.icon}${p.userId && p.userId !== "*" ? short(p.userId) : "todos"}`;
       return `${i === nextIdx ? "▶" : ""}${label}`;
     })
     .join(" › ");
@@ -137,6 +157,9 @@ function cycleLine(pattern, nextIdx, nameOf) {
 
 module.exports = {
   buildCycle,
+  canonType,
+  canonPattern,
+  NAMES,
   nextStepIndex,
   stepKey,
   infoOf,

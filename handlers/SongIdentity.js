@@ -13,7 +13,7 @@
 
 const SIM_THRESHOLD = Math.min(0.99, Math.max(0.6, Number(process.env.AUTODJ_TITLE_SIM) || 0.85));
 const HISTORY_MAX = Math.max(500, Number(process.env.AUTODJ_HISTORY_MAX) || 4000);
-const FLUSH_MS = 15000;
+const FLUSH_MS = 5000;
 
 // Ruido que NO distingue una canción de otra. "live", "remix", "slowed", "sped up",
 // "cover", "acoustic"... NO están aquí a propósito: son versiones distintas.
@@ -196,7 +196,7 @@ async function load(client, guildId) {
   let st = _state.get(guildId);
   if (st?.ready) return st;
   if (st?.loading) return st.loading;
-  st = st || { map: new Map(), index: createIndex(), dirty: false, timer: null, ready: false };
+  st = st || { map: new Map(), index: createIndex(), dirty: false, timer: null, ready: false, client };
   _state.set(guildId, st);
   st.loading = (async () => {
     try {
@@ -289,6 +289,14 @@ function lastFor(guildId, { url, name }) {
 /** Índice de TODO lo que el bot ha reproducido (para rechazar "novedades" ya conocidas). */
 function playedIndex(guildId) {
   return _state.get(guildId)?.index || createIndex();
+}
+
+// Guarda lo pendiente al apagar el bot (si no, se perdían hasta FLUSH_MS de historial).
+if (!global.__songHistoryExit) {
+  global.__songHistoryExit = true;
+  const flushAll = () => { for (const [gid, st] of _state) { if (st.dirty && st.client) flush(st.client, gid).catch(() => {}); } };
+  process.on("beforeExit", flushAll);
+  for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => { flushAll(); setTimeout(() => process.exit(0), 800); });
 }
 
 module.exports = {

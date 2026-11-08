@@ -71,7 +71,9 @@ function normalizeAutoDjPattern(pattern) {
   const out = [];
   for (const step of pattern.slice(0, MAX_PATTERN_STEPS)) {
     if (!step || typeof step !== "object") continue;
-    const type = AUTODJ_STEP_TYPES.includes(step.type) ? step.type : "rec";
+    // Nombres únicos: rec→liked (🛸 Recomendación), pedidas→aleatorias (🎲 pedidas).
+    const t0 = AUTODJ_STEP_TYPES.includes(step.type) ? step.type : "rec";
+    const type = t0 === "rec" ? "liked" : t0 === "pedidas" ? "aleatorias" : t0;
     if (type === "random") out.push({ type: "random" });
     else out.push({ type, userId: String(step.userId || "*") });
   }

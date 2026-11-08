@@ -40,7 +40,7 @@ module.exports = async (client) => {
           if (!channel || !channel.isTextBased() || !channel.viewable) continue;
 
           const protectedIds = new Set(
-            [data?.pmsg, data?.qmsg].filter(Boolean)
+            [data?.pmsg, data?.qmsg, data?.publicPanel?.pmsg, data?.publicPanel?.qmsg].filter(Boolean)
           );
 
           const messages = await channel.messages
@@ -48,9 +48,15 @@ module.exports = async (client) => {
             .catch(() => null);
           if (!messages) continue;
 
+          // Panel público "congelado" (el bot está en un voice privado): en ese canal
+          // NO se borra ningún mensaje del propio bot, aunque no tengamos sus ids.
+          const frozenPublic = [data?.publicChannel, data?.publicPanel?.channel]
+            .filter(Boolean).map(String).includes(String(channelId));
+
           const now = Date.now();
           for (const msg of messages.values()) {
             if (protectedIds.has(msg.id)) continue;
+            if (frozenPublic && msg.author?.id === client.user?.id) continue;
             if (msg.pinned) continue;
             if (client.previewMessages?.has(msg.id)) continue;
             if (now - msg.createdTimestamp <= MESSAGE_TTL) continue;
