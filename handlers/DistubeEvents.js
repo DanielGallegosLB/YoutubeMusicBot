@@ -21,7 +21,12 @@ const MAX_SESSION_SONGS = 150;
 // Cuando el server no tiene canciones guardadas de los artistas TOP del perfil
 // (ej. milo j, kidd voodoo), se buscan en YouTube en el momento y se elige una
 // NUEVA (que el usuario no tenga en su historial/cola).
-const _artistSearchCache = new Map(); // query -> { at, results:[{url,name,uploader,duration}] }
+// Map con tope: al pasar `max` entradas borra la más vieja (cachés que antes crecían sin límite).
+class CappedMap extends Map {
+  constructor(max) { super(); this.max = max; }
+  set(k, v) { super.set(k, v); if (this.size > this.max) this.delete(this.keys().next().value); return this; }
+}
+const _artistSearchCache = new CappedMap(500); // query -> { at, results:[{url,name,uploader,duration}] }
 const ARTIST_SEARCH_TTL = Math.max(
   60000,
   Number(process.env.AUTODJ_ARTIST_SEARCH_TTL) || 10 * 60 * 1000
@@ -358,7 +363,7 @@ module.exports = async (client) => {
   const noteStreamFailure = (url) => {
     if (!url) return false;
     if (!client._streamFails) client._streamFails = new Map();
-    if (!client._streamDead) client._streamDead = new Map();
+    if (!client._streamDead) client._streamDead = new CappedMap(1000);
     const k = deadKey(url);
     const prev = client._streamFails.get(k)?.ts || 0;
     const n = (Date.now() - prev < 60 * 60 * 1000 ? (client._streamFails.get(k)?.n || 0) : 0) + 1;
@@ -594,7 +599,7 @@ module.exports = async (client) => {
   // songs[1] con yt-dlp (con tope, matando el proceso si cuelga). Si no
   // valida, se SACA de la cola y se prueba la siguiente (máx 3). Así la
   // transición natural siempre cae en una canción ya comprobada.
-  const _nextValidated = new Map(); // `${guild}|${url}` -> at
+  const _nextValidated = new CappedMap(2000); // `${guild}|${url}` -> at
   const NEXT_VALIDATE_TTL = 10 * 60 * 1000;
   const scheduleNextValidation = (client, queue) => {
     try {

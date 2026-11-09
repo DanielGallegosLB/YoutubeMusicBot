@@ -17,6 +17,7 @@ setInterval(() => {
 module.exports = client;
 
 client.start(TOKEN);
+require("./handlers/MemoryGuard")(client);
 
 process.on("unhandledRejection", (reason, p) => {
   try {
