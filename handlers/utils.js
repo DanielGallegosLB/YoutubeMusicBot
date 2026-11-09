@@ -957,7 +957,11 @@ module.exports = async (client) => {
           const vcm = guild.members?.me?.voice?.channel;
           const lis = vcm ? vcm.members.filter((m) => !m.user.bot).map((m) => m.id) : [];
           if (lis.length) {
-            const customPat = await PlaylistStore.getAutoDjPattern(client, guild.id).catch(() => null);
+            let customPat = await PlaylistStore.getAutoDjPattern(client, guild.id).catch(() => null);
+            if (customPat) {
+              const cp = AutoDjOrder.canonPattern(customPat);
+              if (cp.length === 2 && cp[0].type === "liked" && cp[0].userId === "*" && cp[1].type === "random") customPat = null;
+            }
             const cyc = customPat ? AutoDjOrder.canonPattern(customPat) : AutoDjOrder.buildCycle(lis);
             const nameOf = (uid) => guild.members.cache.get(uid)?.user?.username || null;
             const firstBot = freshQueue.songs.slice(1).find((x) => x && (x.autoDj || x._autoDj));

@@ -9,7 +9,7 @@
  *   4. 🎲 aleatoria de pedidas B
  *   5. 🎤 novedosa de perfil   A        (artistas)
  *   6. 🎤 novedosa de perfil   B
- *   7. 🎲 aleatoria de la lista         (random)
+ *   (7. 🎲 aleatoria de la lista        (random) — SOLO si AUTODJ_LIST_STEP=1)
  *
  * Este módulo NO toca la cola ni Discord: son funciones puras (se pueden
  * probar con `node`).
@@ -62,7 +62,8 @@ function buildCycle(listeners) {
   for (const uid of order) out.push({ type: "liked", userId: uid });
   for (const uid of order) out.push({ type: "aleatorias", userId: uid });
   for (const uid of order) out.push({ type: "artistas", userId: uid });
-  out.push({ type: "random" });
+  // Por defecto el ciclo termina en las novedades; la 🎲 de la lista es opcional.
+  if (/^(1|true|si|sí|on)$/i.test(String(process.env.AUTODJ_LIST_STEP || ""))) out.push({ type: "random" });
   return out;
 }
 

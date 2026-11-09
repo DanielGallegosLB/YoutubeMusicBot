@@ -954,7 +954,13 @@ module.exports = async (client) => {
     //   🛸 rec A › 🛸 rec B › 🎲 aleatoria de pedidas A › B › 🎤 novedosa de perfil A › B › 🎲 aleatoria de la lista
     // Ya no depende del patrón guardado en el dashboard: el orden es siempre este.
     // Si el admin guardó un patrón en el dashboard, MANDA ese; si no, el ciclo por defecto.
-    const customPat = await PlaylistStore.getAutoDjPattern(client, guildId).catch(() => null);
+    let customPat = await PlaylistStore.getAutoDjPattern(client, guildId).catch(() => null);
+    // El patrón por defecto del dashboard (↺ 1:1 = 🛸 + 🎲 lista) NO es una personalización:
+    // cuenta como "sin patrón" y rige el ciclo por oyentes.
+    if (customPat) {
+      const cp = AutoDjOrder.canonPattern(customPat);
+      if (cp.length === 2 && cp[0].type === "liked" && cp[0].userId === "*" && cp[1].type === "random") customPat = null;
+    }
     const rawPattern = customPat ? AutoDjOrder.canonPattern(customPat) : AutoDjOrder.buildCycle(listeners);
     const patSig = customPat ? JSON.stringify(rawPattern) : "";
     if (queue._autoDjPatSig !== patSig) { queue._autoDjPatSig = patSig; queue._autoDjIdx = undefined; queue._autoDjTurn = {}; }
