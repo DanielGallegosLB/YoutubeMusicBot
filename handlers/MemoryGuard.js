@@ -126,6 +126,8 @@ module.exports = function startMemoryGuard(client) {
     try {
       for (const g of client.guilds.cache.keys()) await SongIdentity.history.flush(client, g);
     } catch (_) {}
+    // Almacén en memoria: guardar lo pendiente ANTES de salir (también lo hace el hook 'exit').
+    try { await Promise.all([client.music?.flush?.(), client.autoresume?.flush?.()]); } catch (_) {}
     setTimeout(() => process.exit(75), 3000);
   };
 

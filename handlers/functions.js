@@ -361,6 +361,19 @@ function recordSkipSignal(client, guildId, userId, queue) {
   try {
     const song = queue?.songs?.[0];
     if (!song?.url || !userId || !guildId) return;
+    // Aviso PÚBLICO en el canal de texto de la cola (el panel sea público o privado):
+    // el usuario sabe que el bot ya registró el skip y está cargando la siguiente.
+    try {
+      const ch = queue?.textChannel;
+      const last = client._skipNoticeAt?.get(guildId) || 0;
+      if (ch?.send && Date.now() - last > 1500) {
+        (client._skipNoticeAt || (client._skipNoticeAt = new Map())).set(guildId, Date.now());
+        const title = String(song.name || "la canción").slice(0, 80);
+        ch.send({ content: `⏭️ <@${userId}> saltó **${title}** — procesando la siguiente canción…`, allowedMentions: { parse: [] } })
+          .then((m) => setTimeout(() => m.delete().catch(() => {}), 15000))
+          .catch(() => {});
+      }
+    } catch {}
     Store.recordTrackSkip(client, guildId, userId, song)
       .then((n) => {
         client.logger?.log(

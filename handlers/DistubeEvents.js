@@ -502,7 +502,14 @@ module.exports = async (client) => {
     const head = [];
     let k = 0;
     while (k < rest.length && !isBot(rest[k]) && isOtherRequester(rest[k]?.user, ownerId)) head.push(rest[k++]);
-    const tail = rest.slice(k);
+    // Canciones ESCRITAS en el chat (búsqueda/link): prioridad sobre el AutoDJ. Quedan
+    // justo después de la actual (y de los pedidos de otras personas), en orden de
+    // llegada, y el AutoDJ nunca las mueve ni las intercala con su tramo.
+    const isPrio = (x) => !isBot(x) && !!(x?.metadata?.chatPriority || x?._chatPriority);
+    const prioSongs = rest.slice(k).filter(isPrio)
+      .sort((a, b) => (Number(a.metadata?.chatPriority) || 0) - (Number(b.metadata?.chatPriority) || 0));
+    head.push(...prioSongs);
+    const tail = rest.slice(k).filter((x) => !isPrio(x));
     const userSongs = tail.filter((x) => !isBot(x));
     const botSongs = tail.filter(isBot).sort((a, b) => (Number(a._autoDjSeq) || 0) - (Number(b._autoDjSeq) || 0));
     const rebuilt = cur ? [cur, ...head] : [...head];
@@ -1666,6 +1673,7 @@ module.exports = async (client) => {
             return { url: chosen.url, name: chosen.name || null, existing: inQueue.has(chosen.url), fromList: false, autoDjType: "artistas", autoDjUserId: effUser || null };
           }
         }
+        const why = { total: 0, seen: 0, taken: 0, inQueue: 0, own: 0, known: 0, banned: 0, unsafe: 0, dur: 0 };
         // Fallback: no hay canciones guardadas de los artistas TOP en el server
         // (ej. milo j/kidd voodoo). Se BUSCAN en YouTube al vuelo y se elige una
         // NUEVA (no vista, no en cola, no ya escuchada por el usuario).
@@ -1675,16 +1683,40 @@ module.exports = async (client) => {
               const ownPool = new Set((poolsByUser[effUser] || []).map((t) => t.url));
               const ownHist = new Set((historyByUser.get(effUser) || []).map((t) => t?.url).filter(Boolean));
               // titleSeen already defined globally for this refill
+              const dryCache = client._artistDry || (client._artistDry = new Map()); // artista -> ts sin novedades
+              const DRY_MS = Math.max(60000, Number(process.env.AUTODJ_ARTIST_DRY_MS) || 20 * 60 * 1000);
+              const SEARCH_BUDGET_MS = Math.max(10000, Number(process.env.AUTODJ_ARTIST_SEARCH_BUDGET_MS) || 40000);
+              const t0 = Date.now();
               for (const top of tops) {
-                const results = await searchArtistSongs(client, top.name + " audio");
-                const fresh = results.filter((r) => r?.url
-                  && !seen.has(r.url) && !taken.has(r.url) && !inQueue.has(r.url)
-                  && !ownPool.has(r.url) && !ownHist.has(r.url)
-                  && !noveltyKnown(r.name || r.title, r.url, effUser, true)
-                  && !isArtistBanned(effUser, r.uploader?.name)
-                  && isSafeCand(r)
-                  && (Number(r.duration) || 0) > 0 && (Number(r.duration) || 0) <= 600);
-                if (!fresh.length) continue;
+                if (Date.now() - t0 > SEARCH_BUDGET_MS) break;
+                const dk = `${guildId}|${effUser}|${SongIdentity.artistKey(top.name)}`;
+                if (Date.now() - (dryCache.get(dk) || 0) < DRY_MS) continue;
+                // Varias consultas por artista: la búsqueda "X audio" devuelve casi siempre
+                // sus mayores éxitos (que el bot ya conoce) y todo se descartaba como "ya conocido".
+                const variants = [top.name + " audio", top.name + " official audio", top.name + " new song", top.name + " - Topic"];
+                let fresh = [];
+                for (const qv of variants) {
+                  if (Date.now() - t0 > SEARCH_BUDGET_MS) break;
+                  const results = await searchArtistSongs(client, qv, Math.max(ARTIST_SEARCH_LIMIT, 15));
+                  const keep = [];
+                  for (const r of results) {
+                    why.total++;
+                    if (!r?.url) continue;
+                    if (seen.has(r.url)) { why.seen++; continue; }
+                    if (taken.has(r.url)) { why.taken++; continue; }
+                    if (inQueue.has(r.url)) { why.inQueue++; continue; }
+                    if (ownPool.has(r.url) || ownHist.has(r.url)) { why.own++; continue; }
+                    if (noveltyKnown(r.name || r.title, r.url, effUser, true)) { why.known++; continue; }
+                    if (isArtistBanned(effUser, r.uploader?.name)) { why.banned++; continue; }
+                    if (!isSafeCand(r)) { why.unsafe++; continue; }
+                    const du = Number(r.duration) || 0;
+                    if (!(du > 0 && du <= 600)) { why.dur++; continue; }
+                    if (!fresh.some((f) => f.url === r.url)) keep.push(r);
+                  }
+                  fresh = fresh.concat(keep);
+                  if (fresh.length >= 3) break;
+                }
+                if (!fresh.length) { dryCache.set(dk, Date.now()); continue; }
                 // Preferir "audio", versión corta, evitar mixes/longs
                 // Mismas canciones con distinta URL (video oficial / lyric / stone version…):
                 // se queda la de MENOR duración (sin intro ni relleno).
@@ -1735,6 +1767,7 @@ module.exports = async (client) => {
               }
           }
         }
+        dbgLine(`🎤 novedad: descartes ${JSON.stringify(why)}`);
         // Una NOVEDAD siempre es novedosa: si no hay, el paso se omite (nunca se sustituye por un gusto).
         dbgLine(`🎤 novedad: sin canciones nuevas de los artistas del perfil -> paso omitido`);
         return null;

@@ -205,6 +205,8 @@ async function playSong(client, message, query, isURL, channel) {
     textChannel: message.channel,
     message,
     position,
+    // Prioridad del chat: el AutoDJ (relayoutQueue) la deja como la SIGUIENTE.
+    metadata: { chatPriority: Date.now() },
   };
 
   let added = false;
