@@ -2,17 +2,18 @@
 title Bot de musica - JUGNU-MUSIC
 cd /d "%~dp0"
 
-REM ===================================================================
-REM  Cierra cualquier instancia anterior de ESTE bot antes de arrancar.
-REM  Solo mata procesos cuya linea de comandos apunte a esta carpeta
-REM  (JUGNU-MUSIC\index.js), para no tocar otros bots del equipo.
-REM ===================================================================
+REM  Desactiva "QuickEdit" de la consola (Windows). Con QuickEdit activo, un clic
+REM  en esta ventana CONGELA el proceso hasta apretar una tecla: el bot dejaba de
+REM  responder minutos enteros, la voz de Discord moria y el panel quedaba muerto.
+REM  Aplica a las consolas que se abran DESPUES de este cambio (cierra esta ventana
+REM  y vuelve a abrir start.bat una vez).
+reg add "HKCU\Console" /v QuickEdit /t REG_DWORD /d 0 /f >nul 2>&1
 
-node index.js
-REM  Se arranca con la RUTA COMPLETA a proposito: asi la linea de comandos
-REM  contiene "JUGNU-MUSIC\index.js" y el filtro de arriba puede identificar
-REM  a este bot (con "npm start" seria solo "node index.js", indistinguible).
+:inicio
 echo [start.bat] Iniciando bot...
-echo.
-:fin
-
+REM  Ruta completa a proposito: la linea de comandos contiene "JUGNU-MUSIC\index.js".
+REM  --max-old-space-size=6144: margen de memoria (6 GB en vez de 4 GB).
+node --max-old-space-size=6144 "%~dp0index.js"
+echo [start.bat] El bot termino (codigo %errorlevel%). Reiniciando en 5 s...
+timeout /t 5 /nobreak >nul
+goto inicio

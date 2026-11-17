@@ -67,6 +67,57 @@ function buildCycle(listeners) {
   return out;
 }
 
+/**
+ * Expande un patrón PERSONALIZADO (dashboard) a pasos por persona.
+ *
+ * Un paso "para todos" (`userId: "*"`) se convierte en UNA RONDA COMPLETA, un
+ * paso por oyente en orden de conexión, de forma consecutiva:
+ *
+ *   [🛸 todos, 🎤 todos, 🎲 lista]  con A, B   →   🛸A › 🛸B › 🎤A › 🎤B › 🎲 lista
+ *
+ * Antes cada "*" rotaba entre oyentes con un contador por tipo y SALTANDO a
+ * quien no tenía contenido, así que el orden real quedaba mezclado (rec A,
+ * novedad A, rec B…) y no el de "primero las recs de todos, luego las novedades
+ * de todos". Cada paso expandido lleva `base` (índice del paso original).
+ * Los pasos con usuario fijo y la 🎲 de la lista no se expanden.
+ */
+function expandPattern(pattern, listeners) {
+  const order = (listeners || []).filter(Boolean);
+  const out = [];
+  (pattern || []).forEach((p, base) => {
+    if (!p || p.type === "random") { out.push({ type: "random", base }); return; }
+    const uid = p.userId && p.userId !== "*" ? p.userId : null;
+    if (uid) { out.push({ type: p.type, userId: uid, base }); return; }
+    if (!order.length) { out.push({ type: p.type, userId: "*", base }); return; }
+    for (const u of order) out.push({ type: p.type, userId: u, base });
+  });
+  return out;
+}
+
+/**
+ * Índice del PRÓXIMO paso de un patrón expandido, a partir del último que se
+ * intentó (`{ base, userId }`). Si entra o sale alguien sigue por (paso, orden
+ * del oyente) sin reiniciar la ronda ni repetir a quien ya tuvo su turno.
+ */
+function nextExpandedIndex(expanded, last, listeners) {
+  if (!expanded?.length) return 0;
+  if (!last || !Number.isInteger(last.base)) return 0;
+  const ord = (u) => (u ? (listeners || []).indexOf(u) : -1);
+  let lo = ord(last.userId);
+  if (lo < 0 && last.userId && Array.isArray(last.order)) {
+    // El último oyente atendido ya se fue: se continúa tras la posición que
+    // tenía, sin repetir a los que ya tuvieron su turno en esta ronda.
+    const p = last.order.indexOf(last.userId);
+    if (p >= 0) lo = (listeners || []).filter((u) => { const k = last.order.indexOf(u); return k >= 0 && k <= p; }).length - 1;
+  }
+  for (let i = 0; i < expanded.length; i++) {
+    const e = expanded[i];
+    if (e.base > last.base) return i;
+    if (e.base === last.base && ord(e.userId) > lo) return i;
+  }
+  return 0; // terminó el ciclo → empieza otro
+}
+
 /** Posición (ronda, orden del oyente) de un paso dentro del ciclo. */
 function stepKey(step, listeners) {
   const round = ROUND_OF[step?.type] ?? 0;
@@ -158,6 +209,8 @@ function cycleLine(pattern, nextIdx, nameOf) {
 
 module.exports = {
   buildCycle,
+  expandPattern,
+  nextExpandedIndex,
   canonType,
   canonPattern,
   NAMES,

@@ -1,5 +1,7 @@
 const { loadEnvFile } = require("process");
 loadEnvFile()
+// Primero que todo: garantiza que yt-dlp nunca descargue audio a disco.
+const DownloadGuard = require("./handlers/DownloadGuard");
 const MusicBot = require("./handlers/Client");
 const { TOKEN } = require("./settings/config");
 
@@ -18,6 +20,8 @@ module.exports = client;
 
 client.start(TOKEN);
 require("./handlers/MemoryGuard")(client);
+DownloadGuard.startSweeper();
+require("./handlers/PanelGuard")(client);
 
 process.on("unhandledRejection", (reason, p) => {
   try {

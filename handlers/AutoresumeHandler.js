@@ -112,5 +112,9 @@ module.exports = async (client) => {
 
     // Delete autoresume data for the guild
     await client.autoresume.delete(newQueue.textChannel.guildId);
+
+    // El panel quedó pintado como "terminó" al caerse la conexión: repintarlo ya,
+    // con los botones habilitados.
+    try { client.forcePanelRefresh?.(guild.id, "autoresume"); } catch (e) {}
   }
 };

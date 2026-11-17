@@ -753,6 +753,7 @@ module.exports = async (client) => {
       client.logger.log(
         `[QueueWatchdog ${guildId}] reconectado automáticamente: reproduciendo "${pick.name || pick.url}".`
       );
+      client.forcePanelRefresh?.(guildId, "reconexión tras watchdog");
     } catch (e) {
       client.logger.error(`[QueueWatchdog ${guildId}] error al reconectar: ${e.message}`);
     }
@@ -835,6 +836,7 @@ module.exports = async (client) => {
 
       if (await waitVoiceReady(conn, 15000)) {
         client.logger.log(`[VoiceWatchdog ${guildId}] la conexión de voz se recuperó sola; el audio sigue con "${cur?.name || "?"}".`);
+        client.forcePanelRefresh?.(guildId, "voz recuperada sola");
         return;
       }
       client.logger.warn(`[VoiceWatchdog ${guildId}] sigue en "${st()}": forzando rejoin de la conexión de voz.`);
@@ -845,6 +847,7 @@ module.exports = async (client) => {
       }
       if (await waitVoiceReady(conn, 20000)) {
         client.logger.log(`[VoiceWatchdog ${guildId}] reconectado con rejoin; retomando "${cur?.name || "?"}".`);
+        client.forcePanelRefresh?.(guildId, "rejoin de voz");
         return;
       }
       client.logger.error(
@@ -967,8 +970,10 @@ module.exports = async (client) => {
     }
     const rawPattern = customPat ? AutoDjOrder.canonPattern(customPat) : AutoDjOrder.buildCycle(listeners);
     const patSig = customPat ? JSON.stringify(rawPattern) : "";
-    if (queue._autoDjPatSig !== patSig) { queue._autoDjPatSig = patSig; queue._autoDjIdx = undefined; queue._autoDjTurn = {}; }
-    const pattern = rawPattern.slice();
+    if (queue._autoDjPatSig !== patSig) { queue._autoDjPatSig = patSig; queue._autoDjIdx = undefined; queue._autoDjTurn = {}; queue._autoDjLast = undefined; }
+    // Patrón personalizado: cada paso "para todos" ("*") se expande a UNA RONDA
+    // por persona, en orden de conexión (rec A › rec B › novedad A › novedad B).
+    const pattern = customPat ? AutoDjOrder.expandPattern(rawPattern, listeners) : rawPattern.slice();
     if (!pattern.length) pattern.push({ type: "random" });
 
     // Exclusiones: lo que cada oyente pidió NO volver a escuchar con AutoDJ
@@ -1973,12 +1978,12 @@ module.exports = async (client) => {
     // El ciclo SIGUE desde el último paso intentado (aunque esa canción ya haya
     // sonado o el oyente haya cambiado): nunca se reinicia ni se desfasa.
     const si = customPat
-      ? (Number.isInteger(queue._autoDjIdx) ? queue._autoDjIdx + 1 : 0) % pattern.length
+      ? AutoDjOrder.nextExpandedIndex(pattern, queue._autoDjLast, listeners)
       : AutoDjOrder.nextStepIndex(pattern, queue._autoDjLast, listeners);
     const block = [];
     for (let i = 0; i < toAdd; i++) {
       const step = pattern[(si + i) % pattern.length];
-      queue._autoDjLast = { type: step.type, userId: step.userId || null };
+      queue._autoDjLast = { type: step.type, userId: step.userId || null, base: step.base, order: listeners.slice() };
       queue._autoDjIdx = (si + i) % pattern.length;
       const pick = await pickForStep(step, taken, inQueue);
       if (!pick) continue;
@@ -2715,11 +2720,17 @@ module.exports = async (client) => {
       const guildId = queue.textChannel.guildId;
       stopMarqueeActivity(client, queue.textChannel.guild);
 
-      // Edit player message
-      client.editPlayerMessage(queue.textChannel).catch(() => {});
+      // Desconexión PROGRAMADA del watchdog de voz: el rescate va a volver a
+      // unir al bot y a restaurar la cola en segundos. NO se pinta el panel como
+      // "terminó" (antes se quedaba con los botones muertos tras reconectar).
+      const recovering = !!client._voiceRecovering?.get(guildId);
+      if (!recovering) {
+        // Edit player message
+        client.editPlayerMessage(queue.textChannel).catch(() => {});
 
-      // Update embed
-      client.updateembed(client, queue.textChannel.guild).catch(() => {});
+        // Update embed
+        client.updateembed(client, queue.textChannel.guild).catch(() => {});
+      }
 
       // Check if this disconnect was caused by an explicit stop command
       const stoppedAt = client.playlistStopped.get(guildId);
@@ -2821,7 +2832,7 @@ module.exports = async (client) => {
 
       client.logger.error(
         `[FFMPEG_EXITED] La reproducción de la canción ${trackName} se interrumpió tras varios intentos. ` +
-        (morio
+        (murio
           ? `El stream de esta canción está muerto repetidamente: se aparta del AutoDJ por 12h. `
           : `Causa probable: el stream fue throttled/cortado o el proceso de ffmpeg falló. `) +
         `Saltando a la siguiente canción si existe para continuar la reproducción.`
@@ -2878,7 +2889,15 @@ module.exports = async (client) => {
 
   client.distube.on("finishSong", async (queue, song) => {
     // Fire-and-forget so the next song starts immediately (these do heavy DB/network work)
-    client.editPlayerMessage(queue.textChannel).catch(() => {});
+    // El panel solo se marca como "terminó" (botones deshabilitados) si NO hay una
+    // siguiente canción: entre temas debe seguir usable (pausa / skip) durante los
+    // 10-20 s que tarda en resolverse el stream, y este edit podía llegar a
+    // Discord DESPUÉS del repintado del tema nuevo, dejándolo deshabilitado.
+    // Cuando de verdad termina la cola, el evento "finish" ya lo hace.
+    try {
+      const hasNext = (queue.songs?.length || 0) > 1 || queue.autoplay || Number(queue.repeatMode) > 0;
+      if (!hasNext) client.editPlayerMessage(queue.textChannel).catch(() => {});
+    } catch (e) {}
     // La canción que terminó: el panel la usa para saber que lo que suena
     // AHORA es la siguiente (songs[0]) y no esperar a que DisTube termine de
     // resolver el stream (10-20 s) para actualizar el CURRENT TRACK.
@@ -3139,7 +3158,15 @@ module.exports = async (client) => {
             // ready = todo bien (se limpia el backoff); destroyed = la cola se
             // está cerrando y no hay nada que vigilar.
             clearConnWatchdog(guildId);
-            if (st === "ready") client._voiceRecoverFails?.delete(guildId);
+            if (st === "ready") {
+              client._voiceRecoverFails?.delete(guildId);
+              // Conexión de voz (re)establecida: el panel tiene que quedar con la
+              // canción actual y los botones HABILITADOS (pausa / skip), sin
+              // esperar al siguiente tema.
+              if (oldState?.status && oldState.status !== "ready") {
+                setTimeout(() => client.forcePanelRefresh?.(guildId, "voz reconectada"), 1500);
+              }
+            }
           }
         });
         conn.on("debug", (msg) => client.logger.log(`[VoiceDiag ${guildId}] DBG ${String(msg).slice(0, 400)}`));

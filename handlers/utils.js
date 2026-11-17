@@ -366,10 +366,21 @@ module.exports = async (client) => {
     // Copia corta de `${guildId}.music` para saber qué mensajes NO se deben
     // borrar (pmsg, qmsg). Leerlo por cada mensaje costaba ~80ms cada vez.
     if (!client._musicMetaCache) client._musicMetaCache = new Map();
+    // Si la lectura FALLA (timeout / store ocupado tras un lag del proceso) NO se
+    // cachea un `{}`: antes eso dejaba pmsg/qmsg "sin proteger" 10 s y el borrado
+    // automático se llevaba los paneles. Se devuelve el último dato bueno, o null
+    // (= desconocido → se trata como protegido).
     const musicMeta = async (guildId) => {
       const c = client._musicMetaCache.get(guildId);
       if (c && Date.now() - c.at < 10000) return c.data;
-      const data = await client.music?.get(`${guildId}.music`).catch(() => null);
+      let data, failed = false;
+      try {
+        data = await Promise.race([
+          Promise.resolve(client.music?.get(`${guildId}.music`)),
+          new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), 3000)),
+        ]);
+      } catch (_) { failed = true; }
+      if (failed) return c?.data ?? null;
       const val = data || {};
       client._musicMetaCache.set(guildId, { at: Date.now(), data: val });
       return val;
@@ -384,6 +395,7 @@ module.exports = async (client) => {
       if (client.temp?.get(message.guildId) === message.id) return true;
       if (client.previewMessages?.has?.(message.id)) return true;
       const meta = await musicMeta(message.guildId);
+      if (!meta) return true; // no se pudo leer la config: ante la duda, NO borrar
       if (meta.publicPanel && (meta.publicPanel.pmsg === message.id || meta.publicPanel.qmsg === message.id)) return true;
       return meta.pmsg === message.id || meta.qmsg === message.id;
     };
@@ -438,6 +450,10 @@ module.exports = async (client) => {
 
   client.editPlayerMessage = async (channel) => {
     try {
+      // El panel va a quedar en "terminó": el próximo updateplayer DEBE repintarlo
+      // aunque la canción/stats sean los mismos (si no, el dedup lo dejaba
+      // deshabilitado para siempre).
+      client._playerPanel?.delete(channel?.guild?.id);
       const ID = client.temp.get(channel.guild.id);
       if (!ID) return;
 
@@ -690,6 +706,14 @@ module.exports = async (client) => {
         || await guild.channels.fetch(data.channel).catch(() => null);
         if (!musicchannel) return;
 
+        // ¿Hay una cola VIVA? Entonces este "reset a vacío" NO debe pisar el panel
+        // (dejaba los botones deshabilitados con el bot sonando): se asegura que
+        // los mensajes existan y se repinta con la canción actual.
+        const liveQ = client.distube?.getQueue?.(guild.id);
+        const live = !!liveQ?.songs?.length;
+        if (!live) client._playerPanel?.delete(guild.id);
+        client._panelRef?.set(guild.id, { channelId: musicchannel.id, pmsg: data.pmsg, qmsg: data.qmsg });
+
         const [playmsg, queuemsg] = await Promise.all([
           client.fetchPanelMessage(musicchannel, data.pmsg),
           client.fetchPanelMessage(musicchannel, data.qmsg),
@@ -740,6 +764,15 @@ module.exports = async (client) => {
             qmsg: keep.queuemsg?.id,
           });
           client._musicMetaCache?.delete(guild.id);
+          client._panelRef?.set(guild.id, { channelId: musicchannel.id, pmsg: keep.playmsg?.id, qmsg: keep.queuemsg?.id });
+          // Los mensajes recién creados salen "vacíos": si el bot está sonando hay
+          // que pintarlos YA con la canción actual y los botones habilitados.
+          if (live) client.forcePanelRefresh(guild.id, "self-repair");
+          return;
+        }
+
+        if (live) {
+          client.forcePanelRefresh(guild.id, "updateembed con cola viva");
           return;
         }
 
@@ -965,7 +998,7 @@ module.exports = async (client) => {
               const cp = AutoDjOrder.canonPattern(customPat);
               if (cp.length === 2 && cp[0].type === "liked" && cp[0].userId === "*" && cp[1].type === "random") customPat = null;
             }
-            const cyc = customPat ? AutoDjOrder.canonPattern(customPat) : AutoDjOrder.buildCycle(lis);
+            const cyc = customPat ? AutoDjOrder.expandPattern(AutoDjOrder.canonPattern(customPat), lis) : AutoDjOrder.buildCycle(lis);
             const nameOf = (uid) => guild.members.cache.get(uid)?.user?.username || null;
             const firstBot = freshQueue.songs.slice(1).find((x) => x && (x.autoDj || x._autoDj));
             let nextIdx = -1;
@@ -1036,6 +1069,7 @@ module.exports = async (client) => {
       || await guild.channels.fetch(data.channel).catch(() => null);
       if (!musicchannel) return;
 
+      client._panelRef?.set(guild.id, { channelId: musicchannel.id, pmsg: data.pmsg, qmsg: data.qmsg });
       let playembed = await client.fetchPanelMessage(musicchannel, data.pmsg);
       if (playembed === undefined) return; // fallo transitorio: no recrear
 
@@ -1047,6 +1081,7 @@ module.exports = async (client) => {
       // Always get the freshest state from distube
       const freshQueue = client.distube.getQueue(guild.id);
       if (!freshQueue || !freshQueue.songs.length) {
+        client._playerPanel?.delete(guildId);
         return await playembed.edit({
           embeds: [client.playembed(guild)],
           components: client.buttons(true),
@@ -1182,11 +1217,14 @@ module.exports = async (client) => {
         // aún", aunque cambie el estado de los botones (btnKey): el btn solo
         // decide si re-pintar con el MISMO texto, no si borrar stats.
         if (candidateText === rawStats && cur && cur.url === track.url && cur.text !== rawStats) return;
-        await playembed.edit({
+        // Solo se memoriza como "ya pintado" si el edit llegó a Discord. Antes se
+        // guardaba aunque fallara (rate limit / timeout) y el dedup impedía el
+        // reintento: el panel se quedaba como estaba hasta la siguiente canción.
+        const painted = await playembed.edit({
           embeds: [buildEmbed(candidateText)],
           components: client.buttons(useButtons, freshQueue),
-        }).catch(() => {});
-        client._playerPanel.set(guildId, { url: track.url, text: candidateText, btn: btnKey });
+        }).then(() => true, () => false);
+        if (painted) client._playerPanel.set(guildId, { url: track.url, text: candidateText, btn: btnKey });
       };
 
 // Stats ANTES de pintar, en una SOLA pasada.
@@ -1267,6 +1305,26 @@ module.exports = async (client) => {
   };
   client.updatequeue = panelCoalesce(client.updatequeueRaw);
   client.updateplayer = panelCoalesce(client.updateplayerRaw);
+
+  // Dónde está el panel de cada guild (se llena en updateplayer/updateembed): el
+  // PanelGuard lo consulta SIN tocar la base de datos.
+  if (!client._panelRef) client._panelRef = new Map();
+
+  // Repinta el panel (reproductor + cola) ignorando el dedup. Es lo que se llama
+  // cuando algo externo pudo dejarlo deshabilitado/viejo: reconexión de voz,
+  // autoresume, self-repair, panel recreado, etc. No hace nada sin cola viva.
+  client.forcePanelRefresh = (guildId, why = "") => {
+    try {
+      if (!guildId) return false;
+      client._playerPanel?.delete(guildId);
+      const q = client.distube?.getQueue?.(guildId);
+      if (!q?.songs?.length) return false;
+      client.updateplayer(q).catch(() => {});
+      client.updatequeue(q).catch(() => {});
+      if (why) client.logger?.log?.(`[Panel] repintado forzado G:${guildId} (${why}).`);
+      return true;
+    } catch (_) { return false; }
+  };
 
   /**
    *

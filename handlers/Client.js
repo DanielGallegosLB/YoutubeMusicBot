@@ -77,6 +77,10 @@ class MusicBot extends Client {
           jsRuntimes: "node",
           noCheckCertificates: true,
           format: "bestaudio[ext=m4a]/bestaudio[ext=mp3]/bestaudio/best",
+          // SOLO consultar: el audio se lee por URL con ffmpeg y nunca se baja a
+          // disco (ver DownloadGuard.js, que además lo fuerza a nivel proceso).
+          simulate: true,
+          skipDownload: true,
           extractorArgs: "youtube:player_client=web_embedded,android",
         };
         try {
@@ -127,7 +131,15 @@ class MusicBot extends Client {
         await new Promise((resolve) => setTimeout(resolve, 500 * attempt));
       }
       try {
-        const info = await ytDlpJson(`ytsearch1:${query}`, ytDlpPlugin.ytdlpOptions, {});
+        // Búsqueda de respaldo: SOLO metadatos. `--flat-playlist` no resuelve
+        // formatos (no hay nada que descargar) y se descarta `format`, que era
+        // lo que hacía a yt-dlp bajar "Titulo [id].m4a" a la carpeta del bot.
+        const { format: _omitFormat, ...searchOpts } = ytDlpPlugin.ytdlpOptions || {};
+        const info = await ytDlpJson(
+          `ytsearch1:${query}`,
+          { ...searchOpts, flatPlaylist: true, simulate: true, skipDownload: true },
+          {}
+        );
         const entry = info && info.entries ? info.entries[0] : info;
         if (!entry || !entry.id) return null;
         return new Song(
@@ -138,7 +150,7 @@ class MusicBot extends Client {
             id: entry.id,
             name: entry.title,
             url: entry.webpage_url || `https://www.youtube.com/watch?v=${entry.id}`,
-            thumbnail: entry.thumbnail,
+            thumbnail: entry.thumbnail || `https://i.ytimg.com/vi/${entry.id}/hqdefault.jpg`,
             duration: entry.duration,
             uploader: { name: entry.channel || entry.uploader || "" },
           },

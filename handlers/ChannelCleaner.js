@@ -26,6 +26,7 @@ const withTimeout = (p, ms) =>
  * @param {MusicBot} client
  */
 module.exports = async (client) => {
+  const lastGood = new Map(); // guildId -> último `${guild}.music` leído bien
   const sweep = async () => {
     for (const guild of client.guilds.cache.values()) {
       try {
@@ -33,14 +34,29 @@ module.exports = async (client) => {
         const policy = await withTimeout(client.getChannelPolicy(guild.id), 3000);
         if (!policy?.cleanup?.length) continue;
 
+        // SIN los ids de los paneles NO se borra nada. Si la lectura a la base
+        // se coló por el timeout (típico justo después de un lag/congelamiento
+        // del proceso), `data` llegaba null, `protectedIds` quedaba VACÍO y el
+        // barrido borraba el reproductor y la cola ("Self-Repair: Missing
+        // messages play:false queue:false"). Se usa el último dato bueno, y si
+        // tampoco existe se salta este guild hasta el próximo ciclo.
+        if (data && (data.pmsg || data.qmsg)) lastGood.set(guild.id, data);
+        const meta = (data && (data.pmsg || data.qmsg)) ? data : lastGood.get(guild.id);
+        if (!meta) continue;
+
         for (const channelId of policy.cleanup) {
           if (policy.noCleanup.includes(String(channelId))) continue;
 
           const channel = guild.channels.cache.get(String(channelId));
           if (!channel || !channel.isTextBased() || !channel.viewable) continue;
 
+          const ref = client._panelRef?.get(guild.id);
           const protectedIds = new Set(
-            [data?.pmsg, data?.qmsg, data?.publicPanel?.pmsg, data?.publicPanel?.qmsg].filter(Boolean)
+            [
+              meta.pmsg, meta.qmsg, meta.publicPanel?.pmsg, meta.publicPanel?.qmsg,
+              // Otras fuentes del mismo dato: el panel flotante y la referencia en memoria.
+              client.temp?.get?.(guild.id), ref?.pmsg, ref?.qmsg,
+            ].filter(Boolean)
           );
 
           const messages = await channel.messages
@@ -50,7 +66,7 @@ module.exports = async (client) => {
 
           // Panel público "congelado" (el bot está en un voice privado): en ese canal
           // NO se borra ningún mensaje del propio bot, aunque no tengamos sus ids.
-          const frozenPublic = [data?.publicChannel, data?.publicPanel?.channel]
+          const frozenPublic = [meta.publicChannel, meta.publicPanel?.channel]
             .filter(Boolean).map(String).includes(String(channelId));
 
           const now = Date.now();
