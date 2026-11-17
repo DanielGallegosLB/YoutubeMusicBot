@@ -1,6 +1,5 @@
 const { Queue } = require("distube");
 const MusicBot = require("./Client");
-const { arraysEqual } = require("./functions");
 
 /**
  * Builds a simplified track object from the original track object.
@@ -39,30 +38,46 @@ module.exports = async (client, queue) => {
     clearInterval(client._autoresumeTimers.get(guildKey));
   }
 
+  // Estado ya guardado, en memoria, por guild. Antes cada tick (10 s) releía el JSON de
+  // `music` (~700 KB) y el de `autoresume`, y comparaba las canciones POR REFERENCIA
+  // (arraysEqual con !==: objetos del disco vs. instancias Song => siempre "distinto"),
+  // así que reescribía la lista entera de canciones en CADA tick. Eso eran decenas de
+  // lecturas/escrituras de disco por minuto (y los EPERM de Windows al renombrar).
+  if (!client._autoresumeCache) client._autoresumeCache = new Map();
+  client._autoresumeCache.delete(guildKey); // sesión nueva => se revalida contra el disco
+  const TIME_MS = Number(process.env.AUTORESUME_TIME_MS) || 30000; // cada cuánto se guarda currentTime
+  const REVALIDATE_MS = 300000; // cada 5 min se vuelve a contrastar con el disco
+  const songsKeyOf = (arr) => (Array.isArray(arr) ? arr.map((t) => t?.url || t?.id || "").join("|") : "");
+
   const timer = setInterval(async () => {
     try {
-      // Si hubo un stop reciente en este guild, no re-guardar el estado de
-      // autoresume (cerraba la carrera timer vs. stop que volvía a reproducir).
-      if (client.playlistStopped?.get?.(queue.textChannel.guildId)) {
-        await client.autoresume.delete(queue.textChannel.guildId).catch(() => {});
+      const gid = queue.textChannel.guildId;
+      if (client.playlistStopped?.get?.(gid)) {
+        client._autoresumeCache.delete(gid);
+        await client.autoresume.delete(gid).catch(() => {});
         return;
       }
-      // Get the current queue for the guild
       const newQueue = client.distube.getQueue(queue.textChannel.guild);
-      // Get autoresume data for the guild
-      const autoresume = await client.music.get(
-        `${queue.textChannel.guildId}.autoresume`
-      );
+      if (!newQueue) return;
 
-      // Check if both newQueue and autoresume exist
-      if (!newQueue || !autoresume) return;
+      // Flag "autoresume" del guild: se consulta como mucho 1 vez por minuto.
+      const now = Date.now();
+      let st = client._autoresumeCache.get(gid);
+      if (!st || now - st.flagAt > 60000) {
+        const flag = await client.music.get(`${gid}.autoresume`);
+        st = client._autoresumeCache.get(gid) || st || { at: 0, props: null, songsKey: null, timeAt: 0 };
+        st.flag = !!flag;
+        st.flagAt = now;
+        client._autoresumeCache.set(gid, st);
+      }
+      if (!st.flag) return;
 
-      // Prepare autoresume data
+      const songsArr = newQueue.songs.length > 0 ? newQueue.songs.map(buildTrack).filter(Boolean) : [];
       const autoresumeData = {
-        guild: newQueue.textChannel.guildId || null,
+        guild: gid || null,
         voiceChannel: newQueue.voiceChannel?.id || null,
         textChannel: newQueue.textChannel?.id || null,
-        songs: newQueue.songs.length > 0 ? newQueue.songs.map(buildTrack).filter(Boolean) : [],
+        songs: songsArr,
         volume: newQueue.volume || 100,
         repeatMode: newQueue.repeatMode || 0,
         playing: newQueue.playing || false,
@@ -70,44 +85,35 @@ module.exports = async (client, queue) => {
         autoplay: newQueue.autoplay || false,
       };
 
-      // Ensure autoresume data exists
-      await client.autoresume.ensure(queue.textChannel.guildId, autoresumeData);
+      // Primera vez (o revalidación): lo guardado en disco es la referencia.
+      if (!st.props || now - st.at > REVALIDATE_MS) {
+        await client.autoresume.ensure(gid, autoresumeData);
+        const storedData = await client.autoresume.get(gid);
+        if (!storedData) { st.props = null; return; }
+        st.props = {};
+        for (const k of ["guild", "voiceChannel", "textChannel", "volume", "repeatMode", "playing", "currentTime", "autoplay"]) st.props[k] = storedData[k];
+        st.songsKey = songsKeyOf(storedData.songs);
+        st.at = now;
+      }
 
-      // Get stored autoresume data
-      const storedData = await client.autoresume.get(
-        newQueue.textChannel.guildId
-      );
+      // Propiedades simples (currentTime, como mucho cada TIME_MS). Sin await y con
+      // catch: antes un EPERM aquí salía como "Unhandled Rejection".
+      for (const property of ["guild", "voiceChannel", "textChannel", "volume", "repeatMode", "playing", "currentTime", "autoplay"]) {
+        if (st.props[property] === autoresumeData[property]) continue;
+        if (property === "currentTime" && now - st.timeAt < TIME_MS) continue;
+        const val = autoresumeData[property];
+        if (property === "currentTime") st.timeAt = now;
+        client.autoresume
+          .set(`${gid}.${property}`, val)
+          .then(() => { st.props[property] = val; })
+          .catch(() => {});
+      }
 
-      if (!storedData) return;
-
-      // Properties to update
-      const propertiesToUpdate = [
-        "guild",
-        "voiceChannel",
-        "textChannel",
-        "volume",
-        "repeatMode",
-        "playing",
-        "currentTime",
-        "autoplay",
-      ];
-
-      // Update autoresume data if there are changes
-      propertiesToUpdate.forEach((property) => {
-        if (storedData[property] !== autoresumeData[property]) {
-          client.autoresume.set(
-            `${newQueue.textChannel.guildId}.${property}`,
-            autoresumeData[property]
-          );
-        }
-      });
-
-      // Update songs if there are changes
-      if (!arraysEqual(storedData.songs, newQueue.songs)) {
-        await client.autoresume.set(
-          `${newQueue.textChannel.guildId}.songs`,
-          newQueue.songs.map(buildTrack).filter(Boolean)
-        );
+      // Canciones: solo si la lista cambió de verdad (por url), no en cada tick.
+      const key = songsKeyOf(songsArr);
+      if (key !== st.songsKey) {
+        await client.autoresume.set(`${gid}.songs`, songsArr);
+        st.songsKey = key;
       }
     } catch (error) {
       // No dejar que un fallo de autoresume tire un unhandled rejection

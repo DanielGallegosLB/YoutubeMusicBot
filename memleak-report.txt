@@ -1,0 +1,472 @@
+=== 2026-11-12T08:17:40.395Z · heap vivo 400MB · heap=400MB · muestreado vivo=347MB · uptime=4h ===
+-- Por archivo --
+   274 MB  src/files.js
+    59 MB  src/utils.js
+     2 MB  (nativo)
+     2 MB  handlers/PlaylistStore.js
+     2 MB  handlers/QueueBridge.js
+     1 MB  node:internal/timers
+     1 MB  dist/index.js
+     0 MB  cjs/loader
+     0 MB  handlers/DistubeEvents.js
+     0 MB  handlers/SongIdentity.js
+     0 MB  node:inspector
+     0 MB  node:fs
+     0 MB  lodash/lodash.js
+     0 MB  dispatcher/client-h1.js
+     0 MB  structures/Message.js
+-- Por función (archivo:línea donde se reservó) --
+   274 MB  getFile  src/files.js:47
+    59 MB  parseData  src/utils.js:5
+     2 MB  canonUrlKey  handlers/PlaylistStore.js:100
+     1 MB  writeFavoritesSnapshot  handlers/QueueBridge.js:290
+     1 MB  processTimers  node:internal/timers:526
+     1 MB  writeUserRequestsSnapshot  handlers/QueueBridge.js:372
+     1 MB  filter  (nativo):0
+     0 MB  (anónima)  (nativo):1
+     0 MB  set  (nativo):0
+     0 MB  Map  (nativo):0
+     0 MB  listGuildFavorites  handlers/PlaylistStore.js:985
+     0 MB  add  handlers/SongIdentity.js:128
+     0 MB  post  node:inspector:115
+     0 MB  unpackMessage  dist/index.js:916
+     0 MB  (anónima)  cjs/loader:1968
+     0 MB  readFileSync  node:fs:433
+     0 MB  push  (nativo):0
+     0 MB  test  (nativo):0
+     0 MB  client.autoDjRefillInner  handlers/DistubeEvents.js:531
+     0 MB  emit  node:events:455
+     0 MB  makeTrack  handlers/AutoresumeHandler.js:69
+     0 MB  (anónima)  cjs/loader:826
+     0 MB  (anónima)  (nativo):0
+     0 MB  _patch  structures/Message.js:56
+     0 MB  splice  (nativo):0
+     0 MB  BaseChannel  structures/BaseChannel.js:16
+     0 MB  connect  tls/wrap:1714
+     0 MB  lazyllhttp  dispatcher/client-h1.js:63
+     0 MB  runAutoDjRefill  handlers/DistubeEvents.js:920
+     0 MB  replace  (nativo):0
+     0 MB  getAllKeys  lodash/lodash.js:5946
+     0 MB  next  (nativo):0
+     0 MB  AggregationCursor  cursor/aggregation_cursor.js:20
+     0 MB  cursorInit  cursor/abstract_cursor.js:623
+     0 MB  then  (nativo):0
+     0 MB  _resume  dispatcher/client.js:546
+     0 MB  client.updatequeueRaw  handlers/utils.js:788
+     0 MB  wrapSafe  cjs/loader:1701
+     0 MB  _createCollection  lib/model.js:1116
+     0 MB  _patch  structures/User.js:36
+
+=== 2026-11-13T06:43:47.241Z · heap vivo 404MB · heap=404MB · muestreado vivo=354MB · uptime=6h ===
+-- Por archivo --
+   299 MB  src/files.js
+    36 MB  src/utils.js
+     4 MB  handlers/PlaylistStore.js
+     3 MB  (nativo)
+     2 MB  handlers/QueueBridge.js
+     1 MB  dist/index.js
+     1 MB  node:internal/timers
+     1 MB  handlers/SongIdentity.js
+     0 MB  cjs/loader
+     0 MB  handlers/DistubeEvents.js
+     0 MB  node:fs
+     0 MB  node:inspector
+     0 MB  node:events
+     0 MB  streams/readable
+     0 MB  node:dgram
+-- Por función (archivo:línea donde se reservó) --
+   299 MB  getFile  src/files.js:47
+    36 MB  parseData  src/utils.js:5
+     4 MB  canonUrlKey  handlers/PlaylistStore.js:100
+     1 MB  writeFavoritesSnapshot  handlers/QueueBridge.js:290
+     1 MB  processTimers  node:internal/timers:526
+     1 MB  filter  (nativo):0
+     1 MB  unpackMessage  dist/index.js:916
+     1 MB  Map  (nativo):0
+     1 MB  writeUserRequestsSnapshot  handlers/QueueBridge.js:372
+     1 MB  (anónima)  (nativo):1
+     1 MB  set  (nativo):0
+     1 MB  add  handlers/SongIdentity.js:128
+     0 MB  test  (nativo):0
+     0 MB  post  node:inspector:115
+     0 MB  listGuildFavorites  handlers/PlaylistStore.js:985
+     0 MB  wrapSafe  cjs/loader:1701
+     0 MB  readFileSync  node:fs:433
+     0 MB  split  (nativo):0
+     0 MB  emit  node:events:455
+     0 MB  onMessage  node:dgram:982
+     0 MB  readFileAfterOpen  node:fs:293
+     0 MB  addChunk  streams/readable:552
+     0 MB  (anónima)  cjs/loader:1968
+     0 MB  Promise  (nativo):0
+     0 MB  map  (nativo):0
+     0 MB  (anónima)  handlers/PlaylistFetcher.js:350
+     0 MB  client.autoDjRefillInner  handlers/DistubeEvents.js:531
+     0 MB  (anónima)  cjs/loader:1951
+     0 MB  (anónima)  handlers/QueueBridge.js:931
+     0 MB  readFileAfterClose  read/context:46
+     0 MB  (anónima)  handlers/DistubeEvents.js:411
+     0 MB  match  (nativo):0
+     0 MB  _patch  structures/Message.js:56
+     0 MB  processPromiseRejections  process/promises:439
+     0 MB  _stepDispatch  dist/index.js:600
+     0 MB  (anónima)  events/voiceStateUpdate.js:13
+     0 MB  client.updatequeueRaw  handlers/utils.js:788
+     0 MB  readMany  cmap/connection.js:424
+     0 MB  BaseChannel  structures/BaseChannel.js:16
+     0 MB  push  (nativo):0
+
+=== 2026-11-14T03:53:56.953Z · heap vivo 719MB · heap=719MB · muestreado vivo=671MB · uptime=27h ===
+-- Por archivo --
+   606 MB  src/files.js
+    36 MB  src/utils.js
+    11 MB  handlers/PlaylistStore.js
+     4 MB  (nativo)
+     2 MB  handlers/QueueBridge.js
+     2 MB  dist/index.js
+     1 MB  node:inspector
+     1 MB  node:internal/timers
+     0 MB  handlers/SongIdentity.js
+     0 MB  node:fs
+     0 MB  cjs/loader
+     0 MB  handlers/DistubeEvents.js
+     0 MB  node:dgram
+     0 MB  structures/Message.js
+     0 MB  streams/readable
+-- Por función (archivo:línea donde se reservó) --
+   606 MB  getFile  src/files.js:47
+    36 MB  parseData  src/utils.js:5
+    10 MB  canonUrlKey  handlers/PlaylistStore.js:100
+     1 MB  writeFavoritesSnapshot  handlers/QueueBridge.js:290
+     1 MB  unpackMessage  dist/index.js:916
+     1 MB  post  node:inspector:115
+     1 MB  processTimers  node:internal/timers:526
+     1 MB  Map  (nativo):0
+     1 MB  filter  (nativo):0
+     1 MB  writeUserRequestsSnapshot  handlers/QueueBridge.js:372
+     1 MB  set  (nativo):0
+     0 MB  (anónima)  (nativo):1
+     0 MB  add  handlers/SongIdentity.js:128
+     0 MB  test  (nativo):0
+     0 MB  onMessage  node:dgram:982
+     0 MB  wrapSafe  cjs/loader:1701
+     0 MB  map  (nativo):0
+     0 MB  split  (nativo):0
+     0 MB  readFileSync  node:fs:433
+     0 MB  readFileAfterOpen  node:fs:293
+     0 MB  replace  (nativo):0
+     0 MB  Message  structures/Message.js:38
+     0 MB  emit  node:events:455
+     0 MB  _patch  structures/Message.js:56
+     0 MB  (anónima)  node:internal/util:500
+     0 MB  join  (nativo):0
+     0 MB  addChunk  streams/readable:552
+     0 MB  (anónima)  cjs/loader:1968
+     0 MB  Promise  (nativo):0
+     0 MB  queueWrite  handlers/QueueBridge.js:32
+     0 MB  client.autoDjRefillInner  handlers/DistubeEvents.js:531
+     0 MB  (anónima)  cjs/loader:1951
+     0 MB  (anónima)  handlers/QueueBridge.js:931
+     0 MB  checkInt  node:internal/buffer:60
+     0 MB  Readable.push  streams/readable:389
+     0 MB  readFileAfterClose  read/context:46
+     0 MB  (anónima)  handlers/DistubeEvents.js:411
+     0 MB  match  (nativo):0
+     0 MB  ssl.onhandshakedone  tls/wrap:879
+     0 MB  processPromiseRejections  process/promises:439
+
+=== 2026-11-14T22:15:17.681Z · heap vivo 402MB · heap=402MB · muestreado vivo=364MB · uptime=18h ===
+-- Por archivo --
+   279 MB  src/files.js
+    57 MB  src/utils.js
+    14 MB  handlers/PlaylistStore.js
+     3 MB  (nativo)
+     2 MB  handlers/QueueBridge.js
+     1 MB  node:internal/timers
+     1 MB  dist/index.js
+     1 MB  handlers/SongIdentity.js
+     0 MB  cjs/loader
+     0 MB  node:inspector
+     0 MB  node:events
+     0 MB  node:fs
+     0 MB  structures/Message.js
+     0 MB  handlers/DistubeEvents.js
+     0 MB  undici/undici
+-- Por función (archivo:línea donde se reservó) --
+   279 MB  getFile  src/files.js:47
+    57 MB  parseData  src/utils.js:5
+    14 MB  canonUrlKey  handlers/PlaylistStore.js:100
+     1 MB  writeFavoritesSnapshot  handlers/QueueBridge.js:290
+     1 MB  processTimers  node:internal/timers:526
+     1 MB  writeUserRequestsSnapshot  handlers/QueueBridge.js:372
+     1 MB  filter  (nativo):0
+     0 MB  unpackMessage  dist/index.js:916
+     0 MB  Map  (nativo):0
+     0 MB  post  node:inspector:115
+     0 MB  add  handlers/SongIdentity.js:128
+     0 MB  set  (nativo):0
+     0 MB  test  (nativo):0
+     0 MB  (anónima)  (nativo):1
+     0 MB  emit  node:events:455
+     0 MB  listGuildFavorites  handlers/PlaylistStore.js:985
+     0 MB  readFileAfterOpen  node:fs:293
+     0 MB  consumeEnd  api/readable.js:339
+     0 MB  (anónima)  (nativo):0
+     0 MB  Message  structures/Message.js:38
+     0 MB  PermissionOverwrites  structures/PermissionOverwrites.js:14
+     0 MB  (anónima)  cjs/loader:1968
+     0 MB  split  (nativo):0
+     0 MB  readFileSync  node:fs:433
+     0 MB  onMessage  node:dgram:982
+     0 MB  (anónima)  cjs/loader:704
+     0 MB  _patch  structures/Message.js:56
+     0 MB  wrapSafe  cjs/loader:1701
+     0 MB  deserializeObject  lib/bson.cjs:3072
+     0 MB  formsOf  handlers/SongIdentity.js:49
+     0 MB  client.autoDjRefillInner  handlers/DistubeEvents.js:531
+     0 MB  (anónima)  cjs/loader:1951
+     0 MB  nextTick  process/task_queues:112
+     0 MB  join  (nativo):0
+     0 MB  next  (nativo):0
+     0 MB  pickForStep  handlers/DistubeEvents.js:1928
+     0 MB  replace  (nativo):0
+     0 MB  httpNetworkOrCacheFetch  undici/undici:12524
+     0 MB  _add  managers/ChannelManager.js:39
+     0 MB  Promise  (nativo):0
+
+=== 2026-11-15T21:56:47.562Z · heap vivo 705MB · heap=705MB · muestreado vivo=674MB · uptime=41h ===
+-- Por archivo --
+   576 MB  src/files.js
+    57 MB  src/utils.js
+    24 MB  handlers/PlaylistStore.js
+     4 MB  (nativo)
+     2 MB  handlers/QueueBridge.js
+     2 MB  dist/index.js
+     1 MB  node:inspector
+     1 MB  node:internal/timers
+     1 MB  structures/Message.js
+     0 MB  handlers/SongIdentity.js
+     0 MB  cjs/loader
+     0 MB  node:events
+     0 MB  node:fs
+     0 MB  undici/undici
+     0 MB  handlers/DistubeEvents.js
+-- Por función (archivo:línea donde se reservó) --
+   576 MB  getFile  src/files.js:47
+    57 MB  parseData  src/utils.js:5
+    24 MB  canonUrlKey  handlers/PlaylistStore.js:100
+     2 MB  writeFavoritesSnapshot  handlers/QueueBridge.js:290
+     1 MB  post  node:inspector:115
+     1 MB  unpackMessage  dist/index.js:916
+     1 MB  Map  (nativo):0
+     1 MB  processTimers  node:internal/timers:526
+     1 MB  writeUserRequestsSnapshot  handlers/QueueBridge.js:372
+     1 MB  filter  (nativo):0
+     0 MB  (anónima)  (nativo):1
+     0 MB  test  (nativo):0
+     0 MB  (anónima)  (nativo):0
+     0 MB  emit  node:events:455
+     0 MB  _patch  structures/Message.js:56
+     0 MB  add  handlers/SongIdentity.js:128
+     0 MB  split  (nativo):0
+     0 MB  listGuildFavorites  handlers/PlaylistStore.js:985
+     0 MB  readFileAfterOpen  node:fs:293
+     0 MB  consumeEnd  api/readable.js:339
+     0 MB  Message  structures/Message.js:38
+     0 MB  set  (nativo):0
+     0 MB  onMessage  node:dgram:982
+     0 MB  User  structures/User.js:18
+     0 MB  (anónima)  cjs/loader:1968
+     0 MB  console.<computed>  handlers/Logger.js:128
+     0 MB  readFileSync  node:fs:433
+     0 MB  onStreamRead  node:internal/stream_base_commons:166
+     0 MB  (anónima)  cjs/loader:704
+     0 MB  createOpaqueTimingInfo  undici/undici:5483
+     0 MB  Promise  (nativo):0
+     0 MB  toString  node:buffer:862
+     0 MB  wrapSafe  cjs/loader:1701
+     0 MB  DataManager  managers/DataManager.js:12
+     0 MB  deserializeObject  lib/bson.cjs:3072
+     0 MB  formsOf  handlers/SongIdentity.js:49
+     0 MB  map  (nativo):0
+     0 MB  client.autoDjRefillInner  handlers/DistubeEvents.js:531
+     0 MB  (anónima)  cjs/loader:1951
+     0 MB  nextTick  process/task_queues:112
+
+=== 2026-11-16T05:06:51.012Z · heap vivo 1011MB · heap=1011MB · muestreado vivo=980MB · uptime=49h ===
+-- Por archivo --
+   877 MB  src/files.js
+    57 MB  src/utils.js
+    26 MB  handlers/PlaylistStore.js
+     5 MB  (nativo)
+     3 MB  handlers/QueueBridge.js
+     2 MB  dist/index.js
+     1 MB  node:inspector
+     1 MB  node:internal/timers
+     1 MB  structures/Message.js
+     0 MB  handlers/SongIdentity.js
+     0 MB  cjs/loader
+     0 MB  node:events
+     0 MB  node:fs
+     0 MB  undici/undici
+     0 MB  handlers/DistubeEvents.js
+-- Por función (archivo:línea donde se reservó) --
+   877 MB  getFile  src/files.js:47
+    57 MB  parseData  src/utils.js:5
+    26 MB  canonUrlKey  handlers/PlaylistStore.js:100
+     2 MB  writeFavoritesSnapshot  handlers/QueueBridge.js:290
+     2 MB  unpackMessage  dist/index.js:916
+     2 MB  Map  (nativo):0
+     1 MB  post  node:inspector:115
+     1 MB  processTimers  node:internal/timers:526
+     1 MB  (anónima)  (nativo):1
+     1 MB  writeUserRequestsSnapshot  handlers/QueueBridge.js:372
+     1 MB  filter  (nativo):0
+     0 MB  split  (nativo):0
+     0 MB  test  (nativo):0
+     0 MB  set  (nativo):0
+     0 MB  emit  node:events:455
+     0 MB  _patch  structures/Message.js:56
+     0 MB  onMessage  node:dgram:982
+     0 MB  readFileAfterOpen  node:fs:293
+     0 MB  add  handlers/SongIdentity.js:128
+     0 MB  Message  structures/Message.js:38
+     0 MB  URL  node:internal/url:803
+     0 MB  onStreamRead  node:internal/stream_base_commons:166
+     0 MB  (anónima)  (nativo):0
+     0 MB  User  structures/User.js:18
+     0 MB  push  (nativo):0
+     0 MB  replace  (nativo):0
+     0 MB  createOpaqueTimingInfo  undici/undici:5483
+     0 MB  (anónima)  dist/index.js:84
+     0 MB  DataManager  managers/DataManager.js:12
+     0 MB  (anónima)  cjs/loader:1968
+     0 MB  consumeEnd  api/readable.js:339
+     0 MB  console.<computed>  handlers/Logger.js:128
+     0 MB  join  (nativo):0
+     0 MB  nextTick  process/task_queues:112
+     0 MB  readFileSync  node:fs:433
+     0 MB  (anónima)  cjs/loader:704
+     0 MB  _update  structures/Base.js:28
+     0 MB  Promise  (nativo):0
+     0 MB  wrapSafe  cjs/loader:1701
+     0 MB  deserializeObject  lib/bson.cjs:3072
+
+=== 2026-11-17T02:17:25.509Z · heap vivo 1316MB · heap=1316MB · muestreado vivo=1280MB · uptime=70h ===
+-- Por archivo --
+  1173 MB  src/files.js
+    57 MB  src/utils.js
+    28 MB  handlers/PlaylistStore.js
+     5 MB  (nativo)
+     3 MB  handlers/QueueBridge.js
+     2 MB  dist/index.js
+     2 MB  node:inspector
+     1 MB  node:internal/timers
+     1 MB  structures/Message.js
+     1 MB  handlers/SongIdentity.js
+     0 MB  node:fs
+     0 MB  cjs/loader
+     0 MB  node:events
+     0 MB  undici/undici
+     0 MB  handlers/DistubeEvents.js
+-- Por función (archivo:línea donde se reservó) --
+  1173 MB  getFile  src/files.js:47
+    57 MB  parseData  src/utils.js:5
+    28 MB  canonUrlKey  handlers/PlaylistStore.js:100
+     2 MB  writeFavoritesSnapshot  handlers/QueueBridge.js:290
+     2 MB  Map  (nativo):0
+     2 MB  post  node:inspector:115
+     1 MB  unpackMessage  dist/index.js:916
+     1 MB  processTimers  node:internal/timers:526
+     1 MB  _patch  structures/Message.js:56
+     1 MB  writeUserRequestsSnapshot  handlers/QueueBridge.js:372
+     1 MB  filter  (nativo):0
+     0 MB  (anónima)  (nativo):1
+     0 MB  split  (nativo):0
+     0 MB  set  (nativo):0
+     0 MB  test  (nativo):0
+     0 MB  emit  node:events:455
+     0 MB  readFileAfterOpen  node:fs:293
+     0 MB  add  handlers/SongIdentity.js:128
+     0 MB  replace  (nativo):0
+     0 MB  DataManager  managers/DataManager.js:12
+     0 MB  (anónima)  (nativo):0
+     0 MB  onMessage  node:dgram:982
+     0 MB  Message  structures/Message.js:38
+     0 MB  URL  node:internal/url:803
+     0 MB  onStreamRead  node:internal/stream_base_commons:166
+     0 MB  listGuildFavorites  handlers/PlaylistStore.js:985
+     0 MB  User  structures/User.js:18
+     0 MB  consumeEnd  api/readable.js:339
+     0 MB  nextTick  process/task_queues:112
+     0 MB  push  (nativo):0
+     0 MB  createOpaqueTimingInfo  undici/undici:5483
+     0 MB  (anónima)  cjs/loader:1968
+     0 MB  next  (nativo):0
+     0 MB  readFileSync  node:fs:433
+     0 MB  find  handlers/SongIdentity.js:138
+     0 MB  (anónima)  dist/index.js:84
+     0 MB  (anónima)  cjs/loader:704
+     0 MB  Promise  (nativo):0
+     0 MB  PermissionOverwrites  structures/PermissionOverwrites.js:14
+     0 MB  wrapSafe  cjs/loader:1701
+
+=== 2026-11-17T04:57:16.649Z · heap vivo 1616MB · heap=1616MB · muestreado vivo=1581MB · uptime=72h ===
+-- Por archivo --
+  1474 MB  src/files.js
+    57 MB  src/utils.js
+    28 MB  handlers/PlaylistStore.js
+     5 MB  (nativo)
+     3 MB  handlers/QueueBridge.js
+     3 MB  dist/index.js
+     2 MB  node:inspector
+     1 MB  node:internal/timers
+     1 MB  structures/Message.js
+     1 MB  handlers/SongIdentity.js
+     0 MB  node:fs
+     0 MB  cjs/loader
+     0 MB  node:events
+     0 MB  handlers/DistubeEvents.js
+     0 MB  undici/undici
+-- Por función (archivo:línea donde se reservó) --
+  1474 MB  getFile  src/files.js:47
+    57 MB  parseData  src/utils.js:5
+    28 MB  canonUrlKey  handlers/PlaylistStore.js:100
+     2 MB  writeFavoritesSnapshot  handlers/QueueBridge.js:290
+     2 MB  Map  (nativo):0
+     2 MB  unpackMessage  dist/index.js:916
+     2 MB  post  node:inspector:115
+     1 MB  processTimers  node:internal/timers:526
+     1 MB  writeUserRequestsSnapshot  handlers/QueueBridge.js:372
+     1 MB  filter  (nativo):0
+     1 MB  _patch  structures/Message.js:56
+     0 MB  set  (nativo):0
+     0 MB  add  handlers/SongIdentity.js:128
+     0 MB  split  (nativo):0
+     0 MB  test  (nativo):0
+     0 MB  emit  node:events:455
+     0 MB  (anónima)  (nativo):0
+     0 MB  (anónima)  (nativo):1
+     0 MB  readFileAfterOpen  node:fs:293
+     0 MB  replace  (nativo):0
+     0 MB  listGuildFavorites  handlers/PlaylistStore.js:985
+     0 MB  onMessage  node:dgram:982
+     0 MB  Message  structures/Message.js:38
+     0 MB  URL  node:internal/url:803
+     0 MB  consumeEnd  api/readable.js:339
+     0 MB  DataManager  managers/DataManager.js:12
+     0 MB  onStreamRead  node:internal/stream_base_commons:166
+     0 MB  User  structures/User.js:18
+     0 MB  nextTick  process/task_queues:112
+     0 MB  push  (nativo):0
+     0 MB  runAutoDjRefill  handlers/DistubeEvents.js:920
+     0 MB  createOpaqueTimingInfo  undici/undici:5483
+     0 MB  (anónima)  cjs/loader:1968
+     0 MB  console.<computed>  handlers/Logger.js:128
+     0 MB  next  (nativo):0
+     0 MB  serialize  serialize-javascript/index.js:58
+     0 MB  readFileSync  node:fs:433
+     0 MB  find  handlers/SongIdentity.js:138
+     0 MB  (anónima)  cjs/loader:704
+     0 MB  _update  structures/Base.js:28
+

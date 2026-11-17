@@ -955,7 +955,10 @@ module.exports = async (client) => {
       try {
         if (client.autoDj?.get(guild.id)) {
           const vcm = guild.members?.me?.voice?.channel;
-          const lis = vcm ? vcm.members.filter((m) => !m.user.bot).map((m) => m.id) : [];
+          // Mismo criterio que el refill: los ensordecidos no cuentan (salvo que TODOS lo estén).
+          const _hum = vcm ? vcm.members.filter((m) => !m.user.bot) : null;
+          const _att = _hum && process.env.AUTODJ_SKIP_DEAF !== "0" ? _hum.filter((m) => !m.voice?.selfDeaf && !m.voice?.serverDeaf) : _hum;
+          const lis = _hum ? (_att.size ? _att : _hum).map((m) => m.id) : [];
           if (lis.length) {
             let customPat = await PlaylistStore.getAutoDjPattern(client, guild.id).catch(() => null);
             if (customPat) {

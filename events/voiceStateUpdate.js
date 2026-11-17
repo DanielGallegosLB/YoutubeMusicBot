@@ -8,6 +8,8 @@ const {
 const { stopMarqueeActivity } = require("../handlers/ActivityManager");
 const AutoDjPresence = require("../handlers/AutoDjPresence");
 
+const GRACE_MS = Math.max(0, Number(process.env.AUTODJ_LEAVE_GRACE_MS ?? 30000) || 0);
+
 client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
   if (!newState || !newState.guild || !newState.member) return;
 
@@ -135,6 +137,17 @@ if (embed) {
     }
   }
 
+  // --- Ensordecer / desensordecer en el canal del bot: cambia quién cuenta como oyente,
+  //     así que se refresca el embed del orden (el refill ya lo lee en vivo).
+  try {
+    const bc = guild.members.me?.voice?.channel;
+    if (bc && newState.channelId === bc.id && oldState.channelId === newState.channelId
+      && (oldState.selfDeaf !== newState.selfDeaf || oldState.serverDeaf !== newState.serverDeaf)) {
+      const q = client.distube?.getQueue?.(guildId);
+      if (q) client.updatequeue?.(q)?.catch?.(() => {});
+    }
+  } catch (_) {}
+
   // --- AutoDJ: si la persona se va del canal del bot, quitar SUS canciones
   //     del AutoDJ de la cola (solo las que el bot le añadió para él) y
   //     reabastecer con los que siguen.
@@ -143,19 +156,35 @@ if (embed) {
       const botChannel = guild.members.me?.voice?.channel;
       const wasWithBot = !!botChannel && oldState.channelId === botChannel.id;
       const stillWithBot = !!botChannel && newState.channelId === botChannel.id;
+      const timers = client._autoDjLeaveTimers || (client._autoDjLeaveTimers = new Map());
+      const tKey = `${guildId}:${newState.member.id}`;
+      // Volvió dentro del período de gracia: no se le quita nada.
+      if (stillWithBot && timers.has(tKey)) {
+        clearTimeout(timers.get(tKey));
+        timers.delete(tKey);
+        client.logger.log(`[AutoDJ] ${newState.member.user?.tag || newState.member.id} volvió antes de ${Math.round(GRACE_MS / 1000)}s: se conservan sus recomendaciones.`);
+      }
       if (wasWithBot && !stillWithBot) {
         // Activar limpieza al salir (por defecto)
         if (process.env.AUTODJ_REMOVE_ON_LEAVE !== "0") process.env.AUTODJ_REMOVE_ON_LEAVE = "1";
-        const removed = await AutoDjPresence.removeUserRecommendations(
-          client,
-          guild,
-          newState.member.id
-        );
-        if (removed) {
-          client.logger.log(
-            `[AutoDJ] ${newState.member.user?.tag || newState.member.id} (G:${guildId}) dejó el canal: ${removed} recomendación(es) fuera de la cola.`
-          );
-        }
+        // Período de gracia (AUTODJ_LEAVE_GRACE_MS, 30 s): si vuelve, no se le quitan.
+        if (timers.has(tKey)) clearTimeout(timers.get(tKey));
+        const uid = newState.member.id;
+        const tag = newState.member.user?.tag || uid;
+        const t = setTimeout(async () => {
+          timers.delete(tKey);
+          try {
+            const bc = guild.members.me?.voice?.channel;
+            const back = bc && bc.members?.has(uid);
+            if (back) return;
+            const removed = await AutoDjPresence.removeUserRecommendations(client, guild, uid);
+            if (removed) {
+              client.logger.log(`[AutoDJ] ${tag} (G:${guildId}) no volvió en ${Math.round(GRACE_MS / 1000)}s: ${removed} recomendación(es) fuera de la cola.`);
+            }
+          } catch (e) { console.log(`AutoDJ grace error: `, e); }
+        }, GRACE_MS);
+        if (t.unref) t.unref();
+        timers.set(tKey, t);
       }
     } catch (error) {
       console.log(`AutoDJ presence error: `, error);

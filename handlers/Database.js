@@ -65,19 +65,77 @@ module.exports = async (client) => {
     },
   });
 
-  // Serialize writes per store to avoid JoshDB JSON rename collisions on Windows (EPERM)
-  const serializeWrites = (store) => {
-    let chain = Promise.resolve();
+  // Serialize writes per store to avoid JoshDB JSON rename collisions on Windows (EPERM).
+  //
+  // Cola propia (en vez de una cadena de promesas) con COALESCENCIA: si ya hay un set()
+  // pendiente (aún no iniciado) para la MISMA clave, el nuevo valor reemplaza al viejo
+  // en vez de apilarse. Cada set() pendiente retiene el documento entero del guild
+  // (~700 KB, objetos creados por getFile al leerlo); si el disco se atasca (EPERM,
+  // antivirus, OneDrive...) la cola crecía sin límite y esa memoria nunca se liberaba.
+  // El estado final es idéntico: el último valor de una clave es el que gana.
+  // No se combina nunca a través de una clave solapada (a / a.b), para no reordenar.
+  const serializeWrites = (store, name) => {
     const originalSet = store.set.bind(store);
-    store.set = (...args) => {
-      const run = chain.then(() => originalSet(...args));
-      // Allow the chain to settle even if this write rejects, so the queue never deadlocks
-      chain = run.then(() => {}, () => {});
-      return run;
+    const pending = [];
+    const st = { name, pending: 0, maxPending: 0, coalesced: 0, writes: 0, failed: 0, runningSince: 0 };
+    let running = false;
+
+    const overlap = (a, b) => a === b || a.startsWith(b + ".") || b.startsWith(a + ".");
+
+    const pump = async () => {
+      if (running) return;
+      running = true;
+      try {
+        while (pending.length) {
+          const job = pending.shift();
+          st.pending = pending.length;
+          st.runningSince = Date.now();
+          try {
+            const res = await originalSet(...job.args);
+            st.writes++;
+            for (const w of job.waiters) w.resolve(res);
+          } catch (e) {
+            st.failed++;
+            for (const w of job.waiters) w.reject(e);
+          }
+        }
+      } finally {
+        running = false;
+        st.runningSince = 0;
+      }
     };
+
+    store.set = (...args) =>
+      new Promise((resolve, reject) => {
+        const key = typeof args[0] === "string" ? args[0] : null;
+        if (key) {
+          for (let i = pending.length - 1; i >= 0; i--) {
+            const p = pending[i];
+            if (!p.key) break;
+            if (p.key === key) {
+              p.args = args; // el valor más nuevo reemplaza al pendiente
+              p.waiters.push({ resolve, reject });
+              st.coalesced++;
+              return;
+            }
+            if (overlap(p.key, key)) break; // no cruzar claves solapadas
+          }
+        }
+        pending.push({ key, args, waiters: [{ resolve, reject }] });
+        st.pending = pending.length;
+        if (pending.length > st.maxPending) st.maxPending = pending.length;
+        pump();
+      });
+
+    store.writeStats = () => ({
+      ...st,
+      pending: pending.length,
+      stuckMs: st.runningSince ? Date.now() - st.runningSince : 0,
+    });
   };
-  serializeWrites(client.music);
-  serializeWrites(client.autoresume);
+
+  serializeWrites(client.music, "music");
+  serializeWrites(client.autoresume, "autoresume");
 
   // Handle guild deletion event
   client.on(Events.GuildDelete, async (guild) => {

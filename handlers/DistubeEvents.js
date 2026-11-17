@@ -534,7 +534,11 @@ module.exports = async (client) => {
 
     const vc = channel || queue.voice?.connection?.channel || queue.textChannel?.guild?.members?.me?.voice?.channel;
     if (!vc || !vc.members) return 0;
-    const listeners = vc.members.filter((m) => !m.user.bot).map((m) => m.id);
+    // Solo cuentan quienes ESCUCHAN: los ensordecidos (propio o del server) no reciben
+    // canciones nuevas. Si TODOS están ensordecidos se usa a todos (que no se pare).
+    const humans = vc.members.filter((m) => !m.user.bot);
+    const attentive = process.env.AUTODJ_SKIP_DEAF === "0" ? humans : humans.filter((m) => !m.voice?.selfDeaf && !m.voice?.serverDeaf);
+    const listeners = (attentive.size ? attentive : humans).map((m) => m.id);
     if (!listeners.length) return 0;
     // Un refill por cola a la vez (además del lock por guild de autoDjRefill).
     if (queue._autoDjRefilling) return 0;
@@ -1046,6 +1050,15 @@ module.exports = async (client) => {
         };
         for (const a of (spotify || [])) put(a.name, a.count);
         for (const a of (perfil || [])) put(a.name, a.count);
+        // Artistas de las canciones que ESTE usuario marcó con 👍: pesan más que una
+        // reproducción suelta (así las novedades salen de artistas que le gustan).
+        try {
+          for (const t of (poolsByUser[uid] || [])) {
+            if (!(t?.likedBy || []).includes(uid)) continue;
+            const an = String(t?.uploader?.name || t?.artist || "").trim();
+            if (an && looksLikeArtistChannel(an, an)) put(an, 3);
+          }
+        } catch (_) {}
         artistsByUser[uid] = [...merged.values()].sort((a, b) => (b.count || 0) - (a.count || 0));
       } catch {
         requestsByUser[uid] = [];
@@ -1622,7 +1635,10 @@ module.exports = async (client) => {
           // limitado a AUTODJ_ARTIST_TOP_N, por defecto 2). Dentro de esos,
           // elegimos lo MENOS visto/reproducido (canciones nuevas para él),
           // repartiendo entre los top-2 sin quedar pegado sólo al #1.
-          const chosen = pickLeastPlayed(src, (t) => skipWeight(t.url, effUser), (t) => playsOf(t));
+          // Sorteo ponderado (no el top fijo): más peso al artista que más le gusta,
+          // pero todos los de su perfil pueden salir; lo menos escuchado sube un poco.
+          const chosen = weightedPick(src, (t) =>
+            Math.pow(Math.max(1, t._artistWeight || 1), 0.6) * skipWeight(t.url, effUser) / (1 + 0.5 * playsOf(t)));
           if (chosen?.url) {
             taken.add(chosen.url);
             logPick({
@@ -1808,8 +1824,19 @@ module.exports = async (client) => {
       // 1) Alguna favorita REAL sin ver → la más LIKEADA primero, nunca se repite.
       const freshReal = freshOf(pool);
       let motivo;
+      // Sorteo ponderado: peso = likes^1.6 × descanso (cuánto hace que sonó: a 0 h casi
+      // no sale, a ≥AUTODJ_REC_REST_HOURS vuelve a pleno) × 1/(1+veces en esta sesión)
+      // × skips. Las que más le gustan salen más, pero sin ser siempre las mismas.
+      const REST_H = Math.max(1, Number(process.env.AUTODJ_REC_REST_HOURS) || 48);
+      const lovedWeight = (t) => {
+        const likes = Math.max(0, likesOf(t));
+        const lt = Number(lastOf(t.name || t.title, t.url)?.t) || 0;
+        const rest = lt ? Math.pow(Math.min(1, Math.max(0.08, (Date.now() - lt) / 3.6e6 / REST_H)), 0.7) : 1;
+        const sess = 1 / (1 + 1.5 * (Number(sessionPlaysOf(t.url)) || 0));
+        return Math.pow(1 + likes, 1.6) * rest * sess * (weightOf ? weightOf(t) : 1);
+      };
       if (freshReal.length) {
-        found = pickMostLiked(freshReal, weightOf);
+        found = weightedPick(freshReal, lovedWeight);
         motivo = "favorita-nueva";
       } else if (ALLOW_UNLIKED && step.type === "rec") {
         // 2) El pool REAL ya se vio entero → Favoritas SIN 👍 (nunca con 👎).
@@ -1829,7 +1856,7 @@ module.exports = async (client) => {
       if (!found && effUser && step.type === "rec") {
         const roomFresh = freshOf(roomPoolFor(effUser));
         if (roomFresh.length) {
-          found = pickMostLiked(roomFresh, weightOf);
+          found = weightedPick(roomFresh, lovedWeight);
           motivo = "sala-nueva";
         }
       }
